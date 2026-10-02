@@ -5145,6 +5145,16 @@ public class JujutsuNeonMod {
         private static boolean jumpChargeWasDown = false;
         private static int jumpChargeTicks = 0;
 
+        // Полностью собственный movement controller.
+        private static int clientDashMode = DASH_NONE;
+        private static int clientDashAge = 0;
+        private static Vec3 clientDashDirection = Vec3.ZERO;
+
+        // Creative: первый короткий tap ждёт несколько тиков, чтобы второй tap
+        // мог включить обычный creative flight без случайного прыжка.
+        private static long creativeLastSpacePressTick = -1000L;
+        private static int pendingCreativeShortJumpTicks = -1;
+
         private static final HoldKeyState BLUE_STATE = new HoldKeyState();
         private static final HoldKeyState RED_STATE = new HoldKeyState();
         private static final HoldKeyState DOMAIN_STATE = new HoldKeyState();
@@ -5413,6 +5423,242 @@ public class JujutsuNeonMod {
             state.wasDown = down;
         }
 
+        private static boolean clientIsAirDashHeight(Minecraft mc) {
+            if (mc.player == null || mc.level == null) return false;
+            if (mc.player.getAbilities().flying) return true;
+
+            Vec3 start = mc.player.position().add(0.0, 0.05, 0.0);
+            Vec3 end = start.add(0.0, -4.15, 0.0);
+
+            BlockHitResult hit = mc.level.clip(new ClipContext(
+                    start,
+                    end,
+                    ClipContext.Block.COLLIDER,
+                    ClipContext.Fluid.NONE,
+                    mc.player
+            ));
+
+            if (hit.getType() == HitResult.Type.MISS) return true;
+            return start.y - hit.getLocation().y >= 4.0 - 1.0E-3;
+        }
+
+        private static Vec3 clientHorizontalDirection(Minecraft mc) {
+            if (mc.player == null) return Vec3.ZERO;
+
+            double forwardInput =
+                    (mc.options.keyUp.isDown() ? 1.0 : 0.0) -
+                    (mc.options.keyDown.isDown() ? 1.0 : 0.0);
+            double strafeInput =
+                    (mc.options.keyRight.isDown() ? 1.0 : 0.0) -
+                    (mc.options.keyLeft.isDown() ? 1.0 : 0.0);
+
+            if (Math.abs(forwardInput) < 1.0E-4 && Math.abs(strafeInput) < 1.0E-4) {
+                return Vec3.ZERO;
+            }
+
+            double yaw = Math.toRadians(mc.player.getYRot());
+            Vec3 forward = new Vec3(-Math.sin(yaw), 0.0, Math.cos(yaw));
+            Vec3 right = new Vec3(forward.z, 0.0, -forward.x);
+
+            Vec3 result = forward.scale(forwardInput).add(right.scale(strafeInput));
+            return result.lengthSqr() > 1.0E-6 ? result.normalize() : Vec3.ZERO;
+        }
+
+        private static boolean tryClientForcedMove(Minecraft mc, Vec3 delta, boolean allowStepUp) {
+            if (mc.player == null || mc.level == null) return false;
+
+            AABB box = mc.player.getBoundingBox();
+
+            if (mc.level.noCollision(mc.player, box.move(delta))) {
+                mc.player.move(MoverType.SELF, delta);
+                return true;
+            }
+
+            if (allowStepUp) {
+                for (int h = 1; h <= 2; h++) {
+                    Vec3 stepped = delta.add(0.0, h, 0.0);
+                    if (mc.level.noCollision(mc.player, box.move(stepped))) {
+                        mc.player.move(MoverType.SELF, stepped);
+                        return true;
+                    }
+                }
+            }
+
+            return false;
+        }
+
+        private static void startClientDash(Minecraft mc, MovementAction requestedAction) {
+            if (!hudBlindfold || mc.player == null || mc.level == null) return;
+            if (hudMaxBlueActive || hudPurpleCasting) return;
+            if (clientDashMode != DASH_NONE) return;
+
+            boolean air = clientIsAirDashHeight(mc);
+            Vec3 look = mc.player.getLookAngle().normalize();
+
+            if (air) {
+                clientDashMode = DASH_AIR;
+                clientDashDirection = look;
+            } else if (requestedAction == MovementAction.LEFT_DASH ||
+                    requestedAction == MovementAction.RIGHT_DASH) {
+                Vec3 horizontal = new Vec3(look.x, 0.0, look.z);
+                if (horizontal.lengthSqr() < 1.0E-4) {
+                    double yaw = Math.toRadians(mc.player.getYRot());
+                    horizontal = new Vec3(-Math.sin(yaw), 0.0, Math.cos(yaw));
+                }
+                horizontal = horizontal.normalize();
+
+                Vec3 right = new Vec3(-horizontal.z, 0.0, horizontal.x);
+                clientDashDirection = requestedAction == MovementAction.LEFT_DASH
+                        ? right.scale(-1.0)
+                        : right;
+                clientDashMode = DASH_SIDE;
+            } else {
+                clientDashMode = DASH_FRONT;
+                clientDashDirection = look;
+            }
+
+            clientDashAge = 0;
+            mc.player.setDeltaMovement(Vec3.ZERO);
+        }
+
+        private static void tickClientDash(Minecraft mc) {
+            if (clientDashMode == DASH_NONE || mc.player == null) return;
+
+            if (!hudBlindfold || hudMaxBlueActive || hudPurpleCasting) {
+                clientDashMode = DASH_NONE;
+                clientDashAge = 0;
+                clientDashDirection = Vec3.ZERO;
+                return;
+            }
+
+            Vec3 dir = clientDashDirection;
+            if (dir.lengthSqr() < 1.0E-6) {
+                clientDashMode = DASH_NONE;
+                return;
+            }
+
+            double speed;
+            int lifetime;
+            boolean stepUp;
+
+            if (clientDashMode == DASH_FRONT) {
+                lifetime = (int) FRONT_DASH_TICKS;
+                double t = Mth.clamp(clientDashAge / (double) FRONT_DASH_TICKS, 0.0, 1.0);
+                speed = 1.32 - 1.02 * t;
+                stepUp = true;
+            } else if (clientDashMode == DASH_SIDE) {
+                lifetime = (int) SIDE_DASH_TICKS;
+                speed = 1.28;
+                stepUp = true;
+            } else {
+                lifetime = (int) AIR_DASH_TICKS;
+                speed = 1.68; // ~5 блоков за 3 тика
+                stepUp = false;
+            }
+
+            if (clientDashAge >= lifetime ||
+                    !tryClientForcedMove(mc, dir.normalize().scale(speed), stepUp)) {
+                clientDashMode = DASH_NONE;
+                clientDashAge = 0;
+                clientDashDirection = Vec3.ZERO;
+                mc.player.setDeltaMovement(Vec3.ZERO);
+                return;
+            }
+
+            // Во время рывка vanilla gravity/input не должны уводить траекторию.
+            mc.player.setDeltaMovement(Vec3.ZERO);
+            mc.player.fallDistance = 0.0F;
+            clientDashAge++;
+        }
+
+        private static boolean clientWaterSurfaceRun(Minecraft mc, Vec3 dir, double speed) {
+            if (mc.player == null || mc.level == null) return false;
+
+            BlockPos below = BlockPos.containing(
+                    mc.player.getX(),
+                    mc.player.getY() - 0.18,
+                    mc.player.getZ()
+            );
+
+            var fluid = mc.level.getFluidState(below);
+            if (!fluid.is(FluidTags.WATER)) return false;
+
+            double surfaceY = below.getY() + fluid.getHeight(mc.level, below);
+            if (mc.player.getY() < surfaceY - 0.48 || mc.player.getY() > surfaceY + 0.65) {
+                return false;
+            }
+
+            mc.player.setPos(mc.player.getX(), surfaceY + 0.03, mc.player.getZ());
+            mc.player.setDeltaMovement(Vec3.ZERO);
+            tryClientForcedMove(mc, dir.scale(speed), true);
+            mc.player.setDeltaMovement(0.0, 0.015, 0.0);
+            mc.player.fallDistance = 0.0F;
+            return true;
+        }
+
+        private static void tickCustomGroundMovement(Minecraft mc) {
+            if (!hudBlindfold || mc.player == null || mc.level == null) return;
+            if (hudMaxBlueActive || hudPurpleCasting) return;
+            if (clientDashMode != DASH_NONE) return;
+
+            // В активном creative flight ванильный полёт остаётся полностью рабочим.
+            if (mc.player.getAbilities().flying) return;
+
+            Vec3 dir = clientHorizontalDirection(mc);
+            if (dir.lengthSqr() < 1.0E-6) return;
+
+            boolean superRun = ClientModEvents.SUPER_SPEED_KEY.isDown();
+            double speed = superRun
+                    ? CUSTOM_RUN_BLOCKS_PER_TICK
+                    : CUSTOM_WALK_BLOCKS_PER_TICK;
+
+            if (superRun && clientWaterSurfaceRun(mc, dir, speed)) return;
+
+            // Обычная ходьба/сверхбег работают только как наше принудительное
+            // горизонтальное перемещение. Vanilla input уже обнулён событием ниже.
+            if (mc.player.onGround()) {
+                tryClientForcedMove(mc, dir.scale(speed), true);
+            }
+        }
+
+        private static void performClientChargedJump(Minecraft mc, int tier) {
+            if (mc.player == null || !hudBlindfold) return;
+            if (!mc.player.onGround()) return;
+            if (mc.player.getAbilities().flying) return;
+
+            int clamped = Mth.clamp(tier, 0, 3);
+            double yVelocity = switch (clamped) {
+                case 1 -> 1.099;
+                case 2 -> 1.560;
+                case 3 -> 1.880;
+                default -> 0.545;
+            };
+
+            Vec3 old = mc.player.getDeltaMovement();
+            mc.player.setDeltaMovement(old.x, yVelocity, old.z);
+            mc.player.fallDistance = 0.0F;
+        }
+
+        private static void fireChargedJump(Minecraft mc, int tier) {
+            performClientChargedJump(mc, tier);
+            NETWORK.sendToServer(new JumpControlPacket(tier));
+        }
+
+        @SubscribeEvent
+        public static void onMovementInputUpdate(MovementInputUpdateEvent event) {
+            Minecraft mc = Minecraft.getInstance();
+            if (!hudBlindfold || mc.player == null || event.getEntity() != mc.player) return;
+
+            // Когда creative flight уже активен — вообще не трогаем vanilla flight input.
+            if (mc.player.getAbilities().flying) return;
+
+            // Пока надета повязка, наземное движение и прыжок принадлежат
+            // Jujutsu Neon. Это убирает повторный vanilla-jump при удержании Space.
+            event.getInput().forwardImpulse = 0.0F;
+            event.getInput().leftImpulse = 0.0F;
+            event.getInput().jumping = false;
+        }
+
         @SubscribeEvent
         public static void onBlueAttackClick(InputEvent.InteractionKeyMappingTriggered event) {
             if (!hudBlueActive || !event.isAttack()) return;
@@ -5448,6 +5694,10 @@ public class JujutsuNeonMod {
                 }
                 jumpChargeWasDown = false;
                 jumpChargeTicks = 0;
+                pendingCreativeShortJumpTicks = -1;
+                clientDashMode = DASH_NONE;
+                clientDashAge = 0;
+                clientDashDirection = Vec3.ZERO;
                 chargingAnim = "NONE";
                 return;
             }
@@ -5486,21 +5736,56 @@ public class JujutsuNeonMod {
 
 
             boolean jumpHeldNow = mc.options.keyJump.isDown();
-            if (hudBlindfold) {
-                mc.player.input.jumping = false;
 
-                if (jumpHeldNow) {
-                    if (!jumpChargeWasDown) jumpChargeTicks = 0;
-                    jumpChargeTicks = Math.min(60, jumpChargeTicks + 1);
-                } else if (jumpChargeWasDown) {
-                    int tier;
-                    if (jumpChargeTicks >= 60) tier = 3;
-                    else if (jumpChargeTicks >= 40) tier = 2;
-                    else if (jumpChargeTicks >= 20) tier = 1;
-                    else tier = 0;
+            if (pendingCreativeShortJumpTicks >= 0) {
+                pendingCreativeShortJumpTicks--;
+                if (pendingCreativeShortJumpTicks < 0 &&
+                        hudBlindfold &&
+                        !mc.player.getAbilities().flying) {
+                    fireChargedJump(mc, 0);
+                }
+            }
 
-                    NETWORK.sendToServer(new JumpControlPacket(tier));
+            if (hudBlindfold && !mc.player.getAbilities().flying) {
+                if (jumpHeldNow && !jumpChargeWasDown) {
                     jumpChargeTicks = 0;
+
+                    // Собственный double-tap detector для входа в creative flight:
+                    // первый tap не вызывает прыжок мгновенно, второй включает flight.
+                    if (mc.player.getAbilities().mayfly && mc.level != null) {
+                        long nowClient = mc.level.getGameTime();
+                        if (nowClient - creativeLastSpacePressTick <= 7L) {
+                            pendingCreativeShortJumpTicks = -1;
+                            creativeLastSpacePressTick = -1000L;
+                            jumpChargeTicks = 0;
+
+                            mc.player.getAbilities().flying = true;
+                            mc.player.onUpdateAbilities();
+                        } else {
+                            creativeLastSpacePressTick = nowClient;
+                        }
+                    }
+                }
+
+                if (!mc.player.getAbilities().flying) {
+                    if (jumpHeldNow) {
+                        jumpChargeTicks = Math.min(60, jumpChargeTicks + 1);
+                    } else if (jumpChargeWasDown) {
+                        int tier;
+                        if (jumpChargeTicks >= 60) tier = 3;
+                        else if (jumpChargeTicks >= 40) tier = 2;
+                        else if (jumpChargeTicks >= 20) tier = 1;
+                        else tier = 0;
+
+                        if (tier == 0 && mc.player.getAbilities().mayfly) {
+                            // Даём второму tap короткое окно, чтобы включить creative flight.
+                            pendingCreativeShortJumpTicks = 7;
+                        } else {
+                            fireChargedJump(mc, tier);
+                        }
+
+                        jumpChargeTicks = 0;
+                    }
                 }
 
                 jumpChargeWasDown = jumpHeldNow;
@@ -5513,14 +5798,21 @@ public class JujutsuNeonMod {
                 boolean left = mc.options.keyLeft.isDown() && !mc.options.keyRight.isDown();
                 boolean right = mc.options.keyRight.isDown() && !mc.options.keyLeft.isDown();
 
-                if (left) {
-                    NETWORK.sendToServer(new MovementPacket(MovementAction.LEFT_DASH));
+                MovementAction action;
+                if (left) action = MovementAction.LEFT_DASH;
+                else if (right) action = MovementAction.RIGHT_DASH;
+                else action = MovementAction.FRONT_DASH;
+
+                startClientDash(mc, action);
+                NETWORK.sendToServer(new MovementPacket(action));
+
+                if (clientDashMode == DASH_AIR) {
+                    startAnim("AIR_DASH", 5);
+                } else if (action == MovementAction.LEFT_DASH) {
                     startAnim("SIDE_DASH_LEFT", 6);
-                } else if (right) {
-                    NETWORK.sendToServer(new MovementPacket(MovementAction.RIGHT_DASH));
+                } else if (action == MovementAction.RIGHT_DASH) {
                     startAnim("SIDE_DASH_RIGHT", 6);
                 } else {
-                    NETWORK.sendToServer(new MovementPacket(MovementAction.FRONT_DASH));
                     startAnim("FRONT_DASH", 14);
                 }
             }
@@ -5531,6 +5823,8 @@ public class JujutsuNeonMod {
                 lastSpeedHeld = speedHeld;
             }
 
+            tickClientDash(mc);
+            tickCustomGroundMovement(mc);
 
             if (hudMaxBlueActive) {
                 if (mc.options.keyUp.isDown() && !mc.options.keyDown.isDown()) {
