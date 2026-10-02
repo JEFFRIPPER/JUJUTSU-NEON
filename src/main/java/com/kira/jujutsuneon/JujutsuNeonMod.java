@@ -103,7 +103,7 @@ import java.util.function.Supplier;
 
 /**
  * Jujutsu Neon ULTIMATE — Forge 1.20.1.
- * Blue / Maximum Blue / Red / Maximum Red / Hollow Purple используют нативные 4096x4096 VFX-спрайты.
+ * Maximum Blue использует непрерывную процедурную 3D-модель; остальные техники пока сохраняют VFX-слои.
  * Поддерживающие частицы, HD-аудио и 4K-текстуры предметов работают отдельными слоями.
  * VFX-пайплайн усилен многослойными shockwave/star/slash/trail эффектами
  * в яркой action-RPG эстетике, без копирования чужих ассетов.
@@ -5196,6 +5196,93 @@ public class JujutsuNeonMod {
         private static boolean hudMaxBlueActive = false;
         private static boolean hudPurpleCasting = false;
 
+        private static final Map<UUID, MaxBlueClientVisual> MAX_BLUE_VISUALS = new HashMap<>();
+
+        private static class MaxBlueClientVisual {
+            Vec3 previousPos;
+            Vec3 currentPos;
+            Vec3 targetPos;
+
+            float previousRadius;
+            float currentRadius;
+            float targetRadius;
+
+            float previousAlpha;
+            float currentAlpha;
+            float targetAlpha;
+
+            float rotation;
+            int phase;
+            int staleTicks;
+
+            MaxBlueClientVisual(Vec3 pos, float radius, int phase) {
+                this.previousPos = pos;
+                this.currentPos = pos;
+                this.targetPos = pos;
+                this.previousRadius = radius;
+                this.currentRadius = radius;
+                this.targetRadius = radius;
+                this.previousAlpha = 0.0f;
+                this.currentAlpha = 0.0f;
+                this.targetAlpha = 1.0f;
+                this.rotation = 0.0f;
+                this.phase = phase;
+                this.staleTicks = 0;
+            }
+        }
+
+        private static void applyMaximumBlueVisual(MaxBlueVisualPacket msg) {
+            Vec3 target = new Vec3(msg.x(), msg.y(), msg.z());
+
+            if (!msg.active()) {
+                MaxBlueClientVisual visual = MAX_BLUE_VISUALS.get(msg.ownerId());
+                if (visual != null) {
+                    visual.targetPos = target;
+                    visual.targetRadius = 0.0f;
+                    visual.targetAlpha = 0.0f;
+                    visual.phase = MAX_BLUE_PHASE_FADING;
+                    visual.staleTicks = 0;
+                }
+                return;
+            }
+
+            MaxBlueClientVisual visual = MAX_BLUE_VISUALS.computeIfAbsent(
+                    msg.ownerId(),
+                    id -> new MaxBlueClientVisual(target, msg.radius(), msg.phase())
+            );
+
+            visual.targetPos = target;
+            visual.targetRadius = Math.max(0.0f, msg.radius());
+            visual.targetAlpha = 1.0f;
+            visual.phase = msg.phase();
+            visual.staleTicks = 0;
+        }
+
+        private static void tickMaximumBlueClientVisuals() {
+            MAX_BLUE_VISUALS.entrySet().removeIf(entry -> {
+                MaxBlueClientVisual visual = entry.getValue();
+
+                visual.previousPos = visual.currentPos;
+                visual.previousRadius = visual.currentRadius;
+                visual.previousAlpha = visual.currentAlpha;
+
+                visual.currentPos = visual.currentPos.lerp(visual.targetPos, 0.58);
+                visual.currentRadius += (visual.targetRadius - visual.currentRadius) * 0.58f;
+                visual.currentAlpha += (visual.targetAlpha - visual.currentAlpha) * 0.34f;
+                visual.rotation = (visual.rotation + 1.35f) % 360.0f;
+                visual.staleTicks++;
+
+                if (visual.staleTicks > 12) {
+                    visual.targetAlpha = 0.0f;
+                    visual.targetRadius = 0.0f;
+                }
+
+                return visual.targetAlpha <= 0.001f &&
+                        visual.currentAlpha <= 0.015f &&
+                        visual.currentRadius <= 0.02f;
+            });
+        }
+
         private static void applyHudSync(HudSyncPacket msg) {
             hudEnergy = msg.energy();
             hudAirJumps = msg.airJumps();
@@ -5381,6 +5468,8 @@ public class JujutsuNeonMod {
 
             if (event.phase != TickEvent.Phase.END) return;
 
+            tickMaximumBlueClientVisuals();
+
             if (activeAnimTicks > 0) activeAnimTicks--;
 
             if (mc.screen != null) {
@@ -5500,6 +5589,226 @@ public class JujutsuNeonMod {
             processRedKey(ClientModEvents.RED_KEY, RED_STATE);
             processHoldKey(ClientModEvents.DOMAIN_KEY, Ability.INFINITY_TOGGLE, Ability.DOMAIN, DOMAIN_STATE, "CHARGE_DOMAIN");
             processHoldKey(ClientModEvents.UTILITY_KEY, Ability.RCT, Ability.TELEPORT, UTILITY_STATE, "CHARGE_TELEPORT");
+        }
+
+        @SubscribeEvent
+        public static void onRenderMaximumBlue(RenderLevelStageEvent event) {
+            if (event.getStage() != RenderLevelStageEvent.Stage.AFTER_PARTICLES) return;
+            if (MAX_BLUE_VISUALS.isEmpty()) return;
+
+            Minecraft mc = Minecraft.getInstance();
+            if (mc.level == null) return;
+
+            float partialTick = event.getPartialTick();
+            Vec3 camera = mc.gameRenderer.getMainCamera().getPosition();
+            PoseStack pose = event.getPoseStack();
+
+            RenderSystem.enableBlend();
+            RenderSystem.defaultBlendFunc();
+            RenderSystem.enableDepthTest();
+            RenderSystem.disableCull();
+            RenderSystem.depthMask(false);
+            RenderSystem.setShader(GameRenderer::getPositionColorShader);
+
+            for (MaxBlueClientVisual visual : MAX_BLUE_VISUALS.values()) {
+                float alpha = Mth.lerp(partialTick, visual.previousAlpha, visual.currentAlpha);
+                float radius = Mth.lerp(partialTick, visual.previousRadius, visual.currentRadius);
+                Vec3 pos = visual.previousPos.lerp(visual.currentPos, partialTick);
+
+                if (alpha <= 0.01f || radius <= 0.02f) continue;
+
+                pose.pushPose();
+                pose.translate(pos.x - camera.x, pos.y - camera.y, pos.z - camera.z);
+
+                // Стабильное почти чёрное ядро.
+                drawMaxBlueSphere(
+                        pose,
+                        radius * 0.68f,
+                        18,
+                        26,
+                        0.003f, 0.010f, 0.030f,
+                        Math.min(0.98f, alpha)
+                );
+
+                // Глубокая синяя оболочка.
+                drawMaxBlueSphere(
+                        pose,
+                        radius * 0.90f,
+                        20,
+                        30,
+                        0.00f, 0.08f, 0.22f,
+                        alpha * 0.54f
+                );
+
+                // Внешняя плазменная сфера вращается независимо от камеры.
+                float pulse = 1.0f + 0.025f * (float) Math.sin(
+                        (mc.level.getGameTime() + partialTick) * 0.16
+                );
+                pose.pushPose();
+                pose.mulPose(Axis.YP.rotationDegrees(visual.rotation + partialTick * 1.35f));
+                pose.mulPose(Axis.XP.rotationDegrees(visual.rotation * 0.37f));
+                drawMaxBlueSphere(
+                        pose,
+                        radius * 1.03f * pulse,
+                        22,
+                        32,
+                        0.00f, 0.30f, 0.94f,
+                        alpha * 0.24f
+                );
+                pose.popPose();
+
+                // Объёмные энергетические орбиты вокруг ядра.
+                drawMaxBlueOrbit(
+                        pose,
+                        radius * 1.16f,
+                        radius * 0.055f,
+                        visual.rotation + partialTick * 1.35f,
+                        0.12f, 0.70f, 1.00f,
+                        alpha * 0.78f,
+                        0
+                );
+                drawMaxBlueOrbit(
+                        pose,
+                        radius * 1.22f,
+                        radius * 0.042f,
+                        -visual.rotation * 0.82f,
+                        0.02f, 0.42f, 1.00f,
+                        alpha * 0.62f,
+                        1
+                );
+                drawMaxBlueOrbit(
+                        pose,
+                        radius * 1.28f,
+                        radius * 0.036f,
+                        visual.rotation * 0.58f + 90.0f,
+                        0.36f, 0.90f, 1.00f,
+                        alpha * 0.55f,
+                        2
+                );
+
+                pose.popPose();
+            }
+
+            RenderSystem.depthMask(true);
+            RenderSystem.enableCull();
+            RenderSystem.disableBlend();
+        }
+
+        private static void drawMaxBlueSphere(
+                PoseStack pose,
+                float radius,
+                int latSegments,
+                int lonSegments,
+                float red,
+                float green,
+                float blue,
+                float alpha
+        ) {
+            if (radius <= 0.0f || alpha <= 0.0f) return;
+
+            Matrix4f matrix = pose.last().pose();
+            BufferBuilder buffer = Tesselator.getInstance().getBuilder();
+            buffer.begin(VertexFormat.Mode.TRIANGLES, DefaultVertexFormat.POSITION_COLOR);
+
+            for (int lat = 0; lat < latSegments; lat++) {
+                double v0 = lat / (double) latSegments;
+                double v1 = (lat + 1) / (double) latSegments;
+
+                double phi0 = -Math.PI / 2.0 + Math.PI * v0;
+                double phi1 = -Math.PI / 2.0 + Math.PI * v1;
+
+                float y0 = (float) (Math.sin(phi0) * radius);
+                float y1 = (float) (Math.sin(phi1) * radius);
+                float ring0 = (float) (Math.cos(phi0) * radius);
+                float ring1 = (float) (Math.cos(phi1) * radius);
+
+                for (int lon = 0; lon < lonSegments; lon++) {
+                    double u0 = lon / (double) lonSegments;
+                    double u1 = (lon + 1) / (double) lonSegments;
+                    double a0 = Math.PI * 2.0 * u0;
+                    double a1 = Math.PI * 2.0 * u1;
+
+                    float x00 = (float) (Math.cos(a0) * ring0);
+                    float z00 = (float) (Math.sin(a0) * ring0);
+                    float x01 = (float) (Math.cos(a1) * ring0);
+                    float z01 = (float) (Math.sin(a1) * ring0);
+                    float x10 = (float) (Math.cos(a0) * ring1);
+                    float z10 = (float) (Math.sin(a0) * ring1);
+                    float x11 = (float) (Math.cos(a1) * ring1);
+                    float z11 = (float) (Math.sin(a1) * ring1);
+
+                    maxBlueVertex(buffer, matrix, x00, y0, z00, red, green, blue, alpha);
+                    maxBlueVertex(buffer, matrix, x10, y1, z10, red, green, blue, alpha);
+                    maxBlueVertex(buffer, matrix, x11, y1, z11, red, green, blue, alpha);
+
+                    maxBlueVertex(buffer, matrix, x00, y0, z00, red, green, blue, alpha);
+                    maxBlueVertex(buffer, matrix, x11, y1, z11, red, green, blue, alpha);
+                    maxBlueVertex(buffer, matrix, x01, y0, z01, red, green, blue, alpha);
+                }
+            }
+
+            BufferUploader.drawWithShader(buffer.end());
+        }
+
+        private static void drawMaxBlueOrbit(
+                PoseStack pose,
+                float orbitRadius,
+                float thickness,
+                float rotationDeg,
+                float red,
+                float green,
+                float blue,
+                float alpha,
+                int plane
+        ) {
+            Matrix4f matrix = pose.last().pose();
+            BufferBuilder buffer = Tesselator.getInstance().getBuilder();
+            buffer.begin(VertexFormat.Mode.TRIANGLES, DefaultVertexFormat.POSITION_COLOR);
+
+            int segments = 72;
+            float half = Math.max(0.018f, thickness);
+
+            for (int i = 0; i < segments; i++) {
+                double a0 = Math.PI * 2.0 * i / segments + Math.toRadians(rotationDeg);
+                double a1 = Math.PI * 2.0 * (i + 1) / segments + Math.toRadians(rotationDeg);
+
+                Vec3 q0 = maxBlueOrbitPoint(a0, orbitRadius + half, plane);
+                Vec3 q1 = maxBlueOrbitPoint(a1, orbitRadius + half, plane);
+                Vec3 r0 = maxBlueOrbitPoint(a0, orbitRadius - half, plane);
+                Vec3 r1 = maxBlueOrbitPoint(a1, orbitRadius - half, plane);
+
+                maxBlueVertex(buffer, matrix, (float) q0.x, (float) q0.y, (float) q0.z, red, green, blue, alpha);
+                maxBlueVertex(buffer, matrix, (float) q1.x, (float) q1.y, (float) q1.z, red, green, blue, alpha);
+                maxBlueVertex(buffer, matrix, (float) r1.x, (float) r1.y, (float) r1.z, red, green, blue, alpha);
+
+                maxBlueVertex(buffer, matrix, (float) q0.x, (float) q0.y, (float) q0.z, red, green, blue, alpha);
+                maxBlueVertex(buffer, matrix, (float) r1.x, (float) r1.y, (float) r1.z, red, green, blue, alpha);
+                maxBlueVertex(buffer, matrix, (float) r0.x, (float) r0.y, (float) r0.z, red, green, blue, alpha);
+            }
+
+            BufferUploader.drawWithShader(buffer.end());
+        }
+
+        private static Vec3 maxBlueOrbitPoint(double angle, double radius, int plane) {
+            double c = Math.cos(angle) * radius;
+            double s = Math.sin(angle) * radius;
+
+            return switch (plane) {
+                case 1 -> new Vec3(c, s * 0.72, s * 0.34);
+                case 2 -> new Vec3(c * 0.35, s, c);
+                default -> new Vec3(c, s * 0.28, s);
+            };
+        }
+
+        private static void maxBlueVertex(
+                BufferBuilder buffer,
+                Matrix4f matrix,
+                float x, float y, float z,
+                float red, float green, float blue, float alpha
+        ) {
+            buffer.vertex(matrix, x, y, z)
+                    .color(red, green, blue, alpha)
+                    .endVertex();
         }
 
         @SubscribeEvent
