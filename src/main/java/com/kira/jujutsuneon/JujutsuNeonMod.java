@@ -1,7 +1,13 @@
 package com.kira.jujutsuneon;
 
 import com.mojang.blaze3d.platform.InputConstants;
+import com.mojang.blaze3d.systems.RenderSystem;
+import com.mojang.blaze3d.vertex.BufferBuilder;
+import com.mojang.blaze3d.vertex.BufferUploader;
+import com.mojang.blaze3d.vertex.DefaultVertexFormat;
 import com.mojang.blaze3d.vertex.PoseStack;
+import com.mojang.blaze3d.vertex.Tesselator;
+import com.mojang.blaze3d.vertex.VertexFormat;
 import com.mojang.math.Axis;
 import net.minecraft.ChatFormatting;
 import net.minecraft.client.KeyMapping;
@@ -13,6 +19,7 @@ import net.minecraft.client.particle.ParticleProvider;
 import net.minecraft.client.particle.ParticleRenderType;
 import net.minecraft.client.particle.SpriteSet;
 import net.minecraft.client.particle.TextureSheetParticle;
+import net.minecraft.client.renderer.GameRenderer;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.core.particles.BlockParticleOption;
@@ -60,6 +67,7 @@ import net.minecraftforge.client.event.RegisterKeyMappingsEvent;
 import net.minecraftforge.client.event.RegisterParticleProvidersEvent;
 import net.minecraftforge.client.event.RenderHandEvent;
 import net.minecraftforge.client.event.RenderGuiEvent;
+import net.minecraftforge.client.event.RenderLevelStageEvent;
 import net.minecraftforge.event.BuildCreativeModeTabContentsEvent;
 import net.minecraftforge.event.TickEvent;
 import net.minecraftforge.event.entity.living.LivingAttackEvent;
@@ -77,6 +85,7 @@ import net.minecraftforge.network.NetworkEvent;
 import net.minecraftforge.network.PacketDistributor;
 import net.minecraftforge.network.NetworkRegistry;
 import net.minecraftforge.network.simple.SimpleChannel;
+import org.joml.Matrix4f;
 import org.joml.Vector3f;
 import org.lwjgl.glfw.GLFW;
 
@@ -129,8 +138,24 @@ import java.util.function.Supplier;
 @Mod(JujutsuNeonMod.MODID)
 public class JujutsuNeonMod {
 
+    /*
+     * ============================================================
+     * JUJUTSU NEON — ЖЁСТКИЕ ИНВАРИАНТЫ ВИЗУАЛА
+     * ============================================================
+     * 1) Основное тело техники НИКОГДА не является billboard-PNG.
+     * 2) PNG/частицы разрешены только как вторичный VFX-слой.
+     * 3) Основная 3D-модель существует непрерывно: без моргания,
+     *    пересоздания по тикам, случайных скачков масштаба/позиции.
+     * 4) Движение, масштаб и исчезновение интерполируются между тиками.
+     * 5) Поворот камеры не имеет права менять ориентацию 3D-модели.
+     * 6) Оптимизация не имеет права ухудшать непрерывность геометрии.
+     * 7) Если техника вырезает объём, внутри рассчитанного объёма
+     *    не должны оставаться случайные разрушаемые блоки.
+     * ============================================================
+     */
+
     public static final String MODID = "jujutsu_neon";
-    private static final String PROTOCOL = "14";
+    private static final String PROTOCOL = "15";
 
     private static final double CE_MAX = 100.0;
 
@@ -251,6 +276,14 @@ public class JujutsuNeonMod {
                 MaxBlueControlPacket::encode,
                 MaxBlueControlPacket::decode,
                 MaxBlueControlPacket::handle
+        );
+
+        NETWORK.registerMessage(
+                packetId++,
+                MaxBlueVisualPacket.class,
+                MaxBlueVisualPacket::encode,
+                MaxBlueVisualPacket::decode,
+                MaxBlueVisualPacket::handle
         );
 
         NETWORK.registerMessage(
@@ -4953,6 +4986,48 @@ public class JujutsuNeonMod {
             context.setPacketHandled(true);
         }
     }
+
+    private record MaxBlueVisualPacket(
+            UUID ownerId,
+            boolean active,
+            double x,
+            double y,
+            double z,
+            float radius,
+            int phase
+    ) {
+        static void encode(MaxBlueVisualPacket msg, FriendlyByteBuf buf) {
+            buf.writeUUID(msg.ownerId);
+            buf.writeBoolean(msg.active);
+            buf.writeDouble(msg.x);
+            buf.writeDouble(msg.y);
+            buf.writeDouble(msg.z);
+            buf.writeFloat(msg.radius);
+            buf.writeVarInt(msg.phase);
+        }
+
+        static MaxBlueVisualPacket decode(FriendlyByteBuf buf) {
+            return new MaxBlueVisualPacket(
+                    buf.readUUID(),
+                    buf.readBoolean(),
+                    buf.readDouble(),
+                    buf.readDouble(),
+                    buf.readDouble(),
+                    buf.readFloat(),
+                    buf.readVarInt()
+            );
+        }
+
+        static void handle(MaxBlueVisualPacket msg, Supplier<NetworkEvent.Context> contextSupplier) {
+            NetworkEvent.Context context = contextSupplier.get();
+            context.enqueueWork(() -> DistExecutor.unsafeRunWhenOn(
+                    Dist.CLIENT,
+                    () -> () -> ClientForgeEvents.applyMaximumBlueVisual(msg)
+            ));
+            context.setPacketHandled(true);
+        }
+    }
+
 
     private record JumpControlPacket(int tier) {
         static void encode(JumpControlPacket msg, FriendlyByteBuf buf) {
