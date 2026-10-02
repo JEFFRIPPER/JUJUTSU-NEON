@@ -6197,90 +6197,150 @@ public class JujutsuNeonMod {
 
             GuiGraphics g = event.getGuiGraphics();
             int sw = event.getWindow().getGuiScaledWidth();
-            int x = sw - 192;
-            int y = 20;
-            int w = 178;
-            int h = 194;
+            int sh = event.getWindow().getGuiScaledHeight();
 
-            // Полупрозрачная карточка справа.
-            g.fill(x, y, x + w, y + h, 0xB20A0D14);
-            g.fill(x, y, x + 3, y + h, 0xFF20D7FF);
-            g.fill(x + 3, y, x + w, y + 2, 0xFF8B3DFF);
-            g.fill(x + 3, y + h - 2, x + w, y + h, 0xFF20D7FF);
+            /*
+             * Компактный HUD в стиле референса:
+             * - только правый нижний угол;
+             * - никаких больших полноэкранных карточек;
+             * - короткие названия + клавиши;
+             * - CE и зарядка отдельными тонкими полосами над биндами.
+             */
+            int panelW = 118;
+            int rowH = 14;
+            int rows = 8;
+            int panelH = rows * rowH;
+            int right = sw - 8;
+            int x = right - panelW;
+            int bottom = sh - 42;
+            int y = bottom - panelH;
 
-            g.drawString(mc.font, "LIMITLESS // CONTROL", x + 10, y + 8, 0xFFE7F7FF, false);
-            g.drawString(mc.font, hudBlindfold ? "GOJO BLINDFOLD: ONLINE" : "GOJO BLINDFOLD: OFFLINE",
-                    x + 10, y + 20, hudBlindfold ? 0xFF69E9FF : 0xFFFF6E78, false);
+            // Едва заметная общая подложка — панель не должна мешать обзору.
+            g.fill(x - 3, y - 3, right + 1, bottom + 3, 0x5205090F);
 
-            int barX = x + 10;
-            int barY = y + 34;
-            int barW = w - 20;
-            g.fill(barX, barY, barX + barW, barY + 7, 0xFF171B28);
-            int energyW = (int) Math.round(barW * Mth.clamp(hudEnergy / CE_MAX, 0.0, 1.0));
-            g.fill(barX, barY, barX + energyW, barY + 7, 0xFF25D9FF);
-            g.fill(barX, barY + 5, barX + energyW, barY + 7, 0xFF8B3DFF);
-            g.drawString(mc.font, "CE " + (int) Math.round(hudEnergy) + "%", barX, barY + 10, 0xFFBDEFFF, false);
+            int sy = y;
+            drawCompactSkillRow(g, mc, x, sy, panelW, keyName(ClientModEvents.DASH_KEY), "Dash", false);
+            sy += rowH;
+            drawCompactSkillRow(g, mc, x, sy, panelW, keyName(ClientModEvents.SUPER_SPEED_KEY), "Run", false);
+            sy += rowH;
+            drawCompactSkillRow(g, mc, x, sy, panelW, keyName(ClientModEvents.BLUE_KEY), "Blue", hudBlueActive || hudMaxBlueActive);
+            sy += rowH;
+            drawCompactSkillRow(g, mc, x, sy, panelW, keyName(ClientModEvents.RED_KEY), "Red", false);
+            sy += rowH;
+            drawCompactSkillRow(g, mc, x, sy, panelW, keyName(ClientModEvents.PURPLE_KEY), "Purple", hudPurpleCasting);
+            sy += rowH;
+            drawCompactSkillRow(g, mc, x, sy, panelW, keyName(ClientModEvents.DOMAIN_KEY), "Infinity", hudInfinity);
+            sy += rowH;
+            drawCompactSkillRow(g, mc, x, sy, panelW, keyName(ClientModEvents.UTILITY_KEY), "RCT", false);
+            sy += rowH;
+            drawCompactSkillRow(g, mc, x, sy, panelW, keyName(ClientModEvents.TELEPORT_KEY), "Teleport", false);
 
-            int sy = barY + 24;
-            drawSkillRow(g, mc, x + 8, sy, keyName(ClientModEvents.DASH_KEY), "Dash", null);
-            sy += 18;
-            drawSkillRow(g, mc, x + 8, sy, keyName(ClientModEvents.SUPER_SPEED_KEY), "Six Eyes Run", null);
-            sy += 18;
-            drawSkillRow(g, mc, x + 8, sy, keyName(ClientModEvents.BLUE_KEY), "Blue", "HOLD: Maximum Blue");
-            sy += 18;
-            drawSkillRow(g, mc, x + 8, sy, keyName(ClientModEvents.RED_KEY), "Red", "HOLD 2s: Maximum Red");
-            sy += 18;
-            drawSkillRow(g, mc, x + 8, sy, keyName(ClientModEvents.PURPLE_KEY), "Hollow Purple", "CAST: 5s");
-            sy += 18;
-            drawSkillRow(g, mc, x + 8, sy, keyName(ClientModEvents.DOMAIN_KEY), "Infinity", "HOLD: Domain");
-            sy += 18;
-            drawSkillRow(g, mc, x + 8, sy, keyName(ClientModEvents.UTILITY_KEY), "RCT", "HOLD: Blink");
-            sy += 18;
-            drawSkillRow(g, mc, x + 8, sy, keyName(ClientModEvents.TELEPORT_KEY), "Teleport", "STUN 2s");
+            // Проклятая энергия — тонкая полоска прямо над биндами.
+            int ceY = y - 13;
+            int ceW = panelW;
+            int energyW = (int) Math.round(ceW * Mth.clamp(hudEnergy / CE_MAX, 0.0, 1.0));
+
+            g.fill(x, ceY, x + ceW, ceY + 7, 0xA0151820);
+            g.fill(x, ceY, x + energyW, ceY + 7, 0xD925D9FF);
+            g.fill(x, ceY + 5, x + energyW, ceY + 7, 0xD98B3DFF);
+
+            String ceText = "CE " + (int) Math.round(hudEnergy) + "%";
+            g.drawString(
+                    mc.font,
+                    ceText,
+                    x + ceW - mc.font.width(ceText),
+                    ceY - 9,
+                    0xDDE8FAFF,
+                    false
+            );
+
+            // Контекст техники — одна короткая строка, без отдельной большой карточки.
+            String status = null;
+            int statusColor = 0xFFEAF8FF;
 
             if (hudPurpleCasting) {
-                g.drawString(mc.font, "PURPLE // CASTING", x + 10, y + h - 30, 0xFFC67BFF, false);
-            } else if (hudBlueActive) {
-                g.drawString(mc.font, "BLUE // ЛКМ: БРОСОК", x + 10, y + h - 30, 0xFF66DFFF, false);
+                status = "PURPLE // CAST";
+                statusColor = 0xFFC67BFF;
             } else if (hudMaxBlueActive) {
-                g.drawString(mc.font, "MAX BLUE // W/S: DISTANCE", x + 10, y + h - 30, 0xFF66DFFF, false);
+                status = "MAX BLUE // W/S";
+                statusColor = 0xFF66DFFF;
+            } else if (hudBlueActive) {
+                status = "BLUE // ЛКМ";
+                statusColor = 0xFF66DFFF;
+            } else if (hudInfinity) {
+                status = "INFINITY // ON";
+                statusColor = 0xFF6CEBFF;
             }
 
-            if (hudInfinity) {
-                g.drawString(mc.font, "INFINITY // ACTIVE", x + 10, y + h - 18, 0xFF6CEBFF, false);
+            if (status != null) {
+                g.drawString(
+                        mc.font,
+                        status,
+                        right - mc.font.width(status),
+                        ceY - 20,
+                        statusColor,
+                        false
+                );
             }
 
-            if (hudBlindfold && jumpChargeTicks >= 20) {
-                int jw = 84;
+            // Зарядка техники — маленькая полоска над CE.
+            if (!"NONE".equals(chargingAnim)) {
+                int chargeY = ceY - 28;
+                int cw = (int) ((ceW - 2) * Mth.clamp(chargingProgress, 0.0f, 1.0f));
+
+                g.fill(x, chargeY, x + ceW, chargeY + 6, 0x8A10131A);
+                g.fill(x + 1, chargeY + 1, x + 1 + cw, chargeY + 5, 0xE69A49FF);
+            }
+
+            // Шкала заряженного прыжка остаётся снизу по центру, но тоже компактная.
+            if (jumpChargeTicks >= 20) {
+                int jw = 72;
                 int jx = sw / 2 - jw / 2;
-                int jy = event.getWindow().getGuiScaledHeight() - 55;
+                int jy = sh - 49;
                 int tier = jumpChargeTicks >= 60 ? 3 : (jumpChargeTicks >= 40 ? 2 : 1);
                 int fill = tier == 1 ? jw / 3 : (tier == 2 ? jw * 2 / 3 : jw);
 
-                g.fill(jx - 2, jy - 2, jx + jw + 2, jy + 9, 0x99070A10);
-                g.fill(jx, jy, jx + jw, jy + 7, 0xFF151B26);
-                g.fill(jx, jy, jx + fill, jy + 7, 0xFF29D8FF);
-                g.drawCenteredString(mc.font, "JUMP 7 / 13 / 18", sw / 2, jy - 10, 0xFFBDEFFF);
-            }
-
-            if (!"NONE".equals(chargingAnim)) {
-                int cy = y + h + 6;
-                g.fill(x, cy, x + w, cy + 16, 0xB20A0D14);
-                int cw = (int) ((w - 8) * Mth.clamp(chargingProgress, 0.0f, 1.0f));
-                g.fill(x + 4, cy + 4, x + 4 + cw, cy + 12, 0xFF9A49FF);
-                g.drawCenteredString(mc.font, "HOLD +  " + (int)(chargingProgress * 100) + "%", x + w / 2, cy + 4, 0xFFFFFFFF);
+                g.fill(jx - 1, jy - 1, jx + jw + 1, jy + 6, 0x88070A10);
+                g.fill(jx, jy, jx + jw, jy + 5, 0xCC151B26);
+                g.fill(jx, jy, jx + fill, jy + 5, 0xEE29D8FF);
             }
         }
 
-        private static void drawSkillRow(GuiGraphics g, Minecraft mc, int x, int y, String key, String skill, String hold) {
-            int keyW = Math.max(24, mc.font.width(key) + 8);
-            g.fill(x, y, x + keyW, y + 14, 0xFF152533);
-            g.fill(x, y, x + 2, y + 14, 0xFF28D9FF);
-            g.drawCenteredString(mc.font, key, x + keyW / 2, y + 3, 0xFFFFFFFF);
-            g.drawString(mc.font, skill, x + keyW + 6, y + 1, 0xFFEAF8FF, false);
-            if (hold != null) {
-                g.drawString(mc.font, hold, x + keyW + 6, y + 9, 0xFF9BA9C5, false);
-            }
+        private static void drawCompactSkillRow(
+                GuiGraphics g,
+                Minecraft mc,
+                int x,
+                int y,
+                int width,
+                String key,
+                String skill,
+                boolean active
+        ) {
+            int keyW = Math.max(18, mc.font.width(key) + 6);
+            int bg = active ? 0xA51A2733 : 0x72101419;
+            int accent = active ? 0xFF72E9FF : 0xBB28D9FF;
+            int text = active ? 0xFFFFFFFF : 0xDDE8F4F8;
+
+            g.fill(x, y, x + width, y + 12, bg);
+            g.fill(x, y, x + 2, y + 12, accent);
+
+            g.fill(x + 4, y + 2, x + 4 + keyW, y + 10, 0xA0182530);
+            g.drawCenteredString(
+                    mc.font,
+                    key,
+                    x + 4 + keyW / 2,
+                    y + 2,
+                    0xFFFFFFFF
+            );
+
+            g.drawString(
+                    mc.font,
+                    skill,
+                    x + 9 + keyW,
+                    y + 2,
+                    text,
+                    false
+            );
         }
 
         @SubscribeEvent
