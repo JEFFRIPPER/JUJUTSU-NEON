@@ -1,0 +1,15 @@
+.gradle/
+build/
+run/
+out/
+.idea/
+*.iml
+src/main/resources/assets/jujutsu_neon/textures/particle/vfx/*.png
+src/main/resources/assets/jujutsu_neon/textures/item/*.png
+src/main/resources/assets/jujutsu_neon/textures/models/armor/*.png
+src/main/resources/assets/jujutsu_neon/sounds/*.ogg
+src/main/resources/assets/jujutsu_neon/sounds/*.wav
+src/main/resources/assets/jujutsu_neon/particles/vfx_*.json
+src/main/resources/assets/jujutsu_neon/models/item/gojo_blindfold.json
+src/main/resources/assets/jujutsu_neon/lang/ru_ru.json
+src/main/resources/assets/jujutsu_neon/sounds.json
