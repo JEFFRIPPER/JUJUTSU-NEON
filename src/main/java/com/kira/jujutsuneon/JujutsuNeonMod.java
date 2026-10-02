@@ -4000,38 +4000,53 @@ public class JujutsuNeonMod {
             requireBlindfoldMessage(player);
             return;
         }
-        if (!player.onGround()) return;
 
         int clamped = Mth.clamp(tier, 0, 3);
+        boolean grounded = player.onGround();
+
+        // ЖЁСТКОЕ ПРАВИЛО ПРЫЖКОВ:
+        // - заряд 7/13/18 блоков только с земли;
+        // - в воздухе разрешён только слабый tier 0;
+        // - слабых воздушных прыжков сколько угодно, счётчика/CD нет.
+        if (!grounded && clamped > 0) return;
+
+        // Creative flight принадлежит Minecraft и не смешивается с нашими прыжками.
+        if (player.getAbilities().flying) return;
+
         double yVelocity = switch (clamped) {
             case 1 -> 1.099; // ~7 блоков
             case 2 -> 1.560; // ~13 блоков
             case 3 -> 1.880; // ~18 блоков
-            default -> 0.545; // ~2 блока
+            default -> 0.545; // слабый прыжок ~2 блока, в том числе в воздухе
         };
 
+        Vec3 velocity = player.getDeltaMovement();
         player.setDeltaMovement(
-                player.getDeltaMovement().x,
+                velocity.x,
                 yVelocity,
-                player.getDeltaMovement().z
+                velocity.z
         );
         player.hurtMarked = true;
         player.fallDistance = 0.0F;
 
         ServerLevel level = player.serverLevel();
+
+        // Воздушный слабый прыжок получает компактный импульсный VFX,
+        // заряженные наземные — более крупное кольцо.
         spawnNeonRing(
                 level,
-                player.position().add(0.0, 0.08, 0.0),
+                player.position().add(0.0, grounded ? 0.08 : 0.35, 0.0),
                 clamped == 0 ? 0.65 : 0.90 + clamped * 0.25,
                 new Vector3f(0.10f, 0.78f, 1.0f)
         );
+
         level.playSound(
                 null,
                 player.blockPosition(),
                 SoundEvents.PLAYER_ATTACK_SWEEP,
                 SoundSource.PLAYERS,
-                0.45f,
-                1.25f - clamped * 0.08f
+                grounded ? 0.45f : 0.30f,
+                grounded ? 1.25f - clamped * 0.08f : 1.42f
         );
     }
 
@@ -5144,6 +5159,7 @@ public class JujutsuNeonMod {
         private static boolean lastSpeedHeld = false;
         private static boolean jumpChargeWasDown = false;
         private static int jumpChargeTicks = 0;
+        private static boolean jumpPressStartedInAir = false;
 
         // Полностью собственный movement controller.
         private static int clientDashMode = DASH_NONE;
@@ -5689,10 +5705,14 @@ public class JujutsuNeonMod {
 
         private static void performClientChargedJump(Minecraft mc, int tier) {
             if (mc.player == null || !hudBlindfold) return;
-            if (!mc.player.onGround()) return;
             if (mc.player.getAbilities().flying) return;
 
             int clamped = Mth.clamp(tier, 0, 3);
+            boolean grounded = mc.player.onGround();
+
+            // В воздухе никакой зарядки: только слабый tier 0.
+            if (!grounded && clamped > 0) return;
+
             double yVelocity = switch (clamped) {
                 case 1 -> 1.099;
                 case 2 -> 1.560;
@@ -5718,8 +5738,9 @@ public class JujutsuNeonMod {
             // Когда creative flight уже активен — вообще не трогаем vanilla flight input.
             if (mc.player.getAbilities().flying) return;
 
-            // Пока надета повязка, наземное движение и прыжок принадлежат
-            // Jujutsu Neon. Это убирает повторный vanilla-jump при удержании Space.
+            // Пока надета повязка, vanilla jump полностью подавлен.
+            // Space читается отдельно нашим state machine: поэтому удерживание
+            // никогда не вызывает повторные ванильные подпрыгивания.
             event.getInput().forwardImpulse = 0.0F;
             event.getInput().leftImpulse = 0.0F;
             event.getInput().jumping = false;
@@ -5760,6 +5781,7 @@ public class JujutsuNeonMod {
                 }
                 jumpChargeWasDown = false;
                 jumpChargeTicks = 0;
+                jumpPressStartedInAir = false;
                 pendingCreativeShortJumpTicks = -1;
                 clientDashMode = DASH_NONE;
                 clientDashAge = 0;
@@ -5805,6 +5827,7 @@ public class JujutsuNeonMod {
 
             if (pendingCreativeShortJumpTicks >= 0) {
                 pendingCreativeShortJumpTicks--;
+
                 if (pendingCreativeShortJumpTicks < 0 &&
                         hudBlindfold &&
                         !mc.player.getAbilities().flying) {
@@ -5813,17 +5836,24 @@ public class JujutsuNeonMod {
             }
 
             if (hudBlindfold && !mc.player.getAbilities().flying) {
-                if (jumpHeldNow && !jumpChargeWasDown) {
-                    jumpChargeTicks = 0;
+                boolean pressedNow = jumpHeldNow && !jumpChargeWasDown;
+                boolean releasedNow = !jumpHeldNow && jumpChargeWasDown;
 
-                    // Собственный double-tap detector для входа в creative flight:
-                    // первый tap не вызывает прыжок мгновенно, второй включает flight.
+                if (pressedNow) {
+                    jumpChargeTicks = 0;
+                    jumpPressStartedInAir = !mc.player.onGround();
+
+                    // Creative double-Space остаётся доступным.
+                    // Первый tap может быть обычным/воздушным прыжком,
+                    // второй tap в окне включает vanilla creative flight.
                     if (mc.player.getAbilities().mayfly && mc.level != null) {
                         long nowClient = mc.level.getGameTime();
+
                         if (nowClient - creativeLastSpacePressTick <= 7L) {
                             pendingCreativeShortJumpTicks = -1;
                             creativeLastSpacePressTick = -1000L;
                             jumpChargeTicks = 0;
+                            jumpPressStartedInAir = false;
 
                             mc.player.getAbilities().flying = true;
                             mc.player.onUpdateAbilities();
@@ -5831,26 +5861,42 @@ public class JujutsuNeonMod {
                             creativeLastSpacePressTick = nowClient;
                         }
                     }
+
+                    // Воздух: один physical impulse ровно на НАЖАТИЕ.
+                    // Удерживание Space не повторяет прыжок и не заряжает шкалу.
+                    if (!mc.player.getAbilities().flying && jumpPressStartedInAir) {
+                        fireChargedJump(mc, 0);
+                    }
                 }
 
                 if (!mc.player.getAbilities().flying) {
-                    if (jumpHeldNow) {
+                    if (jumpHeldNow && !jumpPressStartedInAir) {
+                        // Зарядка существует ТОЛЬКО у нажатия, начавшегося на земле.
                         jumpChargeTicks = Math.min(60, jumpChargeTicks + 1);
-                    } else if (jumpChargeWasDown) {
-                        int tier;
-                        if (jumpChargeTicks >= 60) tier = 3;
-                        else if (jumpChargeTicks >= 40) tier = 2;
-                        else if (jumpChargeTicks >= 20) tier = 1;
-                        else tier = 0;
-
-                        if (tier == 0 && mc.player.getAbilities().mayfly) {
-                            // Даём второму tap короткое окно, чтобы включить creative flight.
-                            pendingCreativeShortJumpTicks = 7;
+                    } else if (releasedNow) {
+                        if (jumpPressStartedInAir) {
+                            // Воздушный прыжок уже был выполнен на press.
+                            // Release ничего больше не делает.
+                            jumpChargeTicks = 0;
                         } else {
-                            fireChargedJump(mc, tier);
+                            int tier;
+                            if (jumpChargeTicks >= 60) tier = 3;
+                            else if (jumpChargeTicks >= 40) tier = 2;
+                            else if (jumpChargeTicks >= 20) tier = 1;
+                            else tier = 0;
+
+                            if (tier == 0 && mc.player.getAbilities().mayfly) {
+                                // На земле оставляем короткое окно второго tap
+                                // для стандартного creative flight.
+                                pendingCreativeShortJumpTicks = 7;
+                            } else {
+                                fireChargedJump(mc, tier);
+                            }
+
+                            jumpChargeTicks = 0;
                         }
 
-                        jumpChargeTicks = 0;
+                        jumpPressStartedInAir = false;
                     }
                 }
 
@@ -5858,6 +5904,7 @@ public class JujutsuNeonMod {
             } else {
                 jumpChargeWasDown = false;
                 jumpChargeTicks = 0;
+                jumpPressStartedInAir = false;
             }
 
             while (ClientModEvents.DASH_KEY.consumeClick()) {
