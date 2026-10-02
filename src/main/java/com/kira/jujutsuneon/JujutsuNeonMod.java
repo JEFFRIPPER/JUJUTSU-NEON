@@ -63,6 +63,7 @@ import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.client.event.InputEvent;
+import net.minecraftforge.client.event.MovementInputUpdateEvent;
 import net.minecraftforge.client.event.RegisterKeyMappingsEvent;
 import net.minecraftforge.client.event.RegisterParticleProvidersEvent;
 import net.minecraftforge.client.event.RenderHandEvent;
@@ -3933,6 +3934,8 @@ public class JujutsuNeonMod {
         }
         dir = dir.normalize();
 
+        // Позицию двигает клиентский принудительный dash controller.
+        // Сервер здесь только валидирует время и рассчитывает hit/damage.
         if (mode == DASH_FRONT) {
             if (elapsed >= FRONT_DASH_TICKS) {
                 finishDash(player, !player.getPersistentData().getBoolean("jn_dash_hit"));
@@ -3940,11 +3943,9 @@ public class JujutsuNeonMod {
             }
 
             double t = elapsed / (double) FRONT_DASH_TICKS;
-            double speed = 1.32 - 1.02 * t; // длинный старт, заметное замедление к концу
-            Vec3 step = dir.scale(speed);
-
-            Vec3 before = player.position();
-            LivingEntity victim = findDashVictim(player, before, before.add(step));
+            double speed = 1.32 - 1.02 * t;
+            Vec3 from = player.position();
+            LivingEntity victim = findDashVictim(player, from, from.add(dir.scale(speed + 0.90)));
 
             if (victim != null) {
                 victim.hurt(level.damageSources().playerAttack(player), FRONT_DASH_DAMAGE);
@@ -3966,12 +3967,6 @@ public class JujutsuNeonMod {
                 return;
             }
 
-            if (!tryDashMove(player, step, true)) {
-                // Стена выше 2 блоков: без урона владельцу и без застревания.
-                finishDash(player, true);
-                return;
-            }
-
             if (now % 2 == 0) {
                 spawnVfx(level, VFX_TRAIL, player.position().add(0, 0.9, 0), 1);
             }
@@ -3984,25 +3979,12 @@ public class JujutsuNeonMod {
                 return;
             }
 
-            Vec3 step = dir.scale(1.28);
-            if (!tryDashMove(player, step, true)) {
-                finishDash(player, false);
-                return;
-            }
-
             spawnVfx(level, VFX_TRAIL, player.position().add(0, 0.85, 0), 1);
             return;
         }
 
         if (mode == DASH_AIR) {
             if (elapsed >= AIR_DASH_TICKS) {
-                finishDash(player, false);
-                return;
-            }
-
-            // ~5 блоков за один короткий воздушный рывок.
-            Vec3 step = dir.scale(1.68);
-            if (!tryDashMove(player, step, false)) {
                 finishDash(player, false);
                 return;
             }
@@ -4183,10 +4165,11 @@ public class JujutsuNeonMod {
         target.hurtMarked = true;
     }
 
-    private static final int NORMAL_WALK_SPEED_AMPLIFIER = 9;  // 3x vanilla walk
-    private static final int SUPER_RUN_SPEED_AMPLIFIER = 34;   // 8x vanilla walk
-    private static final long SUPER_RUN_COST_INTERVAL = 40L;   // 2 секунды
-    private static final double SUPER_RUN_COST = 1.0;           // 1% CE
+    // Собственная физика перемещения. Никаких Potion MOVEMENT_SPEED.
+    private static final double CUSTOM_WALK_BLOCKS_PER_TICK = 0.30; // ~3x vanilla walk
+    private static final double CUSTOM_RUN_BLOCKS_PER_TICK = 0.80;  // ~8x vanilla walk
+    private static final long SUPER_RUN_COST_INTERVAL = 40L;        // 2 секунды
+    private static final double SUPER_RUN_COST = 1.0;               // 1% CE
 
     private static Vec3 runInputDirection(ServerPlayer player) {
         float forwardInput = player.zza;
@@ -4483,29 +4466,22 @@ public class JujutsuNeonMod {
         if (isHollowPurpleCasting(player)) {
             player.getPersistentData().putBoolean("jn_super_speed", false);
             player.setSprinting(false);
-            player.setDeltaMovement(Vec3.ZERO);
             return;
         }
 
         boolean speed = player.getPersistentData().getBoolean("jn_super_speed");
 
-        // Без CTRL: ровно усиленная ходьба около 3x. Ванильный sprint не суммируется.
+        // Ванильный sprint не участвует в физике Jujutsu Neon.
+        // Фактическую скорость локального игрока задаёт наш client movement controller.
         player.setSprinting(false);
 
         if (!speed) {
-            player.addEffect(new MobEffectInstance(
-                    MobEffects.MOVEMENT_SPEED,
-                    6,
-                    NORMAL_WALK_SPEED_AMPLIFIER,
-                    false, false, false
-            ));
             player.getPersistentData().remove("jn_speed_last_x");
             player.getPersistentData().remove("jn_speed_last_y");
             player.getPersistentData().remove("jn_speed_last_z");
             return;
         }
 
-        // CTRL: отдельный режим сверхбега ~8x.
         long nextCost = player.getPersistentData().getLong("jn_speed_next_cost");
         if (nextCost <= 0) {
             nextCost = now + SUPER_RUN_COST_INTERVAL;
@@ -4523,15 +4499,8 @@ public class JujutsuNeonMod {
             player.getPersistentData().putLong("jn_speed_next_cost", now + SUPER_RUN_COST_INTERVAL);
         }
 
-        player.addEffect(new MobEffectInstance(
-                MobEffects.MOVEMENT_SPEED,
-                6,
-                SUPER_RUN_SPEED_AMPLIFIER,
-                false, false, false
-        ));
-
-        trySuperRunStepUp(player);
-        supportSuperRunOnWater(player, level);
+        // Мир взаимодействует уже с фактической позицией игрока, пришедшей с клиента:
+        // деревья/листва испаряются, вода получает только вторичный VFX.
         vaporizeSuperRunPlants(player, level);
         spawnSuperRunEffects(player, level, now);
     }
