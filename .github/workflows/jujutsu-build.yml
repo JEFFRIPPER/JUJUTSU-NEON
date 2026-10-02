@@ -1,4 +1,5 @@
 name: Build Jujutsu Neon JAR
+
 on:
   push:
     branches:
@@ -10,6 +11,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+
     steps:
       - uses: actions/checkout@v4
 
@@ -30,12 +32,12 @@ jobs:
           sudo apt-get install -y -qq ffmpeg
 
       - name: Generate 4K resources and audio
-                run: |
+        run: |
           python3 -m pip install --quiet pillow
           python3 generate_resources.py
 
       - name: Build Forge mod
-                run: gradle build --stacktrace --no-daemon
+        run: gradle build --stacktrace --no-daemon
 
       - name: Show output
         run: ls -lah build/libs/
