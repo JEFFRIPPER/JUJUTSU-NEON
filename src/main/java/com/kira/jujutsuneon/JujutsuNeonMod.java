@@ -5464,27 +5464,90 @@ public class JujutsuNeonMod {
             return result.lengthSqr() > 1.0E-6 ? result.normalize() : Vec3.ZERO;
         }
 
+        private static boolean clientHasGroundSupport(Minecraft mc, double distance) {
+            if (mc.player == null || mc.level == null) return false;
+            if (mc.player.onGround()) return true;
+
+            Vec3 start = mc.player.position().add(0.0, 0.08, 0.0);
+            Vec3 end = start.add(0.0, -Math.max(0.10, distance), 0.0);
+
+            BlockHitResult hit = mc.level.clip(new ClipContext(
+                    start,
+                    end,
+                    ClipContext.Block.COLLIDER,
+                    ClipContext.Fluid.NONE,
+                    mc.player
+            ));
+
+            return hit.getType() != HitResult.Type.MISS;
+        }
+
+        /**
+         * Принудительный movement solver с "горным скольжением".
+         *
+         * ЖЁСТКОЕ ПРАВИЛО:
+         * - препятствие 1-2 блока = автоматически скользим/поднимаемся;
+         * - 3+ блока = упираемся, сквозь стену не телепортируемся;
+         * - движение разбито на маленькие swept-шаги, поэтому быстрый dash
+         *   не перескакивает тонкие препятствия и не туннелит через блоки.
+         */
         private static boolean tryClientForcedMove(Minecraft mc, Vec3 delta, boolean allowStepUp) {
             if (mc.player == null || mc.level == null) return false;
+            if (delta.lengthSqr() < 1.0E-8) return true;
 
-            AABB box = mc.player.getBoundingBox();
+            double horizontalLength = Math.sqrt(delta.x * delta.x + delta.z * delta.z);
+            int slices = Math.max(
+                    1,
+                    (int) Math.ceil(Math.max(horizontalLength, Math.abs(delta.y)) / 0.18)
+            );
 
-            if (mc.level.noCollision(mc.player, box.move(delta))) {
-                mc.player.move(MoverType.SELF, delta);
-                return true;
-            }
+            Vec3 slice = delta.scale(1.0 / slices);
+            boolean movedAnything = false;
 
-            if (allowStepUp) {
-                for (int h = 1; h <= 2; h++) {
-                    Vec3 stepped = delta.add(0.0, h, 0.0);
-                    if (mc.level.noCollision(mc.player, box.move(stepped))) {
-                        mc.player.move(MoverType.SELF, stepped);
-                        return true;
-                    }
+            for (int part = 0; part < slices; part++) {
+                AABB box = mc.player.getBoundingBox();
+
+                if (mc.level.noCollision(mc.player, box.move(slice))) {
+                    mc.player.move(MoverType.SELF, slice);
+                    movedAnything = true;
+                    continue;
+                }
+
+                if (!allowStepUp) {
+                    return movedAnything;
+                }
+
+                // Ищем МИНИМАЛЬНУЮ высоту, на которой следующий кусок пути свободен.
+                // 0.125 даёт достаточно плотный поиск для ступеней, плит и неровностей.
+                boolean climbed = false;
+                double naturalY = Math.max(0.0, slice.y);
+
+                for (double lift = 0.125; lift <= 2.0001; lift += 0.125) {
+                    Vec3 candidate = new Vec3(
+                            slice.x,
+                            naturalY + lift,
+                            slice.z
+                    );
+
+                    if (!mc.level.noCollision(mc.player, box.move(candidate))) continue;
+
+                    // Не "прыжок" и не velocity: реально проводим игрока вверх
+                    // по геометрии препятствия. Рендер интерполирует это как скольжение.
+                    mc.player.move(MoverType.SELF, candidate);
+                    mc.player.fallDistance = 0.0F;
+                    movedAnything = true;
+                    climbed = true;
+                    break;
+                }
+
+                if (!climbed) {
+                    // Значит свободного прохода в пределах 2 блоков нет:
+                    // перед нами стена 3+ блока либо потолок.
+                    return movedAnything;
                 }
             }
 
-            return false;
+            return movedAnything;
         }
 
         private static void startClientDash(Minecraft mc, MovementAction requestedAction) {
@@ -5556,6 +5619,8 @@ public class JujutsuNeonMod {
                 stepUp = false;
             }
 
+            // Ground/front/side dash используют тот же 2-блочный slope solver.
+            // Air dash остаётся чистым направленным рывком без автоподъёма.
             if (clientDashAge >= lifetime ||
                     !tryClientForcedMove(mc, dir.normalize().scale(speed), stepUp)) {
                 clientDashMode = DASH_NONE;
@@ -5614,9 +5679,10 @@ public class JujutsuNeonMod {
 
             if (superRun && clientWaterSurfaceRun(mc, dir, speed)) return;
 
-            // Обычная ходьба/сверхбег работают только как наше принудительное
-            // горизонтальное перемещение. Vanilla input уже обнулён событием ниже.
-            if (mc.player.onGround()) {
+            // Обычная ходьба/сверхбег используют тот же slope solver, что и dash.
+            // После подъёма на блок onGround может обновиться на тик позже, поэтому
+            // дополнительно проверяем опору прямо под ногами.
+            if (clientHasGroundSupport(mc, 0.34)) {
                 tryClientForcedMove(mc, dir.scale(speed), true);
             }
         }
