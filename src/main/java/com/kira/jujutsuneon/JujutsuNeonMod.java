@@ -1379,6 +1379,21 @@ public class JujutsuNeonMod {
     }
 
     private static void clearMaximumBlue(ServerPlayer player) {
+        double lastX = player.getPersistentData().getDouble("jn_max_blue_x");
+        double lastY = player.getPersistentData().getDouble("jn_max_blue_y");
+        double lastZ = player.getPersistentData().getDouble("jn_max_blue_z");
+
+        NETWORK.send(
+                PacketDistributor.TRACKING_ENTITY_AND_SELF.with(() -> player),
+                new MaxBlueVisualPacket(
+                        player.getUUID(),
+                        false,
+                        lastX, lastY, lastZ,
+                        0.0f,
+                        MAX_BLUE_PHASE_NONE
+                )
+        );
+
         List<MaxBlueSuctionBlock> visuals = MAX_BLUE_SUCTION.remove(player.getUUID());
         if (visuals != null) {
             for (MaxBlueSuctionBlock entry : visuals) {
@@ -1398,55 +1413,40 @@ public class JujutsuNeonMod {
     }
 
     private static void spawnMaximumBlueVisual(ServerLevel level, Vec3 center, double radius, long now, double fadeFactor) {
+        // Основное тело Maximum Blue теперь рисуется отдельной непрерывной 3D-моделью.
+        // Здесь остаются только вторичные искры/дымка, чтобы не было billboard-ядра.
         if (radius <= 0.02 || fadeFactor <= 0.01) return;
+        if (now % 3 != 0) return;
 
-        int shellPoints = Math.max(18, (int) (86 * fadeFactor));
-        double golden = Math.PI * (3.0 - Math.sqrt(5.0));
-
-        for (int i = 0; i < shellPoints; i++) {
-            double y = 1.0 - (i / (double) Math.max(1, shellPoints - 1)) * 2.0;
-            double ring = Math.sqrt(Math.max(0.0, 1.0 - y * y));
-            double theta = golden * i + now * 0.055;
+        int sparks = Math.max(2, (int) Math.round(6.0 * fadeFactor));
+        for (int i = 0; i < sparks; i++) {
+            double theta = rnd(0.0, Math.PI * 2.0);
+            double phi = Math.acos(rnd(-1.0, 1.0));
+            double r = radius * rnd(1.10, 1.42);
 
             Vec3 p = center.add(
-                    Math.cos(theta) * ring * radius,
-                    y * radius,
-                    Math.sin(theta) * ring * radius
+                    Math.sin(phi) * Math.cos(theta) * r,
+                    Math.cos(phi) * r,
+                    Math.sin(phi) * Math.sin(theta) * r
             );
 
-            sendDust(level, p,
-                    i % 3 == 0 ? new Vector3f(0.02f, 0.86f, 1.0f) : new Vector3f(0.02f, 0.32f, 1.0f),
-                    (float) (0.68 + 0.28 * fadeFactor));
+            sendDust(
+                    level,
+                    p,
+                    i % 3 == 0
+                            ? new Vector3f(0.36f, 0.90f, 1.0f)
+                            : new Vector3f(0.02f, 0.44f, 1.0f),
+                    (float) (0.36 + 0.14 * fadeFactor)
+            );
         }
 
-        int ringPoints = Math.max(16, (int) (42 * fadeFactor));
-        for (int plane = 0; plane < 3; plane++) {
-            for (int i = 0; i < ringPoints; i++) {
-                double a = Math.PI * 2.0 * i / ringPoints + now * (0.045 + plane * 0.015);
-                double r = radius * (1.10 + plane * 0.06);
-                Vec3 p;
-                if (plane == 0) p = center.add(Math.cos(a) * r, 0.0, Math.sin(a) * r);
-                else if (plane == 1) p = center.add(Math.cos(a) * r, Math.sin(a) * r, 0.0);
-                else p = center.add(0.0, Math.cos(a) * r, Math.sin(a) * r);
-
-                sendDust(level, p,
-                        plane == 1 ? new Vector3f(0.00f, 0.70f, 1.0f) : new Vector3f(0.02f, 0.42f, 1.0f),
-                        (float) (0.48 + 0.18 * fadeFactor));
-            }
-        }
-
-        int wisps = Math.max(2, (int) (8 * fadeFactor));
-        for (int i = 0; i < wisps; i++) {
-            double a = rnd(0.0, Math.PI * 2.0);
-            double h = rnd(-radius * 0.85, radius * 0.85);
-            double r = radius * rnd(1.18, 1.58);
-            Vec3 p = center.add(Math.cos(a) * r, h, Math.sin(a) * r);
-            sendDust(level, p, new Vector3f(0.00f, 0.72f, 1.0f), 0.52f);
-        }
-
-        if (now % 3 == 0) {
-            spawnVfx(level, VFX_MAX_BLUE, center, 1);
-        }
+        level.sendParticles(
+                ParticleTypes.ELECTRIC_SPARK,
+                center.x, center.y, center.z,
+                Math.max(1, (int) (2 * fadeFactor)),
+                radius * 0.72, radius * 0.72, radius * 0.72,
+                0.018
+        );
     }
 
     private static boolean canMaximumBlueConsume(ServerLevel level, ServerPlayer owner, BlockPos pos) {
@@ -1460,10 +1460,11 @@ public class JujutsuNeonMod {
         return !isOwnerSafeBlock(owner, pos);
     }
 
-    private static void pullMaximumBlueBlocks(ServerPlayer owner, ServerLevel level, Vec3 center, long now) {
-        if (now % 3 != 0) return;
+    private static void consumeMaximumBlueBlocks(ServerPlayer owner, ServerLevel level, Vec3 center, long now) {
+        // По новому визуальному правилу блоки не превращаются в FallingBlockEntity.
+        // Они просто исчезают без дропа: меньше нагрузки и ближе к референсу.
+        if (now % 2 != 0) return;
 
-        List<BlockPos> candidates = new ArrayList<>();
         int minX = Mth.floor(center.x - MAX_BLUE_ZONE_HALF);
         int maxX = Mth.floor(center.x + MAX_BLUE_ZONE_HALF);
         int minY = Mth.floor(center.y - MAX_BLUE_ZONE_HALF);
@@ -1471,99 +1472,37 @@ public class JujutsuNeonMod {
         int minZ = Mth.floor(center.z - MAX_BLUE_ZONE_HALF);
         int maxZ = Mth.floor(center.z + MAX_BLUE_ZONE_HALF);
 
-        for (int x = minX; x <= maxX; x++) {
-            for (int y = minY; y <= maxY; y++) {
-                for (int z = minZ; z <= maxZ; z++) {
+        int budget = 18;
+
+        for (int x = minX; x <= maxX && budget > 0; x++) {
+            for (int y = minY; y <= maxY && budget > 0; y++) {
+                for (int z = minZ; z <= maxZ && budget > 0; z++) {
                     BlockPos pos = new BlockPos(x, y, z);
-                    Vec3 bc = Vec3.atCenterOf(pos);
-                    if (Math.abs(bc.x - center.x) > MAX_BLUE_ZONE_HALF ||
-                            Math.abs(bc.y - center.y) > MAX_BLUE_ZONE_HALF ||
-                            Math.abs(bc.z - center.z) > MAX_BLUE_ZONE_HALF) continue;
-                    if (canMaximumBlueConsume(level, owner, pos)) candidates.add(pos.immutable());
+                    Vec3 blockCenter = Vec3.atCenterOf(pos);
+
+                    if (Math.abs(blockCenter.x - center.x) > MAX_BLUE_ZONE_HALF ||
+                            Math.abs(blockCenter.y - center.y) > MAX_BLUE_ZONE_HALF ||
+                            Math.abs(blockCenter.z - center.z) > MAX_BLUE_ZONE_HALF) {
+                        continue;
+                    }
+
+                    if (!canMaximumBlueConsume(level, owner, pos)) continue;
+
+                    level.setBlock(pos, Blocks.AIR.defaultBlockState(), 2 | 16 | 32);
+                    budget--;
                 }
             }
-        }
-
-        candidates.sort(Comparator.comparingDouble(p -> Vec3.atCenterOf(p).distanceToSqr(center)));
-
-        int count = Math.min(3, candidates.size());
-        if (count <= 0) return;
-
-        List<MaxBlueSuctionBlock> active = MAX_BLUE_SUCTION.computeIfAbsent(owner.getUUID(), id -> new ArrayList<>());
-
-        for (int i = 0; i < count; i++) {
-            BlockPos pos = candidates.get(i);
-            BlockState state = level.getBlockState(pos);
-
-            FallingBlockEntity falling = FallingBlockEntity.fall(level, pos, state);
-            falling.setNoGravity(true);
-            falling.noPhysics = true;
-            falling.setDeltaMovement(Vec3.ZERO);
-            falling.fallDistance = 0.0F;
-
-            active.add(new MaxBlueSuctionBlock(
-                    falling.getId(), Vec3.atCenterOf(pos), now, rnd(0.0, Math.PI * 2.0)));
         }
     }
 
     private static void tickMaximumBlueSuction(ServerPlayer owner, ServerLevel level, Vec3 center, long now) {
-        List<MaxBlueSuctionBlock> active = MAX_BLUE_SUCTION.get(owner.getUUID());
-        if (active == null || active.isEmpty()) return;
+        List<MaxBlueSuctionBlock> active = MAX_BLUE_SUCTION.remove(owner.getUUID());
+        if (active == null) return;
 
-        active.removeIf(entry -> {
+        for (MaxBlueSuctionBlock entry : active) {
             Entity entity = level.getEntity(entry.entityId);
-            if (!(entity instanceof FallingBlockEntity falling) || !entity.isAlive()) return true;
-
-            double t = Mth.clamp((now - entry.startTick) / 24.0, 0.0, 1.0);
-            Vec3 target;
-
-            if (t < 0.45) {
-                double q = maxBlueSmooth(t / 0.45);
-                double angle = entry.phaseOffset + q * Math.PI * 0.85;
-                Vec3 orbitEntry = center.add(
-                        Math.cos(angle) * (MAX_BLUE_RADIUS + 1.15),
-                        Math.sin(angle * 1.7) * 1.1,
-                        Math.sin(angle) * (MAX_BLUE_RADIUS + 1.15));
-                Vec3 liftedStart = entry.start.add(0.0, Math.sin(q * Math.PI) * 1.25, 0.0);
-                target = liftedStart.lerp(orbitEntry, q);
-            } else if (t < 0.82) {
-                double q = (t - 0.45) / 0.37;
-                double angle = entry.phaseOffset + Math.PI * 0.85 + q * Math.PI * 2.25;
-                double r = (MAX_BLUE_RADIUS + 1.15) * (1.0 - q) + (MAX_BLUE_RADIUS + 0.15) * q;
-                target = center.add(
-                        Math.cos(angle) * r,
-                        Math.sin(angle * 1.35) * (0.95 - q * 0.45),
-                        Math.sin(angle) * r);
-            } else {
-                double q = maxBlueSmooth((t - 0.82) / 0.18);
-                double angle = entry.phaseOffset + Math.PI * 3.10;
-                Vec3 orbitPoint = center.add(
-                        Math.cos(angle) * (MAX_BLUE_RADIUS + 0.15),
-                        Math.sin(angle * 1.35) * 0.50,
-                        Math.sin(angle) * (MAX_BLUE_RADIUS + 0.15));
-                target = orbitPoint.lerp(center, q);
-            }
-
-            falling.setPos(target.x, target.y, target.z);
-            falling.setDeltaMovement(Vec3.ZERO);
-            falling.setNoGravity(true);
-            falling.noPhysics = true;
-            falling.fallDistance = 0.0F;
-
-            if (now % 2 == 0) {
-                sendDust(level,
-                        target.add(rnd(-0.12, 0.12), rnd(-0.12, 0.12), rnd(-0.12, 0.12)),
-                        new Vector3f(0.02f, 0.60f, 1.0f), 0.44f);
-            }
-
-            if (t >= 1.0) {
-                falling.discard();
-                return true;
-            }
-            return false;
-        });
-
-        if (active.isEmpty()) MAX_BLUE_SUCTION.remove(owner.getUUID());
+            if (entity != null) entity.discard();
+        }
     }
 
     private static void damageMaximumBlueZone(ServerPlayer owner, ServerLevel level, Vec3 center, long now) {
@@ -1633,6 +1572,17 @@ public class JujutsuNeonMod {
             fadeFactor = 1.0 - Mth.clamp((now - fadeStart) / (double) MAX_BLUE_FADE_TICKS, 0.0, 1.0);
         }
 
+        NETWORK.send(
+                PacketDistributor.TRACKING_ENTITY_AND_SELF.with(() -> player),
+                new MaxBlueVisualPacket(
+                        player.getUUID(),
+                        true,
+                        center.x, center.y, center.z,
+                        (float) radius,
+                        phase
+                )
+        );
+
         spawnMaximumBlueVisual(level, center, radius, now, fadeFactor);
         tickMaximumBlueSuction(player, level, center, now);
 
@@ -1651,7 +1601,7 @@ public class JujutsuNeonMod {
 
         if (phase == MAX_BLUE_PHASE_ACTIVE) {
             damageMaximumBlueZone(player, level, center, now);
-            pullMaximumBlueBlocks(player, level, center, now);
+            consumeMaximumBlueBlocks(player, level, center, now);
 
             long activeStart = player.getPersistentData().getLong("jn_max_blue_phase_start");
             if (now - activeStart >= MAX_BLUE_ACTIVE_TICKS) beginMaximumBlueFade(player);
