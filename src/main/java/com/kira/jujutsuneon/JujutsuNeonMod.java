@@ -2048,15 +2048,7 @@ public class JujutsuNeonMod {
         player.hurtMarked = true;
 
         playSfx(level, player, SFX_PURPLE, 1.75f, 0.60f);
-        spawnStylizedShockwave(level, origin, 4.2, new Vector3f(0.72f, 0.02f, 1.0f));
-        spawnRadialStar(
-                level,
-                origin,
-                new Vector3f(0.58f, 0.00f, 1.0f),
-                new Vector3f(1.0f, 0.04f, 0.55f),
-                24,
-                6.0
-        );
+        // Spatial shock/rings are rendered by HollowPurpleReferenceClient.
         playImpactLayer(level, origin, 1.20f, 0.72f);
 
         player.displayClientMessage(
@@ -2416,7 +2408,7 @@ public class JujutsuNeonMod {
             long started = player.getPersistentData().getLong("jn_purple_started");
             long elapsed = Math.max(0L, now - started);
 
-            spawnHollowPurpleCastScene(player, level, now, elapsed);
+            // Reference renderer owns the complete cast scene client-side.
 
             if (elapsed >= PURPLE_CAST_TICKS) {
                 launchHollowPurple(player);
@@ -2486,28 +2478,7 @@ public class JujutsuNeonMod {
             );
         }
 
-        double visualRadius = purpleBallRadius(endDistance);
-        spawnPurpleMergedSphere(
-                level,
-                next,
-                velocity.normalize(),
-                visualRadius,
-                now,
-                true
-        );
-
-        // High-speed core wake; kept deliberately sparse for client/network performance.
-        for (int i = 1; i <= 5; i++) {
-            Vec3 trail = pos.lerp(next, i / 6.0);
-            sendDust(
-                    level,
-                    trail,
-                    i % 2 == 0
-                            ? new Vector3f(0.62f, 0.02f, 1.0f)
-                            : new Vector3f(1.0f, 0.04f, 0.58f),
-                    0.72f
-            );
-        }
+        // Projectile body/trail are rendered as procedural 3D geometry on the client.
 
         if (endDistance >= PURPLE_END_DISTANCE) {
             dissolveHollowPurple(player, level, next);

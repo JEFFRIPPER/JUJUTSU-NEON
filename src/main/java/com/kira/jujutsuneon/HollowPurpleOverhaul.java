@@ -135,7 +135,7 @@ public final class HollowPurpleOverhaul {
             NetworkEvent.Context context = contextSupplier.get();
             context.enqueueWork(() -> DistExecutor.unsafeRunWhenOn(
                     Dist.CLIENT,
-                    () -> () -> HollowPurpleClient.accept(msg)
+                    () -> () -> HollowPurpleReferenceClient.accept(msg)
             ));
             context.setPacketHandled(true);
         }
