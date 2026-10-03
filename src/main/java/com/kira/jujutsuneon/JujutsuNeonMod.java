@@ -156,7 +156,7 @@ public class JujutsuNeonMod {
      */
 
     public static final String MODID = "jujutsu_neon";
-    private static final String PROTOCOL = "15";
+    private static final String PROTOCOL = "16";
 
     private static final double CE_MAX = 100.0;
 
@@ -285,6 +285,14 @@ public class JujutsuNeonMod {
                 MaxBlueVisualPacket::encode,
                 MaxBlueVisualPacket::decode,
                 MaxBlueVisualPacket::handle
+        );
+
+        NETWORK.registerMessage(
+                packetId++,
+                MaxBlueDebrisBatchPacket.class,
+                MaxBlueDebrisBatchPacket::encode,
+                MaxBlueDebrisBatchPacket::decode,
+                MaxBlueDebrisBatchPacket::handle
         );
 
         NETWORK.registerMessage(
@@ -1206,13 +1214,22 @@ public class JujutsuNeonMod {
     private static final long MAX_BLUE_FORM_TICKS = 60L;
     private static final long MAX_BLUE_ACTIVE_TICKS = 160L;
     private static final long MAX_BLUE_FADE_TICKS = 20L;
-    private static final double MAX_BLUE_RADIUS = 2.0;
-    private static final double MAX_BLUE_ZONE_HALF = 3.0;
+    // Reference scale: roughly twice the previous visual diameter.
+    private static final double MAX_BLUE_RADIUS = 4.0;
+    private static final double MAX_BLUE_ZONE_HALF = 4.5;
     private static final double MAX_BLUE_MIN_DISTANCE = 3.0;
     private static final double MAX_BLUE_MAX_DISTANCE = 20.0;
     private static final float MAX_BLUE_DAMAGE = 14.0F;
 
     private static final Map<UUID, List<MaxBlueSuctionBlock>> MAX_BLUE_SUCTION = new HashMap<>();
+
+    // Swept-volume block capture. Fast aim changes cannot tunnel between ticks.
+    private static final Map<UUID, ArrayDeque<BlockPos>> MAX_BLUE_PENDING_BLOCKS = new HashMap<>();
+    private static final Map<UUID, Set<Long>> MAX_BLUE_PENDING_KEYS = new HashMap<>();
+    private static final int MAX_BLUE_SWEEP_BUDGET = 512;
+    private static final int MAX_BLUE_PENDING_LIMIT = 12000;
+    private static final double MAX_BLUE_SWEEP_RADIUS = 5.50;
+    private static final double MAX_BLUE_SWEEP_STEP = 0.90;
 
     private static class MaxBlueSuctionBlock {
         final int entityId;
@@ -1238,21 +1255,22 @@ public class JujutsuNeonMod {
     }
 
     private static Vec3 maxBlueFormationCenter(ServerPlayer player, double progress, double desiredDistance) {
-        double eased = maxBlueSmooth(progress);
-
+        // Reference timing: a tiny seed is born next to the caster, then the
+        // anomaly tears forward and expands instead of orbiting like a planet.
         Vec3 eye = player.getEyePosition();
         Vec3 look = player.getLookAngle().normalize();
+        Vec3 horizontal = new Vec3(look.x, 0.0, look.z);
+        if (horizontal.lengthSqr() < 1.0E-6) horizontal = new Vec3(0.0, 0.0, 1.0);
+        horizontal = horizontal.normalize();
+        Vec3 right = new Vec3(-horizontal.z, 0.0, horizontal.x);
+
+        Vec3 seed = eye.add(look.scale(0.90)).add(right.scale(0.55)).add(0.0, -0.38, 0.0);
         Vec3 finalPos = eye.add(look.scale(desiredDistance));
 
-        double angle = progress * Math.PI * 4.0;
-        double orbitRadius = 2.7 * (1.0 - eased) + 0.25;
-        Vec3 orbitPos = player.position().add(
-                Math.cos(angle) * orbitRadius,
-                1.15 + Math.sin(angle * 1.5) * 0.72,
-                Math.sin(angle) * orbitRadius
-        );
-
-        return orbitPos.lerp(finalPos, eased);
+        double travel = maxBlueSmooth((progress - 0.18) / 0.50);
+        double handPulse = Math.sin(progress * Math.PI * 5.0) * 0.045 * (1.0 - travel);
+        seed = seed.add(0.0, handPulse, 0.0);
+        return seed.lerp(finalPos, travel);
     }
 
     private static double currentMaximumBlueRadius(ServerPlayer player, long now) {
@@ -1261,7 +1279,20 @@ public class JujutsuNeonMod {
         if (phase == MAX_BLUE_PHASE_FORMING) {
             long start = player.getPersistentData().getLong("jn_max_blue_phase_start");
             double p = Mth.clamp((now - start) / (double) MAX_BLUE_FORM_TICKS, 0.0, 1.0);
-            return 0.12 + (MAX_BLUE_RADIUS - 0.12) * maxBlueSmooth(p);
+
+            // Reference appearance: tiny white-blue seed -> violent bloom ->
+            // final large anomaly. The burst happens early instead of a boring
+            // linear balloon growth.
+            if (p < 0.18) {
+                return 0.10 + 0.38 * maxBlueSmooth(p / 0.18);
+            }
+
+            double eruption = maxBlueSmooth((p - 0.18) / 0.32);
+            double settle = maxBlueSmooth((p - 0.50) / 0.50);
+            double earlyTarget = MAX_BLUE_RADIUS * 0.82;
+            return 0.48
+                    + (earlyTarget - 0.48) * eruption
+                    + (MAX_BLUE_RADIUS - earlyTarget) * settle;
         }
 
         if (phase == MAX_BLUE_PHASE_ACTIVE) return MAX_BLUE_RADIUS;
@@ -1403,12 +1434,16 @@ public class JujutsuNeonMod {
             }
         }
 
+        MAX_BLUE_PENDING_BLOCKS.remove(player.getUUID());
+        MAX_BLUE_PENDING_KEYS.remove(player.getUUID());
+
         player.getPersistentData().putInt("jn_max_blue_phase", MAX_BLUE_PHASE_NONE);
         for (String key : new String[]{
                 "jn_max_blue_phase_start","jn_max_blue_distance",
                 "jn_max_blue_lock_x","jn_max_blue_lock_y","jn_max_blue_lock_z",
                 "jn_max_blue_fade_radius","jn_max_blue_fade_x","jn_max_blue_fade_y","jn_max_blue_fade_z",
-                "jn_max_blue_x","jn_max_blue_y","jn_max_blue_z"}) {
+                "jn_max_blue_x","jn_max_blue_y","jn_max_blue_z",
+                "jn_max_blue_sweep_ready","jn_max_blue_sweep_x","jn_max_blue_sweep_y","jn_max_blue_sweep_z"}) {
             player.getPersistentData().remove(key);
         }
     }
@@ -1462,37 +1497,82 @@ public class JujutsuNeonMod {
     }
 
     private static void consumeMaximumBlueBlocks(ServerPlayer owner, ServerLevel level, Vec3 center, long now) {
-        // По новому визуальному правилу блоки не превращаются в FallingBlockEntity.
-        // Они просто исчезают без дропа: меньше нагрузки и ближе к референсу.
-        if (now % 2 != 0) return;
+        var data = owner.getPersistentData();
 
-        int minX = Mth.floor(center.x - MAX_BLUE_ZONE_HALF);
-        int maxX = Mth.floor(center.x + MAX_BLUE_ZONE_HALF);
-        int minY = Mth.floor(center.y - MAX_BLUE_ZONE_HALF);
-        int maxY = Mth.floor(center.y + MAX_BLUE_ZONE_HALF);
-        int minZ = Mth.floor(center.z - MAX_BLUE_ZONE_HALF);
-        int maxZ = Mth.floor(center.z + MAX_BLUE_ZONE_HALF);
+        Vec3 previous = center;
+        if (data.getBoolean("jn_max_blue_sweep_ready")) {
+            previous = new Vec3(
+                    data.getDouble("jn_max_blue_sweep_x"),
+                    data.getDouble("jn_max_blue_sweep_y"),
+                    data.getDouble("jn_max_blue_sweep_z")
+            );
+        }
 
-        int budget = 18;
+        data.putBoolean("jn_max_blue_sweep_ready", true);
+        data.putDouble("jn_max_blue_sweep_x", center.x);
+        data.putDouble("jn_max_blue_sweep_y", center.y);
+        data.putDouble("jn_max_blue_sweep_z", center.z);
 
-        for (int x = minX; x <= maxX && budget > 0; x++) {
-            for (int y = minY; y <= maxY && budget > 0; y++) {
-                for (int z = minZ; z <= maxZ && budget > 0; z++) {
-                    BlockPos pos = new BlockPos(x, y, z);
-                    Vec3 blockCenter = Vec3.atCenterOf(pos);
+        UUID ownerId = owner.getUUID();
+        ArrayDeque<BlockPos> pending = MAX_BLUE_PENDING_BLOCKS.computeIfAbsent(ownerId, id -> new ArrayDeque<>());
+        Set<Long> pendingKeys = MAX_BLUE_PENDING_KEYS.computeIfAbsent(ownerId, id -> new HashSet<>());
 
-                    if (Math.abs(blockCenter.x - center.x) > MAX_BLUE_ZONE_HALF ||
-                            Math.abs(blockCenter.y - center.y) > MAX_BLUE_ZONE_HALF ||
-                            Math.abs(blockCenter.z - center.z) > MAX_BLUE_ZONE_HALF) {
-                        continue;
+        // Capsule/swept sphere between the previous and current center. This is
+        // the anti-tunnelling fix: a fast camera flick cannot jump over blocks.
+        double travel = previous.distanceTo(center);
+        int samples = Mth.clamp((int) Math.ceil(travel / MAX_BLUE_SWEEP_STEP), 1, 48);
+        int range = (int) Math.ceil(MAX_BLUE_SWEEP_RADIUS);
+        double radiusSqr = MAX_BLUE_SWEEP_RADIUS * MAX_BLUE_SWEEP_RADIUS;
+
+        for (int sampleIndex = 0; sampleIndex <= samples && pending.size() < MAX_BLUE_PENDING_LIMIT; sampleIndex++) {
+            double t = sampleIndex / (double) samples;
+            // Current position first, then the swept history behind it.
+            Vec3 sample = center.lerp(previous, t);
+            int cx = Mth.floor(sample.x);
+            int cy = Mth.floor(sample.y);
+            int cz = Mth.floor(sample.z);
+
+            for (int x = cx - range; x <= cx + range && pending.size() < MAX_BLUE_PENDING_LIMIT; x++) {
+                for (int y = cy - range; y <= cy + range && pending.size() < MAX_BLUE_PENDING_LIMIT; y++) {
+                    for (int z = cz - range; z <= cz + range && pending.size() < MAX_BLUE_PENDING_LIMIT; z++) {
+                        BlockPos pos = new BlockPos(x, y, z);
+                        Vec3 blockCenter = Vec3.atCenterOf(pos);
+                        if (blockCenter.distanceToSqr(sample) > radiusSqr) continue;
+
+                        long key = pos.asLong();
+                        if (pendingKeys.add(key)) pending.addLast(pos);
                     }
-
-                    if (!canMaximumBlueConsume(level, owner, pos)) continue;
-
-                    level.setBlock(pos, Blocks.AIR.defaultBlockState(), 2 | 16 | 32);
-                    budget--;
                 }
             }
+        }
+
+        List<Long> visualPositions = new ArrayList<>();
+        List<Integer> visualStates = new ArrayList<>();
+        int budget = MAX_BLUE_SWEEP_BUDGET;
+
+        while (budget-- > 0 && !pending.isEmpty()) {
+            BlockPos pos = pending.removeFirst();
+            pendingKeys.remove(pos.asLong());
+            if (!canMaximumBlueConsume(level, owner, pos)) continue;
+
+            BlockState state = level.getBlockState(pos);
+            int stateId = net.minecraft.world.level.block.Block.getId(state);
+
+            // Real world block disappears immediately, without drops. The client
+            // renders a temporary copy spiralling into the white core.
+            level.setBlock(pos, Blocks.AIR.defaultBlockState(), 2 | 16 | 32);
+            visualPositions.add(pos.asLong());
+            visualStates.add(stateId);
+        }
+
+        if (!visualPositions.isEmpty()) {
+            NETWORK.send(
+                    PacketDistributor.TRACKING_ENTITY_AND_SELF.with(() -> owner),
+                    new MaxBlueDebrisBatchPacket(
+                            ownerId, center.x, center.y, center.z,
+                            visualPositions, visualStates
+                    )
+            );
         }
     }
 
@@ -4927,12 +5007,63 @@ public class JujutsuNeonMod {
             NetworkEvent.Context context = contextSupplier.get();
             context.enqueueWork(() -> DistExecutor.unsafeRunWhenOn(
                     Dist.CLIENT,
-                    () -> () -> ClientForgeEvents.applyMaximumBlueVisual(msg)
+                    () -> () -> MaximumBlueReferenceClient.accept(
+                            msg.ownerId(), msg.active(), msg.x(), msg.y(), msg.z(), msg.radius(), msg.phase()
+                    )
             ));
             context.setPacketHandled(true);
         }
     }
 
+
+    private record MaxBlueDebrisBatchPacket(
+            UUID ownerId,
+            double targetX,
+            double targetY,
+            double targetZ,
+            List<Long> packedPositions,
+            List<Integer> stateIds
+    ) {
+        static void encode(MaxBlueDebrisBatchPacket msg, FriendlyByteBuf buf) {
+            buf.writeUUID(msg.ownerId);
+            buf.writeDouble(msg.targetX);
+            buf.writeDouble(msg.targetY);
+            buf.writeDouble(msg.targetZ);
+            int count = Math.min(msg.packedPositions.size(), msg.stateIds.size());
+            buf.writeVarInt(count);
+            for (int i = 0; i < count; i++) {
+                buf.writeLong(msg.packedPositions.get(i));
+                buf.writeVarInt(msg.stateIds.get(i));
+            }
+        }
+
+        static MaxBlueDebrisBatchPacket decode(FriendlyByteBuf buf) {
+            UUID ownerId = buf.readUUID();
+            double x = buf.readDouble();
+            double y = buf.readDouble();
+            double z = buf.readDouble();
+            int count = Mth.clamp(buf.readVarInt(), 0, 1024);
+            List<Long> positions = new ArrayList<>(count);
+            List<Integer> states = new ArrayList<>(count);
+            for (int i = 0; i < count; i++) {
+                positions.add(buf.readLong());
+                states.add(buf.readVarInt());
+            }
+            return new MaxBlueDebrisBatchPacket(ownerId, x, y, z, positions, states);
+        }
+
+        static void handle(MaxBlueDebrisBatchPacket msg, Supplier<NetworkEvent.Context> contextSupplier) {
+            NetworkEvent.Context context = contextSupplier.get();
+            context.enqueueWork(() -> DistExecutor.unsafeRunWhenOn(
+                    Dist.CLIENT,
+                    () -> () -> MaximumBlueReferenceClient.acceptDebrisBatch(
+                            msg.ownerId(), msg.targetX(), msg.targetY(), msg.targetZ(),
+                            msg.packedPositions(), msg.stateIds()
+                    )
+            ));
+            context.setPacketHandled(true);
+        }
+    }
 
     private record JumpControlPacket(int tier) {
         static void encode(JumpControlPacket msg, FriendlyByteBuf buf) {
