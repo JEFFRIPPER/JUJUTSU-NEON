@@ -24,7 +24,9 @@ This file is a hard contract. A movement change is invalid if any invariant belo
 - Walking off a ledge may not cause a horizontal stop-frame.
 - Charged jump preserves horizontal momentum.
 - Airborne WASD control preserves vertical velocity.
-- Ascending 1–2 block obstacles may use the existing swept step-up solver.
+- GROUND movement sets velocity at ClientTick START and lets vanilla physics move the player. No post-tick forced `move()` for GROUND: it desyncs body yaw (sideways running), causes jitter and micro-freezes.
+- Ascending 1–2 block obstacles on GROUND uses vanilla step-up with `setMaxUpStep(2.0)` while GROUND owns motion; the previous step height is restored when it releases ownership.
+- A wall of 3+ blocks never freezes movement: the remaining motion slides along the wall (vanilla collision), including in the swept step-up solver used by DASH / WATER_RUN.
 - Descending terrain must follow the ground smoothly instead of snapping/rubber-banding.
 - Client collision may never enter a block that still exists authoritatively on the server.
 
@@ -39,6 +41,8 @@ This file is a hard contract. A movement change is invalid if any invariant belo
 - Air Dash does not exist.
 - A dash may start only with ground support.
 - Q starts a dash only when BOTH hands are empty.
+- Hands are checked at ClientTick START, before vanilla Drop Item runs; checking after the drop sees an empty hand and dashes together with the drop.
+- Holding Q to drop a stack never turns into a dash when the stack runs out; a dash needs a fresh press with empty hands.
 - Any item in either hand + Q remains Minecraft item-drop behavior; no client prediction and no dash packet.
 - W+Q / neutral+Q = steerable Front Dash.
 - S+Q = steerable Back Dash opposite camera-forward.

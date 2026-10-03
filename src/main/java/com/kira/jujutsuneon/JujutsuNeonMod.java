@@ -5547,7 +5547,9 @@ public class JujutsuNeonMod {
                 }
 
                 if (!allowStepUp) {
-                    return movedAnything;
+                    if (!slideAlongWall(mc, slice)) return movedAnything;
+                    movedAnything = true;
+                    continue;
                 }
 
                 // Ищем МИНИМАЛЬНУЮ высоту, на которой следующий кусок пути свободен.
@@ -5574,13 +5576,25 @@ public class JujutsuNeonMod {
                 }
 
                 if (!climbed) {
-                    // Значит свободного прохода в пределах 2 блоков нет:
-                    // перед нами стена 3+ блока либо потолок.
-                    return movedAnything;
+                    // Свободного прохода в пределах 2 блоков нет: стена 3+ блока или потолок.
+                    // Раньше движение здесь полностью останавливалось, и у высокой стены
+                    // W+A / W+D не давали сдвинуться. Теперь скользим вдоль стены, как в ванилле.
+                    if (!slideAlongWall(mc, slice)) return movedAnything;
+                    movedAnything = true;
                 }
             }
 
             return movedAnything;
+        }
+
+        /** Ванильное скольжение: move() сам срезает компоненту, упирающуюся в стену. */
+        private static boolean slideAlongWall(Minecraft mc, Vec3 slice) {
+            Vec3 before = mc.player.position();
+            mc.player.move(MoverType.SELF, slice);
+            Vec3 after = mc.player.position();
+            double movedX = after.x - before.x;
+            double movedZ = after.z - before.z;
+            return movedX * movedX + movedZ * movedZ >= 1.0E-6;
         }
 
         private static void startClientDash(Minecraft mc, MovementAction requestedAction) {
@@ -5785,7 +5799,8 @@ public class JujutsuNeonMod {
                 case GROUND -> {
                     mc.player.setSwimming(false);
                     if (moving) {
-                        tryClientForcedMove(mc, dir.scale(speed), true);
+                        // Скорость уже задана в начале тика (applyGroundRunVelocity),
+                        // игрока двигает обычная физика Minecraft.
                         smoothGroundDescent(mc);
                     } else {
                         Vec3 v = mc.player.getDeltaMovement();
@@ -5801,6 +5816,53 @@ public class JujutsuNeonMod {
                     }
                     updateCustomLocomotionAnimation(mc, moving, superRun);
                 }
+            }
+        }
+
+        private static boolean runStepBoosted = false;
+        private static float savedStepHeight = 0.6F;
+
+        /**
+         * Бег по земле: в НАЧАЛЕ тика задаём скорость, а двигает игрока ванильная физика.
+         *
+         * Раньше GROUND двигал игрока принудительным move() уже ПОСЛЕ тика игрока.
+         * Minecraft не видел этого движения, поэтому:
+         *  - тело не поворачивалось по направлению бега (бежал «боком», до 75° от головы);
+         *  - тело и камера дёргались от остаточной скорости, были микрофризы;
+         *  - каждый уступ в 1/16 блока перепрыгивался подъёмом на 0.125 блока.
+         * Теперь ванильная физика сама поворачивает тело, скользит вдоль стен и
+         * поднимается на уступы (высота шага временно 2 блока, как и раньше).
+         */
+        private static void applyGroundRunVelocity(Minecraft mc) {
+            if (mc.player == null) {
+                runStepBoosted = false;
+                return;
+            }
+
+            boolean superRun = ClientModEvents.SUPER_SPEED_KEY.isDown();
+            boolean ground = hudBlindfold
+                    && mc.level != null
+                    && mc.screen == null
+                    && resolveMovementState(mc, superRun) == ClientMovementState.GROUND;
+
+            if (ground) {
+                if (!runStepBoosted) {
+                    savedStepHeight = mc.player.maxUpStep();
+                    runStepBoosted = true;
+                }
+                mc.player.setMaxUpStep(2.0F);
+
+                Vec3 dir = clientHorizontalDirection(mc);
+                Vec3 v = mc.player.getDeltaMovement();
+                if (dir.lengthSqr() >= 1.0E-6) {
+                    double speed = superRun ? CUSTOM_RUN_BLOCKS_PER_TICK : CUSTOM_WALK_BLOCKS_PER_TICK;
+                    mc.player.setDeltaMovement(dir.x * speed, v.y, dir.z * speed);
+                } else {
+                    mc.player.setDeltaMovement(0.0, v.y, 0.0);
+                }
+            } else if (runStepBoosted) {
+                mc.player.setMaxUpStep(savedStepHeight);
+                runStepBoosted = false;
             }
         }
 
@@ -5867,6 +5929,7 @@ public class JujutsuNeonMod {
                     // Подавляем ванильный прыжок: с повязкой прыжками управляет наша зарядка.
                     mc.player.input.jumping = false;
                 }
+                applyGroundRunVelocity(mc);
                 return;
             }
 

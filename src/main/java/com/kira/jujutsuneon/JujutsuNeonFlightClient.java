@@ -50,7 +50,8 @@ public final class JujutsuNeonFlightClient {
     private static final float NORMAL_FLY_SPEED = 0.05F;
     private static final float BOOST_FLY_SPEED = 0.10F;
     private static final double NORMAL_VECTOR_SPEED = 0.42;
-    private static final double BOOST_VECTOR_SPEED = 0.82;
+    // Ускоренный полёт (Ctrl): примерно в 3,5 раза быстрее прежнего (было 0.82).
+    private static final double BOOST_VECTOR_SPEED = 2.9;
 
     private static boolean armedFromChargedJump = false;
     private static int armedTicks = 0;

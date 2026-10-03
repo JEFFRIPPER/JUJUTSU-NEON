@@ -1,5 +1,6 @@
 package com.kira.jujutsuneon;
 
+import net.minecraft.client.KeyMapping;
 import net.minecraft.client.Minecraft;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.particles.ParticleTypes;
@@ -46,6 +47,9 @@ public final class JujutsuNeonMovementPatchClient {
     private static JujutsuNeonMovementPatch.DashKind activePatchedDash = null;
     private static long lastDashStartTick = -1000L;
     private static long lastSuperRunClearRequestTick = -1000L;
+    private static int pendingDashPresses = 0;
+    private static boolean dashKeyHeldLastTick = false;
+    private static boolean dashHoldStartedWithItem = false;
 
     static {
         try {
@@ -334,6 +338,33 @@ public final class JujutsuNeonMovementPatchClient {
         }
     }
 
+    /**
+     * Q решаем в НАЧАЛЕ тика, до того как Minecraft обработает ванильный выброс предмета.
+     * Раньше проверка рук шла в конце тика: предмет уже был выброшен, рука пустела,
+     * и вместе с выбросом срабатывал рывок.
+     */
+    @SubscribeEvent(priority = EventPriority.HIGHEST)
+    public static void onClientTickStart(TickEvent.ClientTickEvent event) {
+        if (event.phase != TickEvent.Phase.START) return;
+
+        Minecraft mc = Minecraft.getInstance();
+        KeyMapping dashKey = JujutsuNeonMod.ClientModEvents.DASH_KEY;
+        boolean held = dashKey.isDown();
+        int clicks = 0;
+        while (dashKey.consumeClick()) clicks++;
+
+        if (mc.player == null || mc.level == null) {
+            pendingDashPresses = 0;
+        } else {
+            boolean empty = handsEmpty(mc);
+            // Новое нажатие: запоминаем, было ли что-то в руках. Если Q зажат и выбрасывает
+            // стопку по одному, рывка не будет и после того, как стопка закончится.
+            if (clicks > 0 && !dashKeyHeldLastTick) dashHoldStartedWithItem = !empty;
+            if (clicks > 0 && empty && !dashHoldStartedWithItem) pendingDashPresses += clicks;
+        }
+        dashKeyHeldLastTick = held;
+    }
+
     @SubscribeEvent(priority = EventPriority.HIGHEST)
     public static void onClientTickHigh(TickEvent.ClientTickEvent event) {
         if (event.phase != TickEvent.Phase.END) return;
@@ -342,15 +373,17 @@ public final class JujutsuNeonMovementPatchClient {
         if (mc.player == null || mc.level == null) return;
 
         if (!hasBlindfold(mc) || mc.screen != null || mc.player.getAbilities().flying) {
+            pendingDashPresses = 0;
             desiredDashDirection = Vec3.ZERO;
             activePatchedDash = null;
             return;
         }
 
-        // This is the ONLY Q consumer for custom dash. If an item is held, the
-        // custom mapping is consumed without starting prediction; vanilla Drop Item
-        // remains free to perform its normal Q action.
-        while (JujutsuNeonMod.ClientModEvents.DASH_KEY.consumeClick()) {
+        // Нажатия Q собраны в onClientTickStart (до ванильного выброса предмета).
+        // С предметом в руках они туда не попадают: Q остаётся обычным выбросом.
+        int presses = pendingDashPresses;
+        pendingDashPresses = 0;
+        for (int press = 0; press < presses; press++) {
             if (!handsEmpty(mc)) continue;
             if (techniqueLocksMovement()) continue;
             if (legacyDashMode() != 0) continue;

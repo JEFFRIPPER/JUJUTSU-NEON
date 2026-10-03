@@ -364,32 +364,34 @@ public final class HollowPurpleReferenceClient {
     Vec3 right = rightFor(direction);
     Vec3 up = right.cross(direction).normalize();
 
-    Vec3 backCenter = eye.subtract(direction.scale(1.30)).add(0.0, -0.18, 0.0);
-    Vec3 blueStart = backCenter.add(right.scale(-2.10));
-    Vec3 redStart = backCenter.add(right.scale(2.10));
-    Vec3 fusionPoint = eye.subtract(direction.scale(1.65)).add(0.0, -0.12, 0.0);
+    // Red и Blue — по бокам от игрока на уровне груди, чуть впереди (как в референсе).
+    Vec3 sideCenter = eye.add(direction.scale(0.70)).add(0.0, -0.45, 0.0);
+    Vec3 blueStart = sideCenter.add(right.scale(-0.95));
+    Vec3 redStart = sideCenter.add(right.scale(0.95));
     Vec3 purplePoint = eye.add(direction.scale(2.35)).add(0.0, -0.12, 0.0);
+    // Сливаются перед игроком — там же, где рождается Hollow Purple.
+    Vec3 fusionPoint = purplePoint;
 
     float p = Mth.clamp(progress, 0.0f, 1.0f);
 
-    // Red/Blue materialize behind the caster.
+    // Red/Blue materialize at the caster's sides.
     if (p < 0.32f) {
         float grow = (float) smooth(p / 0.32f);
-        float radius = 0.16f + grow * 1.10f;
+        float radius = 0.08f + grow * 0.40f; // было 0.16 + grow * 1.10
         renderLimitlessModel(pose, camera, redStart, direction, radius, alpha, time, false);
         renderLimitlessModel(pose, camera, blueStart, direction, radius, alpha, time, true);
         renderEnergyBridge(pose, camera, redStart, blueStart, alpha * grow * 0.28f, time, 11.0);
         return;
     }
 
-    // Red/Blue converge and disappear ONLY behind the caster.
+    // Red/Blue converge in front of the caster and disappear into Purple.
     if (p < 0.58f) {
         float merge = (float) smooth((p - 0.32f) / 0.26f);
         Vec3 red = redStart.lerp(fusionPoint, merge);
         Vec3 blue = blueStart.lerp(fusionPoint, merge);
         float vanish = (float) smooth((merge - 0.70f) / 0.30f);
         float poleAlpha = alpha * (1.0f - vanish);
-        float radius = 1.26f - merge * 0.82f;
+        float radius = 0.48f - merge * 0.30f; // было 1.26 - merge * 0.82
 
         if (poleAlpha > 0.01f) {
             renderLimitlessModel(pose, camera, red, direction, radius, poleAlpha, time, false);
