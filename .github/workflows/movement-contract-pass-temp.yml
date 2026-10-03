@@ -1,0 +1,253 @@
+name: Temporary Strict Movement Contract Pass
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  compile:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.1.1'
+
+      - name: Write movement contract and apply locomotion pass
+        run: |
+          cat > MOVEMENT_CONTRACT.md <<'EOF'
+          # JUJUTSU NEON — Movement Contract
+
+          This file is a hard contract for movement code. A movement change is invalid if it violates any implemented invariant below.
+
+          ## Coordinate invariants
+          - Camera-forward is the horizontal look vector.
+          - Camera-right is **(-forward.z, 0, forward.x)**.
+          - W = +forward.
+          - S = -forward.
+          - A = -right.
+          - D = +right.
+          - No downstream patch is allowed to flip A/D a second time.
+
+          ## Locomotion invariants
+          - With the Gojo blindfold equipped, Jujutsu Neon owns movement physics.
+          - Vanilla locomotion animation remains visible; the player must never look like a rigid sliding doll during ordinary walking/running.
+          - Ground movement and airborne horizontal control must be continuous. Walking off a ledge or jumping must not cause a horizontal stop-frame.
+          - Custom locomotion must preserve vertical velocity while applying airborne horizontal control.
+          - Only one movement state may own horizontal motion at a time.
+
+          ## Dash invariants
+          - Q may start a dash only when BOTH hands are empty.
+          - W+Q / neutral+Q = steerable Front Dash.
+          - S+Q = steerable Back Dash in the direction opposite the camera.
+          - A+Q = left Side Dash.
+          - D+Q = right Side Dash.
+          - Front Dash visual pose is a protected reference and must not be degraded by unrelated movement work.
+          - Back Dash uses its own full-body animation and the same longitudinal timing family as Front Dash.
+          - Server hit direction must follow the same steering direction as the client.
+
+          ## Animation lifecycle invariant
+          - When an animation timer reaches zero, its active state must become NONE immediately.
+          - A completed dash/skill may not leave its final body pose stuck on ordinary locomotion.
+
+          ## Known target invariants for subsequent passes
+          - Air Dash is to be removed entirely.
+          - Water without Ctrl must use normal swimming; Ctrl may own surface-running only.
+          - Flight direction must follow the camera/look vector rather than Space/Shift axes.
+          - Trees/collision and downhill descent must never cause rubber-band teleporting.
+          EOF
+
+          python3 - <<'PY'
+          from pathlib import Path
+
+          def replace_once(text, old, new, label):
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'{label}: expected exactly 1 match, found {count}')
+              return text.replace(old, new, 1)
+
+          # ------------------------------------------------------------
+          # Main controller: authoritative input semantics + locomotion.
+          # ------------------------------------------------------------
+          p = Path('src/main/java/com/kira/jujutsuneon/JujutsuNeonMod.java')
+          s = p.read_text(encoding='utf-8')
+
+          s = replace_once(s,
+          '''    private enum MovementAction {\n        FRONT_DASH,\n        LEFT_DASH,\n        RIGHT_DASH,\n        SPEED_ON,\n        SPEED_OFF\n    }''',
+          '''    private enum MovementAction {\n        FRONT_DASH,\n        BACK_DASH,\n        LEFT_DASH,\n        RIGHT_DASH,\n        SPEED_ON,\n        SPEED_OFF\n    }''', 'MovementAction BACK')
+
+          s = replace_once(s,
+          '''        switch (action) {\n            case FRONT_DASH -> startDash(player, 0);\n            case LEFT_DASH -> startDash(player, -1);''',
+          '''        switch (action) {\n            case FRONT_DASH -> startDash(player, 0);\n            case BACK_DASH -> startDash(player, 2);\n            case LEFT_DASH -> startDash(player, -1);''', 'server BACK dispatch')
+
+          s = replace_once(s,
+          '''        if (!consumeEnergy(player, side == 0 ? 3.0 : 4.0)) return;''',
+          '''        boolean longitudinalDash = side == 0 || side == 2;\n        if (!consumeEnergy(player, longitudinalDash ? 3.0 : 4.0)) return;''', 'dash energy family')
+
+          s = replace_once(s,
+          '''        if (side == 0) {\n            // Front Dash полностью следует камере, в том числе вверх/вниз.\n            dir = look;\n            player.getPersistentData().putInt("jn_dash_mode", DASH_FRONT);\n        } else {\n            Vec3 horizontal = new Vec3(look.x, 0.0, look.z);\n            if (horizontal.lengthSqr() < 1.0E-4) {\n                double yaw = Math.toRadians(player.getYRot());\n                horizontal = new Vec3(-Math.sin(yaw), 0.0, Math.cos(yaw));\n            }\n            horizontal = horizontal.normalize();\n            Vec3 right = new Vec3(-horizontal.z, 0.0, horizontal.x);\n            dir = side < 0 ? right.scale(-1.0) : right;\n            player.getPersistentData().putInt("jn_dash_mode", DASH_SIDE);\n        }''',
+          '''        Vec3 horizontal = new Vec3(look.x, 0.0, look.z);\n        if (horizontal.lengthSqr() < 1.0E-4) {\n            double yaw = Math.toRadians(player.getYRot());\n            horizontal = new Vec3(-Math.sin(yaw), 0.0, Math.cos(yaw));\n        }\n        horizontal = horizontal.normalize();\n\n        if (side == 0 || side == 2) {\n            // Longitudinal dash is horizontal and camera-relative. side=2 is reverse.\n            dir = side == 2 ? horizontal.scale(-1.0) : horizontal;\n            player.getPersistentData().putInt("jn_dash_mode", DASH_FRONT);\n        } else {\n            Vec3 right = new Vec3(-horizontal.z, 0.0, horizontal.x);\n            dir = side < 0 ? right.scale(-1.0) : right;\n            player.getPersistentData().putInt("jn_dash_mode", DASH_SIDE);\n        }''', 'server dash direction')
+
+          s = replace_once(s,
+          '''        playSfx(level, player, SFX_DASH, 1.0f, side == 0 ? 0.92f : 1.18f);''',
+          '''        playSfx(level, player, SFX_DASH, 1.0f, longitudinalDash ? 0.92f : 1.18f);''', 'dash sound family')
+
+          # The direct-key coordinate contract: right = (-forward.z, 0, forward.x).
+          old_axis = '''            Vec3 right = new Vec3(forward.z, 0.0, -forward.x);\n\n            Vec3 result = forward.scale(forwardInput).add(right.scale(strafeInput));'''
+          if s.count(old_axis) != 1:
+              raise SystemExit(f'client axis: expected exactly 1 direct-key axis, found {s.count(old_axis)}')
+          s = s.replace(old_axis,
+          '''            Vec3 right = new Vec3(-forward.z, 0.0, forward.x);\n\n            Vec3 result = forward.scale(forwardInput).add(right.scale(strafeInput));''', 1)
+
+          s = replace_once(s,
+          '''            } else {\n                clientDashMode = DASH_FRONT;\n                clientDashDirection = look;\n            }\n\n            clientDashAge = 0;''',
+          '''            } else {\n                Vec3 horizontal = new Vec3(look.x, 0.0, look.z);\n                if (horizontal.lengthSqr() < 1.0E-4) {\n                    double yaw = Math.toRadians(mc.player.getYRot());\n                    horizontal = new Vec3(-Math.sin(yaw), 0.0, Math.cos(yaw));\n                }\n                horizontal = horizontal.normalize();\n                clientDashMode = DASH_FRONT;\n                clientDashDirection = requestedAction == MovementAction.BACK_DASH\n                        ? horizontal.scale(-1.0)\n                        : horizontal;\n            }\n\n            clientDashAge = 0;''', 'legacy client back direction')
+
+          old_tick = '''        private static void tickCustomGroundMovement(Minecraft mc) {\n            if (!hudBlindfold || mc.player == null || mc.level == null) return;\n            if (hudMaxBlueActive || hudPurpleCasting) return;\n            if (clientDashMode != DASH_NONE) return;\n\n            // В активном creative flight ванильный полёт остаётся полностью рабочим.\n            if (mc.player.getAbilities().flying) return;\n\n            Vec3 dir = clientHorizontalDirection(mc);\n            if (dir.lengthSqr() < 1.0E-6) return;\n\n            boolean superRun = ClientModEvents.SUPER_SPEED_KEY.isDown();\n            double speed = superRun\n                    ? CUSTOM_RUN_BLOCKS_PER_TICK\n                    : CUSTOM_WALK_BLOCKS_PER_TICK;\n\n            if (superRun && clientWaterSurfaceRun(mc, dir, speed)) return;\n\n            // Обычная ходьба/сверхбег используют тот же slope solver, что и dash.\n            // После подъёма на блок onGround может обновиться на тик позже, поэтому\n            // дополнительно проверяем опору прямо под ногами.\n            if (clientHasGroundSupport(mc, 0.34)) {\n                tryClientForcedMove(mc, dir.scale(speed), true);\n            }\n        }'''
+          new_tick = '''        private static void updateCustomLocomotionAnimation(\n                Minecraft mc,\n                boolean moving,\n                boolean superRun\n        ) {\n            if (mc.player == null) return;\n            float target = moving ? (superRun ? 1.0F : 0.68F) : 0.0F;\n            // Physics remain custom; only the vanilla limb-cycle is fed explicitly.\n            mc.player.walkAnimation.update(target, moving ? 0.55F : 0.35F);\n        }\n\n        private static void tickCustomGroundMovement(Minecraft mc) {\n            if (!hudBlindfold || mc.player == null || mc.level == null) return;\n            if (hudMaxBlueActive || hudPurpleCasting || clientDashMode != DASH_NONE) {\n                updateCustomLocomotionAnimation(mc, false, false);\n                return;\n            }\n\n            // Flight has a separate owner and is never mixed with ground/air locomotion.\n            if (mc.player.getAbilities().flying) return;\n\n            Vec3 dir = clientHorizontalDirection(mc);\n            boolean moving = dir.lengthSqr() >= 1.0E-6;\n            boolean superRun = ClientModEvents.SUPER_SPEED_KEY.isDown();\n            double speed = superRun\n                    ? CUSTOM_RUN_BLOCKS_PER_TICK\n                    : CUSTOM_WALK_BLOCKS_PER_TICK;\n\n            if (!moving) {\n                updateCustomLocomotionAnimation(mc, false, superRun);\n                return;\n            }\n\n            if (superRun && clientWaterSurfaceRun(mc, dir, speed)) {\n                updateCustomLocomotionAnimation(mc, true, true);\n                return;\n            }\n\n            if (clientHasGroundSupport(mc, 0.34)) {\n                // Ground: Jujutsu Neon swept solver owns position/collision.\n                tryClientForcedMove(mc, dir.scale(speed), true);\n            } else if (!mc.player.isInWaterOrBubble()) {\n                // Air: never kill horizontal control. Preserve the jump/fall Y velocity.\n                Vec3 velocity = mc.player.getDeltaMovement();\n                mc.player.setDeltaMovement(dir.x * speed, velocity.y, dir.z * speed);\n            }\n\n            updateCustomLocomotionAnimation(mc, true, superRun);\n        }'''
+          s = replace_once(s, old_tick, new_tick, 'locomotion controller')
+
+          s = replace_once(s,
+          '''            if (activeAnimTicks > 0) activeAnimTicks--;''',
+          '''            if (activeAnimTicks > 0) {\n                activeAnimTicks--;\n                if (activeAnimTicks <= 0) {\n                    activeAnim = "NONE";\n                    activeAnimLength = 1;\n                }\n            }''', 'animation timer reset')
+
+          old_q = '''            while (ClientModEvents.DASH_KEY.consumeClick()) {\n                boolean left = mc.options.keyLeft.isDown() && !mc.options.keyRight.isDown();\n                boolean right = mc.options.keyRight.isDown() && !mc.options.keyLeft.isDown();\n\n                MovementAction action;\n                if (left) action = MovementAction.LEFT_DASH;\n                else if (right) action = MovementAction.RIGHT_DASH;\n                else action = MovementAction.FRONT_DASH;\n\n                startClientDash(mc, action);\n                NETWORK.sendToServer(new MovementPacket(action));\n\n                if (clientDashMode == DASH_AIR) {\n                    startAnim("AIR_DASH", 5);\n                } else if (action == MovementAction.LEFT_DASH) {\n                    startAnim("SIDE_DASH_LEFT", 6);\n                } else if (action == MovementAction.RIGHT_DASH) {\n                    startAnim("SIDE_DASH_RIGHT", 6);\n                } else {\n                    startAnim("FRONT_DASH", 14);\n                }\n            }'''
+          new_q = '''            while (ClientModEvents.DASH_KEY.consumeClick()) {\n                // Hard input gate: Q is a dash only with BOTH hands empty.\n                if (!hudBlindfold ||\n                        !mc.player.getMainHandItem().isEmpty() ||\n                        !mc.player.getOffhandItem().isEmpty()) {\n                    continue;\n                }\n\n                boolean left = mc.options.keyLeft.isDown() && !mc.options.keyRight.isDown();\n                boolean right = mc.options.keyRight.isDown() && !mc.options.keyLeft.isDown();\n                boolean back = !left && !right &&\n                        mc.options.keyDown.isDown() && !mc.options.keyUp.isDown();\n\n                MovementAction action;\n                if (left) action = MovementAction.LEFT_DASH;\n                else if (right) action = MovementAction.RIGHT_DASH;\n                else if (back) action = MovementAction.BACK_DASH;\n                else action = MovementAction.FRONT_DASH;\n\n                startClientDash(mc, action);\n                NETWORK.sendToServer(new MovementPacket(action));\n\n                if (clientDashMode == DASH_AIR) {\n                    startAnim("AIR_DASH", 5);\n                } else if (action == MovementAction.LEFT_DASH) {\n                    startAnim("SIDE_DASH_LEFT", 6);\n                } else if (action == MovementAction.RIGHT_DASH) {\n                    startAnim("SIDE_DASH_RIGHT", 6);\n                } else if (action == MovementAction.BACK_DASH) {\n                    startAnim("BACK_DASH", 14);\n                } else {\n                    startAnim("FRONT_DASH", 14);\n                }\n            }'''
+          s = replace_once(s, old_q, new_q, 'legacy Q dispatch')
+
+          p.write_text(s, encoding='utf-8')
+
+          # ------------------------------------------------------------
+          # Compatibility server patch: one coordinate basis, BACK kind.
+          # ------------------------------------------------------------
+          p = Path('src/main/java/com/kira/jujutsuneon/JujutsuNeonMovementPatch.java')
+          s = p.read_text(encoding='utf-8')
+          s = replace_once(s,
+          '''    public enum DashKind {\n        FRONT,\n        LEFT,\n        RIGHT,\n        AIR\n    }''',
+          '''    public enum DashKind {\n        FRONT,\n        BACK,\n        LEFT,\n        RIGHT,\n        AIR\n    }''', 'patch DashKind BACK')
+          s = replace_once(s,
+          '''    /** Swaps the old A/D mapping because the previous build was reversed in-game. */\n    private static Vec3 correctedDirection(ServerPlayer player, DashKind kind) {\n        Vec3 forward = horizontalForward(player);\n        Vec3 oldRightAxis = new Vec3(-forward.z, 0.0, forward.x).normalize();\n        return switch (kind) {\n            case LEFT -> oldRightAxis;\n            case RIGHT -> oldRightAxis.scale(-1.0);\n            case FRONT, AIR -> forward;\n        };\n    }''',
+          '''    /** Single coordinate contract: A=-right, D=+right, S=-forward. */\n    private static Vec3 correctedDirection(ServerPlayer player, DashKind kind) {\n        Vec3 forward = horizontalForward(player);\n        Vec3 rightAxis = new Vec3(-forward.z, 0.0, forward.x).normalize();\n        return switch (kind) {\n            case LEFT -> rightAxis.scale(-1.0);\n            case RIGHT -> rightAxis;\n            case BACK -> forward.scale(-1.0);\n            case FRONT, AIR -> forward;\n        };\n    }''', 'patch axis contract')
+          s = replace_once(s,
+          '''        int side = switch (kind) {\n            case LEFT -> -1;\n            case RIGHT -> 1;\n            case FRONT, AIR -> 0;\n        };''',
+          '''        int side = switch (kind) {\n            case LEFT -> -1;\n            case RIGHT -> 1;\n            case BACK -> 2;\n            case FRONT, AIR -> 0;\n        };''', 'patch BACK side')
+          p.write_text(s, encoding='utf-8')
+
+          # ------------------------------------------------------------
+          # Compatibility client patch: same basis + reverse steering.
+          # ------------------------------------------------------------
+          p = Path('src/main/java/com/kira/jujutsuneon/JujutsuNeonMovementPatchClient.java')
+          s = p.read_text(encoding='utf-8')
+          s = replace_once(s,
+          '''    private static Vec3 correctedDashDirection(Minecraft mc, JujutsuNeonMovementPatch.DashKind kind) {\n        Vec3 forward = horizontalForward(mc);\n        Vec3 oldRightAxis = new Vec3(-forward.z, 0.0, forward.x).normalize();\n\n        return switch (kind) {\n            // Intentionally opposite to the previous build: A/D were reversed in-game.\n            case LEFT -> oldRightAxis;\n            case RIGHT -> oldRightAxis.scale(-1.0);\n            case FRONT, AIR -> forward;\n        };\n    }''',
+          '''    private static Vec3 correctedDashDirection(Minecraft mc, JujutsuNeonMovementPatch.DashKind kind) {\n        Vec3 forward = horizontalForward(mc);\n        Vec3 rightAxis = new Vec3(-forward.z, 0.0, forward.x).normalize();\n\n        return switch (kind) {\n            case LEFT -> rightAxis.scale(-1.0);\n            case RIGHT -> rightAxis;\n            case BACK -> forward.scale(-1.0);\n            case FRONT, AIR -> forward;\n        };\n    }''', 'client patch axis contract')
+
+          s = replace_once(s,
+          '''            case AIR -> {\n                animation = "AIR_DASH";\n                ticks = 5;\n            }\n            case LEFT -> {''',
+          '''            case AIR -> {\n                animation = "AIR_DASH";\n                ticks = 5;\n            }\n            case BACK -> {\n                animation = "BACK_DASH";\n                ticks = 14;\n            }\n            case LEFT -> {''', 'client patch BACK animation')
+
+          s = replace_once(s,
+          '''        String legacyAction = switch (kind) {\n            case LEFT -> "LEFT_DASH";\n            case RIGHT -> "RIGHT_DASH";\n            case FRONT, AIR -> "FRONT_DASH";\n        };''',
+          '''        String legacyAction = switch (kind) {\n            case LEFT -> "LEFT_DASH";\n            case RIGHT -> "RIGHT_DASH";\n            case BACK -> "BACK_DASH";\n            case FRONT, AIR -> "FRONT_DASH";\n        };''', 'client patch BACK legacy action')
+
+          old_steer = '''        // Reference front dash is fully camera-steered.  A generous turn rate keeps\n        // it responsive while avoiding an instantaneous 180-degree snap in one frame.\n        if (mode == 1 && activePatchedDash == JujutsuNeonMovementPatch.DashKind.FRONT) {\n            desiredDashDirection = steerTowards(\n                    desiredDashDirection,\n                    horizontalForward(mc),\n                    Math.toRadians(34.0)\n            );\n        }\n\n        Vec3 actual = wallSlideDirection(mc, desiredDashDirection, mode);\n        setLegacyDashDirection(actual);\n\n        if (mode == 1 && activePatchedDash == JujutsuNeonMovementPatch.DashKind.FRONT) {\n            JujutsuNeonMovementPatch.sendFrontSteer(actual);\n        }'''
+          new_steer = '''        // Longitudinal dashes are camera-steered. BACK tracks the exact opposite look vector.\n        boolean longitudinal = mode == 1 &&\n                (activePatchedDash == JujutsuNeonMovementPatch.DashKind.FRONT ||\n                 activePatchedDash == JujutsuNeonMovementPatch.DashKind.BACK);\n        if (longitudinal) {\n            Vec3 target = horizontalForward(mc);\n            if (activePatchedDash == JujutsuNeonMovementPatch.DashKind.BACK) {\n                target = target.scale(-1.0);\n            }\n            desiredDashDirection = steerTowards(\n                    desiredDashDirection,\n                    target,\n                    Math.toRadians(34.0)\n            );\n        }\n\n        Vec3 actual = wallSlideDirection(mc, desiredDashDirection, mode);\n        setLegacyDashDirection(actual);\n\n        if (longitudinal) {\n            JujutsuNeonMovementPatch.sendFrontSteer(actual);\n        }'''
+          s = replace_once(s, old_steer, new_steer, 'reverse steering')
+
+          # Fix direct key basis in patch client too.
+          axis_old = '''        Vec3 right = new Vec3(forward.z, 0.0, -forward.x);\n        Vec3 result = forward.scale(forwardInput).add(right.scale(strafeInput));'''
+          s = replace_once(s, axis_old,
+          '''        Vec3 right = new Vec3(-forward.z, 0.0, forward.x);\n        Vec3 result = forward.scale(forwardInput).add(right.scale(strafeInput));''', 'patch direct-key axis')
+
+          old_select = '''                if (left) kind = JujutsuNeonMovementPatch.DashKind.LEFT;\n                else if (right) kind = JujutsuNeonMovementPatch.DashKind.RIGHT;\n                else kind = JujutsuNeonMovementPatch.DashKind.FRONT;'''
+          new_select = '''                boolean back = !left && !right &&\n                        mc.options.keyDown.isDown() && !mc.options.keyUp.isDown();\n\n                if (left) kind = JujutsuNeonMovementPatch.DashKind.LEFT;\n                else if (right) kind = JujutsuNeonMovementPatch.DashKind.RIGHT;\n                else if (back) kind = JujutsuNeonMovementPatch.DashKind.BACK;\n                else kind = JujutsuNeonMovementPatch.DashKind.FRONT;'''
+          s = replace_once(s, old_select, new_select, 'patch Q BACK selection')
+          p.write_text(s, encoding='utf-8')
+
+          # ------------------------------------------------------------
+          # Full-body animation: dedicated reverse dash + hard timer gate.
+          # ------------------------------------------------------------
+          p = Path('src/main/java/com/kira/jujutsuneon/JujutsuNeonSkillAnimationClient.java')
+          s = p.read_text(encoding='utf-8')
+          s = replace_once(s,
+          '''        PURPLE,\n        FRONT_DASH,\n        SIDE_DASH_LEFT,''',
+          '''        PURPLE,\n        FRONT_DASH,\n        BACK_DASH,\n        SIDE_DASH_LEFT,''', 'skill BACK enum')
+          s = replace_once(s,
+          '''            int length = Math.max(1, ACTIVE_ANIM_LENGTH.getInt(null));\n            float progress = clamp01(1.0f - ticks / (float) length);''',
+          '''            int length = Math.max(1, ACTIVE_ANIM_LENGTH.getInt(null));\n            if (ticks <= 0 || "NONE".equals(active)) return SkillFrame.NONE;\n            float progress = clamp01(1.0f - ticks / (float) length);''', 'skill hard timer gate')
+          s = replace_once(s,
+          '''                case "FRONT_DASH" -> new SkillFrame(Skill.FRONT_DASH, progress);\n                case "SIDE_DASH_LEFT"''',
+          '''                case "FRONT_DASH" -> new SkillFrame(Skill.FRONT_DASH, progress);\n                case "BACK_DASH" -> new SkillFrame(Skill.BACK_DASH, progress);\n                case "SIDE_DASH_LEFT"''', 'skill BACK frame')
+          s = replace_once(s,
+          '''                case FRONT_DASH -> applyFrontDash(localFrame.progress);\n                case SIDE_DASH_LEFT''',
+          '''                case FRONT_DASH -> applyFrontDash(localFrame.progress);\n                case BACK_DASH -> applyBackDash(localFrame.progress);\n                case SIDE_DASH_LEFT''', 'skill BACK dispatch')
+
+          marker = '''        /**\n         * Mirrored side-dash pose from the reference.  side=-1 is left, +1 is right.\n'''
+          back_method = '''        /** Reverse longitudinal dash: opposite momentum, dedicated silhouette. */\n        private void applyBackDash(float progress) {\n            float enter = smooth(clamp01(progress / 0.12f));\n            float exit = 1.0f - smooth(clamp01((progress - 0.75f) / 0.25f));\n            float w = Math.min(enter, exit);\n            if (w <= 0.001f) return;\n\n            rotate(body,\n                    lerp(body.xRot, rad(-32.0f), w),\n                    lerp(body.yRot, rad(2.0f), w),\n                    lerp(body.zRot, rad(0.0f), w));\n            head.xRot = lerp(head.xRot, head.xRot + rad(16.0f), w);\n            head.zRot = lerp(head.zRot, rad(0.0f), w);\n\n            rotate(rightArm,\n                    lerp(rightArm.xRot, rad(-46.0f), w),\n                    lerp(rightArm.yRot, rad(-11.0f), w),\n                    lerp(rightArm.zRot, rad(10.0f), w));\n            rotate(leftArm,\n                    lerp(leftArm.xRot, rad(-34.0f), w),\n                    lerp(leftArm.yRot, rad(13.0f), w),\n                    lerp(leftArm.zRot, rad(-12.0f), w));\n\n            rotate(rightLeg,\n                    lerp(rightLeg.xRot, rad(-34.0f), w),\n                    lerp(rightLeg.yRot, rad(-5.0f), w),\n                    lerp(rightLeg.zRot, rad(4.0f), w));\n            rotate(leftLeg,\n                    lerp(leftLeg.xRot, rad(24.0f), w),\n                    lerp(leftLeg.yRot, rad(7.0f), w),\n                    lerp(leftLeg.zRot, rad(-4.0f), w));\n        }\n\n'''
+          if s.count(marker) != 1:
+              raise SystemExit(f'BACK animation insertion marker: found {s.count(marker)}')
+          s = s.replace(marker, back_method + marker, 1)
+          p.write_text(s, encoding='utf-8')
+          PY
+
+      - name: Contract source assertions
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          main = Path('src/main/java/com/kira/jujutsuneon/JujutsuNeonMod.java').read_text()
+          patch = Path('src/main/java/com/kira/jujutsuneon/JujutsuNeonMovementPatch.java').read_text()
+          client = Path('src/main/java/com/kira/jujutsuneon/JujutsuNeonMovementPatchClient.java').read_text()
+          anim = Path('src/main/java/com/kira/jujutsuneon/JujutsuNeonSkillAnimationClient.java').read_text()
+
+          checks = {
+              'main physical right axis': 'Vec3 right = new Vec3(-forward.z, 0.0, forward.x);' in main,
+              'patch A = -right': 'case LEFT -> rightAxis.scale(-1.0);' in patch,
+              'patch D = +right': 'case RIGHT -> rightAxis;' in patch,
+              'back kind': 'BACK,' in patch,
+              'back movement action': 'BACK_DASH,' in main,
+              'back animation': 'applyBackDash' in anim and '"BACK_DASH"' in anim,
+              'hands-empty gate': '!mc.player.getMainHandItem().isEmpty()' in main and '!mc.player.getOffhandItem().isEmpty()' in main,
+              'air horizontal continuity': 'mc.player.setDeltaMovement(dir.x * speed, velocity.y, dir.z * speed);' in main,
+              'vanilla limb cycle feed': 'mc.player.walkAnimation.update' in main,
+              'animation timer reset': 'activeAnim = "NONE";' in main,
+          }
+          failed = [name for name, ok in checks.items() if not ok]
+          if failed:
+              raise SystemExit('Contract assertions failed: ' + ', '.join(failed))
+          print('Movement contract assertions: PASS')
+          PY
+          git diff --check
+
+      - name: Forge compile and reobf
+        run: gradle reobfJar --stacktrace --no-daemon
+
+      - name: LOC and diff
+        run: |
+          wc -l src/main/java/com/kira/jujutsuneon/*.java
+          git diff --stat
+          git diff --numstat
+
+      - name: Commit verified movement pass
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add MOVEMENT_CONTRACT.md \
+                  src/main/java/com/kira/jujutsuneon/JujutsuNeonMod.java \
+                  src/main/java/com/kira/jujutsuneon/JujutsuNeonMovementPatch.java \
+                  src/main/java/com/kira/jujutsuneon/JujutsuNeonMovementPatchClient.java \
+                  src/main/java/com/kira/jujutsuneon/JujutsuNeonSkillAnimationClient.java
+          git commit -m 'feat: enforce movement contract and add back dash [skip ci]'
+          git push
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MovementContract-Reobf
+          path: build/libs/*.jar
+          if-no-files-found: error
