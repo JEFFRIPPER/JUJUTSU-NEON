@@ -1,6 +1,5 @@
 package com.kira.jujutsuneon;
 
-import net.minecraft.core.BlockPos;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
@@ -15,6 +14,7 @@ import net.minecraft.world.phys.Vec3;
 import net.minecraftforge.event.entity.EntityJoinLevelEvent;
 import net.minecraftforge.event.entity.living.LivingAttackEvent;
 import net.minecraftforge.event.entity.living.LivingKnockBackEvent;
+import net.minecraftforge.event.level.ExplosionEvent;
 import net.minecraftforge.eventbus.api.EventPriority;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.common.Mod;
@@ -27,10 +27,7 @@ import java.util.function.Supplier;
 
 /**
  * Compatibility/fix layer for the movement build that shipped in JujutsuNeon-TEST.jar.
- *
- * The large original JujutsuNeonMod class remains untouched. This layer only corrects
- * movement input/direction and Red safety/no-drop behavior, while reusing the original
- * dash energy, cooldown, hit and VFX code on the server.
+ * It keeps the original ability implementation and patches only movement and Red safety.
  */
 @Mod.EventBusSubscriber(
         modid = JujutsuNeonMod.MODID,
@@ -39,7 +36,6 @@ import java.util.function.Supplier;
 public final class JujutsuNeonMovementPatch {
 
     private static final String PATCH_PROTOCOL = "1";
-
     private static final SimpleChannel PATCH_NETWORK = NetworkRegistry.newSimpleChannel(
             new ResourceLocation(JujutsuNeonMod.MODID, "movement_fix"),
             () -> PATCH_PROTOCOL,
@@ -57,8 +53,7 @@ public final class JujutsuNeonMovementPatch {
         );
     }
 
-    private JujutsuNeonMovementPatch() {
-    }
+    private JujutsuNeonMovementPatch() {}
 
     public enum DashKind {
         FRONT,
@@ -100,15 +95,10 @@ public final class JujutsuNeonMovementPatch {
 
     private static boolean hasGroundSupport(ServerPlayer player, double distance) {
         if (player.onGround()) return true;
-
         Vec3 start = player.position().add(0.0, 0.08, 0.0);
         Vec3 end = start.add(0.0, -Math.max(0.10, distance), 0.0);
         BlockHitResult hit = player.level().clip(new ClipContext(
-                start,
-                end,
-                ClipContext.Block.COLLIDER,
-                ClipContext.Fluid.NONE,
-                player
+                start, end, ClipContext.Block.COLLIDER, ClipContext.Fluid.NONE, player
         ));
         return hit.getType() != HitResult.Type.MISS;
     }
@@ -117,13 +107,8 @@ public final class JujutsuNeonMovementPatch {
         Vec3 start = player.position().add(0.0, 0.05, 0.0);
         Vec3 end = start.add(0.0, -4.15, 0.0);
         BlockHitResult hit = player.level().clip(new ClipContext(
-                start,
-                end,
-                ClipContext.Block.COLLIDER,
-                ClipContext.Fluid.NONE,
-                player
+                start, end, ClipContext.Block.COLLIDER, ClipContext.Fluid.NONE, player
         ));
-
         if (hit.getType() == HitResult.Type.MISS) return true;
         return start.y - hit.getLocation().y >= 4.0 - 1.0E-3;
     }
@@ -138,15 +123,10 @@ public final class JujutsuNeonMovementPatch {
         return horizontal.normalize();
     }
 
-    /**
-     * Empirical left/right correction for the current build.
-     * The previous build produced the opposite side in-game, so this intentionally
-     * swaps the previous mapping instead of reusing its side sign.
-     */
+    /** Swaps the old A/D mapping because the previous build was reversed in-game. */
     private static Vec3 correctedDirection(ServerPlayer player, DashKind kind) {
         Vec3 forward = horizontalForward(player);
         Vec3 oldRightAxis = new Vec3(-forward.z, 0.0, forward.x).normalize();
-
         return switch (kind) {
             case LEFT -> oldRightAxis;
             case RIGHT -> oldRightAxis.scale(-1.0);
@@ -166,17 +146,13 @@ public final class JujutsuNeonMovementPatch {
 
     private static void handlePatchedDash(ServerPlayer player, DashKind kind) {
         if (!player.isAlive() || player.isSpectator()) return;
-        if (!hasBlindfold(player)) return;
-        if (!handsEmpty(player)) return;
-        if (player.getAbilities().flying) return;
+        if (!hasBlindfold(player) || !handsEmpty(player) || player.getAbilities().flying) return;
 
         boolean grounded = hasGroundSupport(player, 0.36);
-
         if (kind == DashKind.AIR) {
             if (grounded || !atLeastFourBlocksAboveGround(player)) return;
-        } else {
-            // 0-3 blocks above ground are not an air-dash zone and cannot use a ground dash.
-            if (!grounded) return;
+        } else if (!grounded) {
+            return;
         }
 
         int side = switch (kind) {
@@ -185,29 +161,28 @@ public final class JujutsuNeonMovementPatch {
             case FRONT, AIR -> 0;
         };
 
+        // Reuse original CE, cooldown, sound, hit registration and VFX.
         invokeOriginalStartDash(player, side);
-
         int mode = player.getPersistentData().getInt("jn_dash_mode");
-        if (mode == 0) return; // cooldown/CE/other original validation rejected it.
+        if (mode == 0) return;
 
         Vec3 direction = correctedDirection(player, kind);
         player.getPersistentData().putDouble("jn_dash_dx", direction.x);
         player.getPersistentData().putDouble("jn_dash_dy", 0.0);
         player.getPersistentData().putDouble("jn_dash_dz", direction.z);
-
-        // AIR is explicit now. The original method still creates the server-side
-        // DASH_AIR state and handles CE/VFX, but vertical camera pitch is discarded.
-        if (kind == DashKind.AIR) {
-            player.getPersistentData().putInt("jn_dash_mode", 3);
-        }
+        if (kind == DashKind.AIR) player.getPersistentData().putInt("jn_dash_mode", 3);
     }
 
-    /**
-     * Ordinary Red uses a vanilla Explosion only for block destruction. In the old
-     * build its owner could still be reached by an explosion DamageSource whose entity
-     * was null. The owner-side flag is synchronous around level.explode(), so checking
-     * the victim closes that hole without affecting any other damage.
-     */
+    /** Owner never participates in the vanilla part of their own Red explosion. */
+    @SubscribeEvent(priority = EventPriority.HIGHEST)
+    public static void onRedExplosionDetonate(ExplosionEvent.Detonate event) {
+        event.getAffectedEntities().removeIf(entity ->
+                entity instanceof ServerPlayer player &&
+                        player.getPersistentData().getBoolean("jn_red_explosion_blocks_only")
+        );
+    }
+
+    /** Defensive fallbacks for damage/knockback paths fired by other Forge hooks. */
     @SubscribeEvent(priority = EventPriority.HIGHEST)
     public static void onRedOwnerAttack(LivingAttackEvent event) {
         if (event.getEntity() instanceof ServerPlayer player &&
@@ -225,10 +200,10 @@ public final class JujutsuNeonMovementPatch {
     }
 
     /**
-     * Technique destruction must never generate block drops. Maximum Blue, Purple,
-     * Maximum Red and super-run already replace blocks with AIR directly. Ordinary Red
-     * is the exception because it uses Level#explode. Any ItemEntity/XP created while
-     * that synchronous Red explosion flag is active is rejected before joining the world.
+     * Ordinary Red is the only destructive technique in the current build that uses a
+     * vanilla Explosion. Reject its ItemEntity/XP spawns while the synchronous Red flag
+     * is active. Maximum Blue, Maximum Red, Purple and super-run already set blocks to
+     * AIR directly and therefore produce no drops.
      */
     @SubscribeEvent(priority = EventPriority.HIGHEST)
     public static void onTechniqueDropSpawn(EntityJoinLevelEvent event) {
@@ -239,7 +214,6 @@ public final class JujutsuNeonMovementPatch {
         for (ServerPlayer player : level.players()) {
             if (!player.getPersistentData().getBoolean("jn_red_explosion_blocks_only")) continue;
             if (player.distanceToSqr(event.getEntity()) > 144.0) continue;
-
             event.setCanceled(true);
             return;
         }
