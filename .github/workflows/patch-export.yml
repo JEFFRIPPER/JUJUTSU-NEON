@@ -57,6 +57,13 @@ jobs:
           print('exported', exported, 'class files')
           PY
 
+      - name: Upload temporary compiled JAR
+        uses: actions/upload-artifact@v4
+        with:
+          name: movement-patch-jar
+          path: build/libs/*.jar
+          if-no-files-found: error
+
       - name: Commit compiled patch payload
         run: |
           git config user.name 'github-actions[bot]'
