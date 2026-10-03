@@ -1,0 +1,125 @@
+name: Temporary Maximum Blue Overhaul
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  overhaul:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.1.1'
+
+      - name: Patch Maximum Blue server and network pipeline
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          p = Path('src/main/java/com/kira/jujutsuneon/JujutsuNeonMod.java')
+          s = p.read_text(encoding='utf-8')
+
+          def must_replace(old, new, label, count=1):
+              global s
+              if new in s:
+                  return
+              if old not in s:
+                  raise SystemExit(f'{label}: source block not found')
+              s = s.replace(old, new, count)
+
+          must_replace(
+              'private static final String PROTOCOL = "15";',
+              'private static final String PROTOCOL = "16";',
+              'protocol'
+          )
+
+          must_replace(
+              '''    private static final double MAX_BLUE_RADIUS = 2.0;\n    private static final double MAX_BLUE_ZONE_HALF = 3.0;''',
+              '''    // Reference scale: roughly twice the previous visual diameter.\n    private static final double MAX_BLUE_RADIUS = 4.0;\n    private static final double MAX_BLUE_ZONE_HALF = 4.5;''',
+              'blue size'
+          )
+
+          must_replace(
+              '''    private static final Map<UUID, List<MaxBlueSuctionBlock>> MAX_BLUE_SUCTION = new HashMap<>();''',
+              '''    private static final Map<UUID, List<MaxBlueSuctionBlock>> MAX_BLUE_SUCTION = new HashMap<>();\n\n    // Swept-volume block capture. Fast aim changes cannot tunnel between ticks.\n    private static final Map<UUID, ArrayDeque<BlockPos>> MAX_BLUE_PENDING_BLOCKS = new HashMap<>();\n    private static final Map<UUID, Set<Long>> MAX_BLUE_PENDING_KEYS = new HashMap<>();\n    private static final int MAX_BLUE_SWEEP_BUDGET = 512;\n    private static final int MAX_BLUE_PENDING_LIMIT = 12000;\n    private static final double MAX_BLUE_SWEEP_RADIUS = 5.50;\n    private static final double MAX_BLUE_SWEEP_STEP = 0.90;''',
+              'sweep state'
+          )
+
+          old_center = '''    private static Vec3 maxBlueFormationCenter(ServerPlayer player, double progress, double desiredDistance) {\n        double eased = maxBlueSmooth(progress);\n\n        Vec3 eye = player.getEyePosition();\n        Vec3 look = player.getLookAngle().normalize();\n        Vec3 finalPos = eye.add(look.scale(desiredDistance));\n\n        double angle = progress * Math.PI * 4.0;\n        double orbitRadius = 2.7 * (1.0 - eased) + 0.25;\n        Vec3 orbitPos = player.position().add(\n                Math.cos(angle) * orbitRadius,\n                1.15 + Math.sin(angle * 1.5) * 0.72,\n                Math.sin(angle) * orbitRadius\n        );\n\n        return orbitPos.lerp(finalPos, eased);\n    }'''
+          new_center = '''    private static Vec3 maxBlueFormationCenter(ServerPlayer player, double progress, double desiredDistance) {\n        // Reference timing: a tiny seed is born next to the caster, then the\n        // anomaly tears forward and expands instead of orbiting like a planet.\n        Vec3 eye = player.getEyePosition();\n        Vec3 look = player.getLookAngle().normalize();\n        Vec3 horizontal = new Vec3(look.x, 0.0, look.z);\n        if (horizontal.lengthSqr() < 1.0E-6) horizontal = new Vec3(0.0, 0.0, 1.0);\n        horizontal = horizontal.normalize();\n        Vec3 right = new Vec3(-horizontal.z, 0.0, horizontal.x);\n\n        Vec3 seed = eye.add(look.scale(0.90)).add(right.scale(0.55)).add(0.0, -0.38, 0.0);\n        Vec3 finalPos = eye.add(look.scale(desiredDistance));\n\n        double travel = maxBlueSmooth((progress - 0.18) / 0.50);\n        double handPulse = Math.sin(progress * Math.PI * 5.0) * 0.045 * (1.0 - travel);\n        seed = seed.add(0.0, handPulse, 0.0);\n        return seed.lerp(finalPos, travel);\n    }'''
+          must_replace(old_center, new_center, 'formation center')
+
+          old_radius = '''        if (phase == MAX_BLUE_PHASE_FORMING) {\n            long start = player.getPersistentData().getLong("jn_max_blue_phase_start");\n            double p = Mth.clamp((now - start) / (double) MAX_BLUE_FORM_TICKS, 0.0, 1.0);\n            return 0.12 + (MAX_BLUE_RADIUS - 0.12) * maxBlueSmooth(p);\n        }'''
+          new_radius = '''        if (phase == MAX_BLUE_PHASE_FORMING) {\n            long start = player.getPersistentData().getLong("jn_max_blue_phase_start");\n            double p = Mth.clamp((now - start) / (double) MAX_BLUE_FORM_TICKS, 0.0, 1.0);\n\n            // Reference appearance: tiny white-blue seed -> violent bloom ->\n            // final large anomaly. The burst happens early instead of a boring\n            // linear balloon growth.\n            if (p < 0.18) {\n                return 0.10 + 0.38 * maxBlueSmooth(p / 0.18);\n            }\n\n            double eruption = maxBlueSmooth((p - 0.18) / 0.32);\n            double settle = maxBlueSmooth((p - 0.50) / 0.50);\n            double earlyTarget = MAX_BLUE_RADIUS * 0.82;\n            return 0.48\n                    + (earlyTarget - 0.48) * eruption\n                    + (MAX_BLUE_RADIUS - earlyTarget) * settle;\n        }'''
+          must_replace(old_radius, new_radius, 'formation radius')
+
+          visual_reg = '''        NETWORK.registerMessage(\n                packetId++,\n                MaxBlueVisualPacket.class,\n                MaxBlueVisualPacket::encode,\n                MaxBlueVisualPacket::decode,\n                MaxBlueVisualPacket::handle\n        );'''
+          debris_reg = visual_reg + '''\n\n        NETWORK.registerMessage(\n                packetId++,\n                MaxBlueDebrisBatchPacket.class,\n                MaxBlueDebrisBatchPacket::encode,\n                MaxBlueDebrisBatchPacket::decode,\n                MaxBlueDebrisBatchPacket::handle\n        );'''
+          must_replace(visual_reg, debris_reg, 'debris packet registration')
+
+          old_handler = '''                    () -> () -> ClientForgeEvents.applyMaximumBlueVisual(msg)'''
+          new_handler = '''                    () -> () -> MaximumBlueReferenceClient.accept(\n                            msg.ownerId(), msg.active(), msg.x(), msg.y(), msg.z(), msg.radius(), msg.phase()\n                    )'''
+          must_replace(old_handler, new_handler, 'renderer route')
+
+          marker = '''\n\n    private record JumpControlPacket(int tier) {'''
+          packet = '''\n\n    private record MaxBlueDebrisBatchPacket(\n            UUID ownerId,\n            double targetX,\n            double targetY,\n            double targetZ,\n            List<Long> packedPositions,\n            List<Integer> stateIds\n    ) {\n        static void encode(MaxBlueDebrisBatchPacket msg, FriendlyByteBuf buf) {\n            buf.writeUUID(msg.ownerId);\n            buf.writeDouble(msg.targetX);\n            buf.writeDouble(msg.targetY);\n            buf.writeDouble(msg.targetZ);\n            int count = Math.min(msg.packedPositions.size(), msg.stateIds.size());\n            buf.writeVarInt(count);\n            for (int i = 0; i < count; i++) {\n                buf.writeLong(msg.packedPositions.get(i));\n                buf.writeVarInt(msg.stateIds.get(i));\n            }\n        }\n\n        static MaxBlueDebrisBatchPacket decode(FriendlyByteBuf buf) {\n            UUID ownerId = buf.readUUID();\n            double x = buf.readDouble();\n            double y = buf.readDouble();\n            double z = buf.readDouble();\n            int count = Mth.clamp(buf.readVarInt(), 0, 1024);\n            List<Long> positions = new ArrayList<>(count);\n            List<Integer> states = new ArrayList<>(count);\n            for (int i = 0; i < count; i++) {\n                positions.add(buf.readLong());\n                states.add(buf.readVarInt());\n            }\n            return new MaxBlueDebrisBatchPacket(ownerId, x, y, z, positions, states);\n        }\n\n        static void handle(MaxBlueDebrisBatchPacket msg, Supplier<NetworkEvent.Context> contextSupplier) {\n            NetworkEvent.Context context = contextSupplier.get();\n            context.enqueueWork(() -> DistExecutor.unsafeRunWhenOn(\n                    Dist.CLIENT,\n                    () -> () -> MaximumBlueReferenceClient.acceptDebrisBatch(\n                            msg.ownerId(), msg.targetX(), msg.targetY(), msg.targetZ(),\n                            msg.packedPositions(), msg.stateIds()\n                    )\n            ));\n            context.setPacketHandled(true);\n        }\n    }'''
+          if 'private record MaxBlueDebrisBatchPacket(' not in s:
+              if marker not in s:
+                  raise SystemExit('debris packet insertion marker not found')
+              s = s.replace(marker, packet + marker, 1)
+
+          consume_pattern = re.compile(
+              r'    private static void consumeMaximumBlueBlocks\(ServerPlayer owner, ServerLevel level, Vec3 center, long now\) \{.*?\n    \}\n\n    private static void tickMaximumBlueSuction',
+              re.S
+          )
+          consume_replacement = '''    private static void consumeMaximumBlueBlocks(ServerPlayer owner, ServerLevel level, Vec3 center, long now) {\n        var data = owner.getPersistentData();\n\n        Vec3 previous = center;\n        if (data.getBoolean("jn_max_blue_sweep_ready")) {\n            previous = new Vec3(\n                    data.getDouble("jn_max_blue_sweep_x"),\n                    data.getDouble("jn_max_blue_sweep_y"),\n                    data.getDouble("jn_max_blue_sweep_z")\n            );\n        }\n\n        data.putBoolean("jn_max_blue_sweep_ready", true);\n        data.putDouble("jn_max_blue_sweep_x", center.x);\n        data.putDouble("jn_max_blue_sweep_y", center.y);\n        data.putDouble("jn_max_blue_sweep_z", center.z);\n\n        UUID ownerId = owner.getUUID();\n        ArrayDeque<BlockPos> pending = MAX_BLUE_PENDING_BLOCKS.computeIfAbsent(ownerId, id -> new ArrayDeque<>());\n        Set<Long> pendingKeys = MAX_BLUE_PENDING_KEYS.computeIfAbsent(ownerId, id -> new HashSet<>());\n\n        // Capsule/swept sphere between the previous and current center. This is\n        // the anti-tunnelling fix: a fast camera flick cannot jump over blocks.\n        double travel = previous.distanceTo(center);\n        int samples = Mth.clamp((int) Math.ceil(travel / MAX_BLUE_SWEEP_STEP), 1, 48);\n        int range = (int) Math.ceil(MAX_BLUE_SWEEP_RADIUS);\n        double radiusSqr = MAX_BLUE_SWEEP_RADIUS * MAX_BLUE_SWEEP_RADIUS;\n\n        for (int sampleIndex = 0; sampleIndex <= samples && pending.size() < MAX_BLUE_PENDING_LIMIT; sampleIndex++) {\n            double t = sampleIndex / (double) samples;\n            // Current position first, then the swept history behind it.\n            Vec3 sample = center.lerp(previous, t);\n            int cx = Mth.floor(sample.x);\n            int cy = Mth.floor(sample.y);\n            int cz = Mth.floor(sample.z);\n\n            for (int x = cx - range; x <= cx + range && pending.size() < MAX_BLUE_PENDING_LIMIT; x++) {\n                for (int y = cy - range; y <= cy + range && pending.size() < MAX_BLUE_PENDING_LIMIT; y++) {\n                    for (int z = cz - range; z <= cz + range && pending.size() < MAX_BLUE_PENDING_LIMIT; z++) {\n                        BlockPos pos = new BlockPos(x, y, z);\n                        Vec3 blockCenter = Vec3.atCenterOf(pos);\n                        if (blockCenter.distanceToSqr(sample) > radiusSqr) continue;\n\n                        long key = pos.asLong();\n                        if (pendingKeys.add(key)) pending.addLast(pos);\n                    }\n                }\n            }\n        }\n\n        List<Long> visualPositions = new ArrayList<>();\n        List<Integer> visualStates = new ArrayList<>();\n        int budget = MAX_BLUE_SWEEP_BUDGET;\n\n        while (budget-- > 0 && !pending.isEmpty()) {\n            BlockPos pos = pending.removeFirst();\n            pendingKeys.remove(pos.asLong());\n            if (!canMaximumBlueConsume(level, owner, pos)) continue;\n\n            BlockState state = level.getBlockState(pos);\n            int stateId = net.minecraft.world.level.block.Block.getId(state);\n\n            // Real world block disappears immediately, without drops. The client\n            // renders a temporary copy spiralling into the white core.\n            level.setBlock(pos, Blocks.AIR.defaultBlockState(), 2 | 16 | 32);\n            visualPositions.add(pos.asLong());\n            visualStates.add(stateId);\n        }\n\n        if (!visualPositions.isEmpty()) {\n            NETWORK.send(\n                    PacketDistributor.TRACKING_ENTITY_AND_SELF.with(() -> owner),\n                    new MaxBlueDebrisBatchPacket(\n                            ownerId, center.x, center.y, center.z,\n                            visualPositions, visualStates\n                    )\n            );\n        }\n    }\n\n    private static void tickMaximumBlueSuction'''
+          if 'Capsule/swept sphere between the previous and current center' not in s:
+              s2, n = consume_pattern.subn(consume_replacement, s, count=1)
+              if n != 1:
+                  raise SystemExit(f'consume method replacement failed: {n}')
+              s = s2
+
+          cleanup_anchor = '''        List<MaxBlueSuctionBlock> visuals = MAX_BLUE_SUCTION.remove(player.getUUID());\n        if (visuals != null) {\n            for (MaxBlueSuctionBlock entry : visuals) {\n                Entity e = player.serverLevel().getEntity(entry.entityId);\n                if (e != null) e.discard();\n            }\n        }'''
+          cleanup_new = cleanup_anchor + '''\n\n        MAX_BLUE_PENDING_BLOCKS.remove(player.getUUID());\n        MAX_BLUE_PENDING_KEYS.remove(player.getUUID());'''
+          must_replace(cleanup_anchor, cleanup_new, 'sweep cleanup')
+
+          remove_keys_old = '''                "jn_max_blue_fade_radius","jn_max_blue_fade_x","jn_max_blue_fade_y","jn_max_blue_fade_z",\n                "jn_max_blue_x","jn_max_blue_y","jn_max_blue_z"}) {'''
+          remove_keys_new = '''                "jn_max_blue_fade_radius","jn_max_blue_fade_x","jn_max_blue_fade_y","jn_max_blue_fade_z",\n                "jn_max_blue_x","jn_max_blue_y","jn_max_blue_z",\n                "jn_max_blue_sweep_ready","jn_max_blue_sweep_x","jn_max_blue_sweep_y","jn_max_blue_sweep_z"}) {'''
+          must_replace(remove_keys_old, remove_keys_new, 'sweep persistent cleanup')
+
+          p.write_text(s, encoding='utf-8')
+          PY
+
+      - name: Forge 1.20.1 compile and reobf
+        run: gradle reobfJar --stacktrace --no-daemon
+
+      - name: Code statistics
+        run: |
+          wc -l src/main/java/com/kira/jujutsuneon/*.java
+          git diff --stat
+
+      - name: Commit verified overhaul
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add src/main/java/com/kira/jujutsuneon/JujutsuNeonMod.java
+          if ! git diff --cached --quiet; then
+            git commit -m 'feat: activate reference Maximum Blue overhaul [skip ci]'
+            git push
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MaximumBlue-Overhaul-Reobf
+          path: build/libs/*.jar
+          if-no-files-found: error
