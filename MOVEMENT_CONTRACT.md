@@ -7,6 +7,7 @@ This file is a hard contract. A movement change is invalid if any invariant belo
 - Gojo blindfold ON: Jujutsu Neon owns movement physics.
 - Exactly one movement state may own motion in a tick.
 - Legal client states are: `LOCKED`, `DASH`, `FLIGHT`, `WATER_RUN`, `WATER`, `GROUND`, `AIR`.
+- `LOCKED` is forced by Max Blue, Hollow Purple cast and the Maximum Purple cutscene. During the Maximum Purple cutscene the server owns the position (teleport-hold), flight is ended and dash/jump input is ignored.
 - A state transition must release ownership before the next state writes velocity/position.
 - No second event handler may independently start the same dash or rewrite the same movement vector.
 

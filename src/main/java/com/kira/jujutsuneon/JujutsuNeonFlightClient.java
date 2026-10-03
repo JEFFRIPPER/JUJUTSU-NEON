@@ -462,8 +462,14 @@ public final class JujutsuNeonFlightClient {
 
         // Прыжок «взводит» полёт через onJumpFired() (любой прыжок, не только заряженный).
 
-        tickArmedJump(mc, currentVerticalVelocity);
-        tickFlight(mc);
+        if (MaximumPurpleClient.isLocalActive()) {
+            // Кат-сцена Максимального Фиолетового: полёт снимается и не взводится.
+            if (customFlight) endFlight(mc, true);
+            armedFromChargedJump = false;
+        } else {
+            tickArmedJump(mc, currentVerticalVelocity);
+            tickFlight(mc);
+        }
 
         float targetFlightBlend = customFlight ? 1.0F : 0.0F;
         float targetBoostBlend = customFlight && boost && !landing ? 1.0F : 0.0F;

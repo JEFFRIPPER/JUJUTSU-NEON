@@ -46,6 +46,7 @@ public final class JujutsuNeonSkillAnimationClient {
         BLUE,
         MAX_BLUE,
         PURPLE,
+        MAX_PURPLE,
         FRONT_DASH,
         BACK_DASH,
         SIDE_DASH_LEFT,
@@ -157,6 +158,7 @@ public final class JujutsuNeonSkillAnimationClient {
                 case "BLUE" -> new SkillFrame(Skill.BLUE, progress);
                 case "MAX_BLUE" -> new SkillFrame(Skill.MAX_BLUE, progress);
                 case "PURPLE_CAST", "HOLLOW_PURPLE" -> new SkillFrame(Skill.PURPLE, progress);
+                case "MAX_PURPLE" -> new SkillFrame(Skill.MAX_PURPLE, progress);
                 case "FRONT_DASH" -> new SkillFrame(Skill.FRONT_DASH, progress);
                 case "BACK_DASH" -> new SkillFrame(Skill.BACK_DASH, progress);
                 case "SIDE_DASH_LEFT" -> new SkillFrame(Skill.SIDE_DASH_LEFT, progress);
@@ -296,6 +298,7 @@ public final class JujutsuNeonSkillAnimationClient {
                 case BLUE -> applyNormalBlue(localFrame.progress, ageInTicks);
                 case MAX_BLUE -> applyMaximumBlue(localFrame.progress, ageInTicks);
                 case PURPLE -> applyPurple(localFrame.progress, ageInTicks);
+                case MAX_PURPLE -> applyMaxPurple(localFrame.progress, ageInTicks);
                 case FRONT_DASH -> applyFrontDash(localFrame.progress);
                 case BACK_DASH -> applyBackDash(localFrame.progress);
                 case SIDE_DASH_LEFT -> applySideDash(localFrame.progress, -1.0f);
@@ -476,6 +479,58 @@ public final class JujutsuNeonSkillAnimationClient {
                     rad(-3.0f * weight));
 
             head.xRot += rad(2.0f * weight - 3.0f * push);
+        }
+
+        /**
+         * Максимальный Фиолетовый, позы по кадрам референса (тики кат-сцены):
+         * присед с рукой у лица -> рука вверх -> обе вверх -> руки вниз-в стороны ->
+         * руки разведены (шары у плеч) -> голова опущена (крупный план) ->
+         * руки вперёд, сводят шары -> руки широко раскинуты во вспышке.
+         * Значения: bodyX, bodyY, headX, rArmX, rArmY, rArmZ, lArmX, lArmY, lArmZ, rLegX, lLegX (градусы).
+         */
+        private static final float[][] MAX_PURPLE_KEYS = {
+                {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+                {6, 22, -10, -12, -125, -25, 10, -30, 0, -20, -25, 20},
+                {30, 22, -10, -12, -125, -25, 10, -30, 0, -20, -25, 20},
+                {36, 0, 0, -18, -175, 0, 8, 10, 0, -12, 0, 0},
+                {46, 0, 0, -18, -175, 0, 8, 10, 0, -12, 0, 0},
+                {50, -4, 0, -22, -168, 0, 22, -168, 0, -22, 0, 0},
+                {58, -4, 0, -22, -168, 0, 22, -168, 0, -22, 0, 0},
+                {62, 6, 0, 0, -20, 0, 40, -20, 0, -40, 8, -6},
+                {70, 6, 0, 0, -20, 0, 40, -20, 0, -40, 8, -6},
+                {74, 0, 0, 0, -10, 0, 55, -10, 0, -55, 0, 0},
+                {84, 0, 0, 0, -10, 0, 55, -10, 0, -55, 0, 0},
+                {88, 0, 0, 12, -10, 0, 55, -10, 0, -55, 0, 0},
+                {102, 0, 0, 12, -10, 0, 55, -10, 0, -55, 0, 0},
+                {106, 4, 0, 0, -88, -22, 0, -88, 22, 0, 6, -6},
+                {114, 4, 0, 0, -88, -22, 0, -88, 22, 0, 6, -6},
+                {117, -10, 0, -20, -40, 0, 105, -40, 0, -105, 10, -10},
+                {150, -10, 0, -20, -40, 0, 105, -40, 0, -105, 10, -10},
+        };
+
+        private void applyMaxPurple(float progress, float age) {
+            float t = clamp01(progress) * 150.0f;
+            float[] a = MAX_PURPLE_KEYS[0];
+            float[] b = MAX_PURPLE_KEYS[MAX_PURPLE_KEYS.length - 1];
+            for (int i = 0; i + 1 < MAX_PURPLE_KEYS.length; i++) {
+                if (t >= MAX_PURPLE_KEYS[i][0] && t <= MAX_PURPLE_KEYS[i + 1][0]) {
+                    a = MAX_PURPLE_KEYS[i];
+                    b = MAX_PURPLE_KEYS[i + 1];
+                    break;
+                }
+            }
+            float span = Math.max(0.001f, b[0] - a[0]);
+            float w = smooth((t - a[0]) / span);
+            float[] p = new float[12];
+            for (int i = 1; i < 12; i++) p[i] = a[i] + (b[i] - a[i]) * w;
+            float breath = (float) Math.sin(age * 0.3f) * 1.5f;
+
+            rotate(body, rad(p[1]), rad(p[2]), 0.0f);
+            head.xRot = rad(p[3]);
+            rotate(rightArm, rad(p[4]), rad(p[5]), rad(p[6] + breath));
+            rotate(leftArm, rad(p[7]), rad(p[8]), rad(p[9] - breath));
+            rotate(rightLeg, rad(p[10]), 0.0f, rad(3.0f));
+            rotate(leftLeg, rad(p[11]), 0.0f, rad(-3.0f));
         }
 
         /**

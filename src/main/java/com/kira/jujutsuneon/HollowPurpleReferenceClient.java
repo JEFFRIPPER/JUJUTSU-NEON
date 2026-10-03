@@ -1181,4 +1181,58 @@ private static void renderLimitlessModel(
                 .color(red, green, blue, Mth.clamp(alpha, 0.0f, 1.0f))
                 .endVertex();
     }
+
+    // ------------------------------------------------------------------
+    // Мост для кат-сцены Максимального Фиолетового (MaximumPurpleClient):
+    // те же 3D-модели и примитивы, что и у обычного Hollow Purple.
+    // Цвета по номеру: 0 RED_DARK, 1 RED, 2 RED_HOT, 3 BLUE_DARK, 4 BLUE, 5 BLUE_HOT,
+    // 6 VOID, 7 PURPLE_DARK, 8 PURPLE, 9 MAGENTA, 10 LAVENDER, 11 WHITE.
+
+    private static final Rgb[] PALETTE = {
+            RED_DARK, RED, RED_HOT, BLUE_DARK, BLUE, BLUE_HOT,
+            VOID, PURPLE_DARK, PURPLE, MAGENTA, LAVENDER, WHITE
+    };
+
+    private static Rgb palette(int index) {
+        return PALETTE[Mth.clamp(index, 0, PALETTE.length - 1)];
+    }
+
+    static void mpAlphaBlend() {
+        alphaBlend();
+    }
+
+    static void mpAdditiveBlend() {
+        additiveBlend();
+    }
+
+    static void mpLimitless(PoseStack pose, Vec3 camera, Vec3 position, Vec3 direction,
+                            float radius, float alpha, double time, boolean blue) {
+        renderLimitlessModel(pose, camera, position, direction, radius, alpha, time, blue);
+    }
+
+    static void mpPurple(PoseStack pose, Vec3 camera, Vec3 position, Vec3 direction,
+                         float radius, float alpha, double time, float intensity, float stress) {
+        renderPurpleModel(pose, camera, position, direction, radius, alpha, time, intensity, stress);
+    }
+
+    static void mpBridge(PoseStack pose, Vec3 camera, Vec3 from, Vec3 to, float alpha, double time, double seed) {
+        renderEnergyBridge(pose, camera, from, to, alpha, time, seed);
+    }
+
+    static void mpSphere(PoseStack pose, Vec3 camera, Vec3 position, float radius, int lat, int lon,
+                         int colorA, int colorB, float alpha, float distortion, double time, double seed) {
+        drawPlasmaSphereAt(pose, camera, position, radius, lat, lon, palette(colorA), palette(colorB),
+                alpha, distortion, time, seed);
+    }
+
+    static void mpRing(PoseStack pose, Vec3 camera, Vec3 position, Vec3 normal, float radius, float thickness,
+                       double rotation, int colorA, int colorB, float alpha, float noise, double seed, boolean broken) {
+        drawFracturedRingAt(pose, camera, position, normal, radius, thickness, rotation,
+                palette(colorA), palette(colorB), alpha, noise, seed, broken);
+    }
+
+    static void mpArc(PoseStack pose, Vec3 camera, Vec3 from, Vec3 to, float thickness, int segments,
+                      double time, double seed, int color, float alpha, float wobble) {
+        drawLightningArc(pose, camera, from, to, thickness, segments, time, seed, palette(color), alpha, wobble);
+    }
 }

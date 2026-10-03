@@ -352,11 +352,11 @@ public class JujutsuNeonMod {
         CLOSER
     }
 
-    private static boolean hasGojoBlindfold(ServerPlayer player) {
+    static boolean hasGojoBlindfold(ServerPlayer player) {
         return player.getItemBySlot(EquipmentSlot.HEAD).is(GOJO_BLINDFOLD.get());
     }
 
-    private static void requireBlindfoldMessage(ServerPlayer player) {
+    static void requireBlindfoldMessage(ServerPlayer player) {
         player.displayClientMessage(
                 Component.literal("Надень Повязку Годжо, чтобы использовать технику.")
                         .withStyle(ChatFormatting.LIGHT_PURPLE),
@@ -364,14 +364,14 @@ public class JujutsuNeonMod {
         );
     }
 
-    private static double getEnergy(ServerPlayer player) {
+    static double getEnergy(ServerPlayer player) {
         if (!player.getPersistentData().contains("jn_ce")) {
             player.getPersistentData().putDouble("jn_ce", CE_MAX);
         }
         return Mth.clamp(player.getPersistentData().getDouble("jn_ce"), 0.0, CE_MAX);
     }
 
-    private static void setEnergy(ServerPlayer player, double value) {
+    static void setEnergy(ServerPlayer player, double value) {
         player.getPersistentData().putDouble("jn_ce", Mth.clamp(value, 0.0, CE_MAX));
     }
 
@@ -410,6 +410,9 @@ public class JujutsuNeonMod {
             requireBlindfoldMessage(player);
             return;
         }
+
+        // Во время Максимального Фиолетового другие техники недоступны.
+        if (MaximumPurple.isActive(player)) return;
 
         if (isHollowPurpleCasting(player) && ability != Ability.HOLLOW_PURPLE) {
             player.displayClientMessage(
@@ -1246,7 +1249,7 @@ public class JujutsuNeonMod {
         }
     }
 
-    private static boolean isMaximumBlueActive(ServerPlayer player) {
+    static boolean isMaximumBlueActive(ServerPlayer player) {
         return player.getPersistentData().getInt("jn_max_blue_phase") != MAX_BLUE_PHASE_NONE;
     }
 
@@ -1811,7 +1814,7 @@ public class JujutsuNeonMod {
         }
     }
 
-    private static boolean isHollowPurpleCasting(ServerPlayer player) {
+    static boolean isHollowPurpleCasting(ServerPlayer player) {
         return player.getPersistentData().getInt("jn_purple_mode") == PURPLE_MODE_CASTING;
     }
 
@@ -4523,6 +4526,12 @@ public class JujutsuNeonMod {
 
         @SubscribeEvent
         public static void onLivingAttack(LivingAttackEvent event) {
+            // Максимальный Фиолетовый бьёт всех, кроме владельца, в том числе сквозь Бесконечность.
+            if (event.getSource().getEntity() instanceof ServerPlayer maxPurpleOwner &&
+                    maxPurpleOwner.getPersistentData().getBoolean("jn_max_purple_damage")) {
+                return;
+            }
+
             if (event.getSource().getEntity() instanceof LivingEntity stunnedAttacker &&
                     stunnedAttacker.getPersistentData().getLong("jn_stun_until") > stunnedAttacker.level().getGameTime()) {
                 event.setCanceled(true);
@@ -5335,7 +5344,64 @@ public class JujutsuNeonMod {
             boolean holdTriggered;
         }
 
-        private static void startAnim(String type, int ticks) {
+        // G: отпустил раньше 3 секунд — обычный Фиолетовый, держишь 3 секунды — Максимальный.
+        private static final int MAX_PURPLE_HOLD_TICKS = 60;
+        private static boolean purpleKeyWasDown = false;
+        private static boolean purpleHoldValid = false;
+        private static boolean purpleMaxSent = false;
+        private static int purpleHoldTicks = 0;
+
+        private static void resetPurpleHold() {
+            if ("CHARGE_MAX_PURPLE".equals(chargingAnim)) {
+                chargingAnim = "NONE";
+                chargingProgress = 0.0f;
+            }
+            purpleKeyWasDown = false;
+            purpleHoldValid = false;
+            purpleMaxSent = false;
+            purpleHoldTicks = 0;
+        }
+
+        private static void processPurpleKey() {
+            boolean down = ClientModEvents.PURPLE_KEY.isDown();
+
+            if (down && !purpleKeyWasDown) {
+                purpleHoldTicks = 0;
+                purpleMaxSent = false;
+                purpleHoldValid = hudBlindfold && !hudPurpleCasting && !hudMaxBlueActive;
+            }
+
+            if (down) {
+                if (purpleHoldValid && !purpleMaxSent) {
+                    purpleHoldTicks++;
+                    chargingAnim = "CHARGE_MAX_PURPLE";
+                    chargingProgress = Mth.clamp(purpleHoldTicks / (float) MAX_PURPLE_HOLD_TICKS, 0.0f, 1.0f);
+
+                    if (purpleHoldTicks >= MAX_PURPLE_HOLD_TICKS) {
+                        purpleMaxSent = true;
+                        chargingAnim = "NONE";
+                        chargingProgress = 0.0f;
+                        MaximumPurple.requestStart();
+                    }
+                }
+            } else if (purpleKeyWasDown) {
+                if (purpleHoldValid && !purpleMaxSent) {
+                    if ("CHARGE_MAX_PURPLE".equals(chargingAnim)) {
+                        chargingAnim = "NONE";
+                        chargingProgress = 0.0f;
+                    }
+                    NETWORK.sendToServer(new AbilityPacket(Ability.HOLLOW_PURPLE));
+                    startAnim("PURPLE_CAST", 100);
+                }
+                purpleHoldValid = false;
+                purpleMaxSent = false;
+                purpleHoldTicks = 0;
+            }
+
+            purpleKeyWasDown = down;
+        }
+
+        static void startAnim(String type, int ticks) {
             activeAnim = type;
             activeAnimTicks = ticks;
             activeAnimLength = Math.max(1, ticks);
@@ -5717,7 +5783,7 @@ public class JujutsuNeonMod {
         }
 
         private static ClientMovementState resolveMovementState(Minecraft mc, boolean superRun) {
-            if (hudMaxBlueActive || hudPurpleCasting) return ClientMovementState.LOCKED;
+            if (hudMaxBlueActive || hudPurpleCasting || MaximumPurpleClient.isLocalActive()) return ClientMovementState.LOCKED;
             if (clientDashMode != DASH_NONE) return ClientMovementState.DASH;
             if (JujutsuNeonFlightClient.isCustomFlightActive()) return ClientMovementState.FLIGHT;
             // С Ctrl поверхность воды — опора: WATER_RUN, если игрок у поверхности
@@ -5946,6 +6012,10 @@ public class JujutsuNeonMod {
             if (mc.player == null) return;
 
             if (event.phase == TickEvent.Phase.START) {
+                if (MaximumPurpleClient.isLocalActive()) {
+                    mc.player.input.jumping = false;
+                    return;
+                }
                 if (hudBlindfold && mc.screen == null) {
                     // Подавляем ванильный прыжок: с повязкой прыжками управляет наша зарядка.
                     mc.player.input.jumping = false;
@@ -5979,6 +6049,29 @@ public class JujutsuNeonMod {
                 clientDashAge = 0;
                 clientDashDirection = Vec3.ZERO;
                 chargingAnim = "NONE";
+                resetPurpleHold();
+                return;
+            }
+
+            // Кат-сцена Максимального Фиолетового: игрок заморожен, техники и движение недоступны.
+            if (MaximumPurpleClient.isLocalActive()) {
+                if (lastSpeedHeld) {
+                    NETWORK.sendToServer(new MovementPacket(MovementAction.SPEED_OFF));
+                    lastSpeedHeld = false;
+                }
+                while (ClientModEvents.HUD_KEY.consumeClick()) { }
+                while (ClientModEvents.TELEPORT_KEY.consumeClick()) { }
+                while (ClientModEvents.PURPLE_KEY.consumeClick()) { }
+                jumpChargeWasDown = false;
+                jumpChargeTicks = 0;
+                jumpPressStartedInAir = false;
+                pendingCreativeShortJumpTicks = -1;
+                clientDashMode = DASH_NONE;
+                clientDashAge = 0;
+                clientDashDirection = Vec3.ZERO;
+                chargingAnim = "NONE";
+                chargingProgress = 0.0f;
+                resetPurpleHold();
                 return;
             }
 
@@ -6008,11 +6101,9 @@ public class JujutsuNeonMod {
             }
 
             while (ClientModEvents.PURPLE_KEY.consumeClick()) {
-                if (hudBlindfold && !hudPurpleCasting) {
-                    NETWORK.sendToServer(new AbilityPacket(Ability.HOLLOW_PURPLE));
-                    startAnim("PURPLE_CAST", 100);
-                }
+                // G обрабатывается по удержанию: см. processPurpleKey().
             }
+            processPurpleKey();
 
 
             boolean jumpHeldNow = mc.options.keyJump.isDown();
@@ -6364,6 +6455,8 @@ public class JujutsuNeonMod {
         public static void onRenderGui(RenderGuiEvent.Post event) {
             // Без повязки мод не рисует вообще ничего поверх обычного Minecraft.
             if (!hudVisible || !hudBlindfold) return;
+            // Во время кат-сцены Максимального Фиолетового HUD скрыт.
+            if (MaximumPurpleClient.isLocalActive()) return;
 
             Minecraft mc = Minecraft.getInstance();
             if (mc.player == null || mc.options.hideGui) return;
@@ -6463,6 +6556,11 @@ public class JujutsuNeonMod {
 
                 g.fill(x, chargeY, x + ceW, chargeY + 6, 0x8A10131A);
                 g.fill(x + 1, chargeY + 1, x + 1 + cw, chargeY + 5, 0xE69A49FF);
+
+                if ("CHARGE_MAX_PURPLE".equals(chargingAnim)) {
+                    String label = chargingProgress >= 1.0f ? "MAX PURPLE" : "MAX PURPLE " + (int) (chargingProgress * 100.0f) + "%";
+                    g.drawString(mc.font, label, right - mc.font.width(label), chargeY - 10, 0xFFC58BFF, false);
+                }
             }
 
             // Шкала заряженного прыжка остаётся снизу по центру, но тоже компактная.

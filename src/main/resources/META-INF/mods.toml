@@ -4,7 +4,7 @@ license="All Rights Reserved"
 
 [[mods]]
 modId="jujutsu_neon"
-version="1.0.5"
+version="1.0.6"
 displayName="Jujutsu Neon ACTION VFX"
 authors="Kira / SQUAD"
 description='''Combat mod with charge skills, HUD, cursed energy, custom VFX and audio.'''
