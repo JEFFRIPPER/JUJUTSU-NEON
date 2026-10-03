@@ -3994,7 +3994,7 @@ public class JujutsuNeonMod {
             }
 
             double t = elapsed / (double) FRONT_DASH_TICKS;
-            double speed = 1.32 - 1.02 * t;
+            double speed = 1.68 - 1.30 * t;
             Vec3 from = player.position();
             LivingEntity victim = findDashVictim(player, from, from.add(dir.scale(speed + 0.90)));
 
@@ -5725,7 +5725,7 @@ public class JujutsuNeonMod {
             if (clientDashMode == DASH_FRONT) {
                 lifetime = (int) FRONT_DASH_TICKS;
                 double t = Mth.clamp(clientDashAge / (double) FRONT_DASH_TICKS, 0.0, 1.0);
-                speed = 1.32 - 1.02 * t;
+                speed = 1.68 - 1.30 * t;
                 stepUp = true;
             } else if (clientDashMode == DASH_SIDE) {
                 lifetime = (int) SIDE_DASH_TICKS;
