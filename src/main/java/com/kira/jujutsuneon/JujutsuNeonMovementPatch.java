@@ -64,6 +64,7 @@ public final class JujutsuNeonMovementPatch {
 
     public enum DashKind {
         FRONT,
+        BACK,
         LEFT,
         RIGHT,
         AIR
@@ -169,13 +170,14 @@ public final class JujutsuNeonMovementPatch {
         return horizontal.normalize();
     }
 
-    /** Swaps the old A/D mapping because the previous build was reversed in-game. */
+    /** Single coordinate contract: A=-right, D=+right, S=-forward. */
     private static Vec3 correctedDirection(ServerPlayer player, DashKind kind) {
         Vec3 forward = horizontalForward(player);
-        Vec3 oldRightAxis = new Vec3(-forward.z, 0.0, forward.x).normalize();
+        Vec3 rightAxis = new Vec3(-forward.z, 0.0, forward.x).normalize();
         return switch (kind) {
-            case LEFT -> oldRightAxis;
-            case RIGHT -> oldRightAxis.scale(-1.0);
+            case LEFT -> rightAxis.scale(-1.0);
+            case RIGHT -> rightAxis;
+            case BACK -> forward.scale(-1.0);
             case FRONT, AIR -> forward;
         };
     }
@@ -204,6 +206,7 @@ public final class JujutsuNeonMovementPatch {
         int side = switch (kind) {
             case LEFT -> -1;
             case RIGHT -> 1;
+            case BACK -> 2;
             case FRONT, AIR -> 0;
         };
 

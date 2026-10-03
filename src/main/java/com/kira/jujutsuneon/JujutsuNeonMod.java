@@ -332,6 +332,7 @@ public class JujutsuNeonMod {
 
     private enum MovementAction {
         FRONT_DASH,
+        BACK_DASH,
         LEFT_DASH,
         RIGHT_DASH,
         SPEED_ON,
@@ -3763,6 +3764,7 @@ public class JujutsuNeonMod {
 
         switch (action) {
             case FRONT_DASH -> startDash(player, 0);
+            case BACK_DASH -> startDash(player, 2);
             case LEFT_DASH -> startDash(player, -1);
             case RIGHT_DASH -> startDash(player, 1);
             case SPEED_ON -> {
@@ -3820,7 +3822,8 @@ public class JujutsuNeonMod {
         long cooldown = player.getPersistentData().getLong("jn_dash_cd");
         if (now < cooldown) return;
 
-        if (!consumeEnergy(player, side == 0 ? 3.0 : 4.0)) return;
+        boolean longitudinalDash = side == 0 || side == 2;
+        if (!consumeEnergy(player, longitudinalDash ? 3.0 : 4.0)) return;
 
         player.getPersistentData().putLong("jn_dash_cd", now + 10);
         player.getPersistentData().putLong("jn_dash_started", now);
@@ -3829,17 +3832,18 @@ public class JujutsuNeonMod {
         Vec3 look = player.getLookAngle().normalize();
         Vec3 dir;
 
-        if (side == 0) {
-            // Front Dash полностью следует камере, в том числе вверх/вниз.
-            dir = look;
+        Vec3 horizontal = new Vec3(look.x, 0.0, look.z);
+        if (horizontal.lengthSqr() < 1.0E-4) {
+            double yaw = Math.toRadians(player.getYRot());
+            horizontal = new Vec3(-Math.sin(yaw), 0.0, Math.cos(yaw));
+        }
+        horizontal = horizontal.normalize();
+
+        if (side == 0 || side == 2) {
+            // Longitudinal dash is horizontal and camera-relative. side=2 is reverse.
+            dir = side == 2 ? horizontal.scale(-1.0) : horizontal;
             player.getPersistentData().putInt("jn_dash_mode", DASH_FRONT);
         } else {
-            Vec3 horizontal = new Vec3(look.x, 0.0, look.z);
-            if (horizontal.lengthSqr() < 1.0E-4) {
-                double yaw = Math.toRadians(player.getYRot());
-                horizontal = new Vec3(-Math.sin(yaw), 0.0, Math.cos(yaw));
-            }
-            horizontal = horizontal.normalize();
             Vec3 right = new Vec3(-horizontal.z, 0.0, horizontal.x);
             dir = side < 0 ? right.scale(-1.0) : right;
             player.getPersistentData().putInt("jn_dash_mode", DASH_SIDE);
@@ -3849,7 +3853,7 @@ public class JujutsuNeonMod {
         player.getPersistentData().putDouble("jn_dash_dy", dir.y);
         player.getPersistentData().putDouble("jn_dash_dz", dir.z);
 
-        playSfx(level, player, SFX_DASH, 1.0f, side == 0 ? 0.92f : 1.18f);
+        playSfx(level, player, SFX_DASH, 1.0f, longitudinalDash ? 0.92f : 1.18f);
         spawnVfx(level, VFX_DASH, player.position().add(0, 0.85, 0), 1);
         spawnVfx(level, VFX_TRAIL, player.position().add(0, 0.85, 0), 1);
     }
@@ -5576,7 +5580,7 @@ public class JujutsuNeonMod {
 
             double yaw = Math.toRadians(mc.player.getYRot());
             Vec3 forward = new Vec3(-Math.sin(yaw), 0.0, Math.cos(yaw));
-            Vec3 right = new Vec3(forward.z, 0.0, -forward.x);
+            Vec3 right = new Vec3(-forward.z, 0.0, forward.x);
 
             Vec3 result = forward.scale(forwardInput).add(right.scale(strafeInput));
             return result.lengthSqr() > 1.0E-6 ? result.normalize() : Vec3.ZERO;
@@ -5694,8 +5698,16 @@ public class JujutsuNeonMod {
                         : right;
                 clientDashMode = DASH_SIDE;
             } else {
+                Vec3 horizontal = new Vec3(look.x, 0.0, look.z);
+                if (horizontal.lengthSqr() < 1.0E-4) {
+                    double yaw = Math.toRadians(mc.player.getYRot());
+                    horizontal = new Vec3(-Math.sin(yaw), 0.0, Math.cos(yaw));
+                }
+                horizontal = horizontal.normalize();
                 clientDashMode = DASH_FRONT;
-                clientDashDirection = look;
+                clientDashDirection = requestedAction == MovementAction.BACK_DASH
+                        ? horizontal.scale(-1.0)
+                        : horizontal;
             }
 
             clientDashAge = 0;
@@ -5779,30 +5791,54 @@ public class JujutsuNeonMod {
             return true;
         }
 
+        private static void updateCustomLocomotionAnimation(
+                Minecraft mc,
+                boolean moving,
+                boolean superRun
+        ) {
+            if (mc.player == null) return;
+            float target = moving ? (superRun ? 1.0F : 0.68F) : 0.0F;
+            // Physics remain custom; only the vanilla limb-cycle is fed explicitly.
+            mc.player.walkAnimation.update(target, moving ? 0.55F : 0.35F);
+        }
+
         private static void tickCustomGroundMovement(Minecraft mc) {
             if (!hudBlindfold || mc.player == null || mc.level == null) return;
-            if (hudMaxBlueActive || hudPurpleCasting) return;
-            if (clientDashMode != DASH_NONE) return;
+            if (hudMaxBlueActive || hudPurpleCasting || clientDashMode != DASH_NONE) {
+                updateCustomLocomotionAnimation(mc, false, false);
+                return;
+            }
 
-            // В активном creative flight ванильный полёт остаётся полностью рабочим.
+            // Flight has a separate owner and is never mixed with ground/air locomotion.
             if (mc.player.getAbilities().flying) return;
 
             Vec3 dir = clientHorizontalDirection(mc);
-            if (dir.lengthSqr() < 1.0E-6) return;
-
+            boolean moving = dir.lengthSqr() >= 1.0E-6;
             boolean superRun = ClientModEvents.SUPER_SPEED_KEY.isDown();
             double speed = superRun
                     ? CUSTOM_RUN_BLOCKS_PER_TICK
                     : CUSTOM_WALK_BLOCKS_PER_TICK;
 
-            if (superRun && clientWaterSurfaceRun(mc, dir, speed)) return;
-
-            // Обычная ходьба/сверхбег используют тот же slope solver, что и dash.
-            // После подъёма на блок onGround может обновиться на тик позже, поэтому
-            // дополнительно проверяем опору прямо под ногами.
-            if (clientHasGroundSupport(mc, 0.34)) {
-                tryClientForcedMove(mc, dir.scale(speed), true);
+            if (!moving) {
+                updateCustomLocomotionAnimation(mc, false, superRun);
+                return;
             }
+
+            if (superRun && clientWaterSurfaceRun(mc, dir, speed)) {
+                updateCustomLocomotionAnimation(mc, true, true);
+                return;
+            }
+
+            if (clientHasGroundSupport(mc, 0.34)) {
+                // Ground: Jujutsu Neon swept solver owns position/collision.
+                tryClientForcedMove(mc, dir.scale(speed), true);
+            } else if (!mc.player.isInWaterOrBubble()) {
+                // Air: never kill horizontal control. Preserve the jump/fall Y velocity.
+                Vec3 velocity = mc.player.getDeltaMovement();
+                mc.player.setDeltaMovement(dir.x * speed, velocity.y, dir.z * speed);
+            }
+
+            updateCustomLocomotionAnimation(mc, true, superRun);
         }
 
         private static void performClientChargedJump(Minecraft mc, int tier) {
@@ -5874,7 +5910,13 @@ public class JujutsuNeonMod {
 
             tickMaximumBlueClientVisuals();
 
-            if (activeAnimTicks > 0) activeAnimTicks--;
+            if (activeAnimTicks > 0) {
+                activeAnimTicks--;
+                if (activeAnimTicks <= 0) {
+                    activeAnim = "NONE";
+                    activeAnimLength = 1;
+                }
+            }
 
             if (mc.screen != null) {
                 if (lastSpeedHeld) {
@@ -6010,12 +6052,22 @@ public class JujutsuNeonMod {
             }
 
             while (ClientModEvents.DASH_KEY.consumeClick()) {
+                // Hard input gate: Q is a dash only with BOTH hands empty.
+                if (!hudBlindfold ||
+                        !mc.player.getMainHandItem().isEmpty() ||
+                        !mc.player.getOffhandItem().isEmpty()) {
+                    continue;
+                }
+
                 boolean left = mc.options.keyLeft.isDown() && !mc.options.keyRight.isDown();
                 boolean right = mc.options.keyRight.isDown() && !mc.options.keyLeft.isDown();
+                boolean back = !left && !right &&
+                        mc.options.keyDown.isDown() && !mc.options.keyUp.isDown();
 
                 MovementAction action;
                 if (left) action = MovementAction.LEFT_DASH;
                 else if (right) action = MovementAction.RIGHT_DASH;
+                else if (back) action = MovementAction.BACK_DASH;
                 else action = MovementAction.FRONT_DASH;
 
                 startClientDash(mc, action);
@@ -6027,6 +6079,8 @@ public class JujutsuNeonMod {
                     startAnim("SIDE_DASH_LEFT", 6);
                 } else if (action == MovementAction.RIGHT_DASH) {
                     startAnim("SIDE_DASH_RIGHT", 6);
+                } else if (action == MovementAction.BACK_DASH) {
+                    startAnim("BACK_DASH", 14);
                 } else {
                     startAnim("FRONT_DASH", 14);
                 }

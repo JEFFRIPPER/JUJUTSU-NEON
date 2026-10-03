@@ -166,12 +166,12 @@ public final class JujutsuNeonMovementPatchClient {
 
     private static Vec3 correctedDashDirection(Minecraft mc, JujutsuNeonMovementPatch.DashKind kind) {
         Vec3 forward = horizontalForward(mc);
-        Vec3 oldRightAxis = new Vec3(-forward.z, 0.0, forward.x).normalize();
+        Vec3 rightAxis = new Vec3(-forward.z, 0.0, forward.x).normalize();
 
         return switch (kind) {
-            // Intentionally opposite to the previous build: A/D were reversed in-game.
-            case LEFT -> oldRightAxis;
-            case RIGHT -> oldRightAxis.scale(-1.0);
+            case LEFT -> rightAxis.scale(-1.0);
+            case RIGHT -> rightAxis;
+            case BACK -> forward.scale(-1.0);
             case FRONT, AIR -> forward;
         };
     }
@@ -191,6 +191,10 @@ public final class JujutsuNeonMovementPatchClient {
             case AIR -> {
                 animation = "AIR_DASH";
                 ticks = 5;
+            }
+            case BACK -> {
+                animation = "BACK_DASH";
+                ticks = 14;
             }
             case LEFT -> {
                 animation = "SIDE_DASH_LEFT";
@@ -218,6 +222,7 @@ public final class JujutsuNeonMovementPatchClient {
         String legacyAction = switch (kind) {
             case LEFT -> "LEFT_DASH";
             case RIGHT -> "RIGHT_DASH";
+            case BACK -> "BACK_DASH";
             case FRONT, AIR -> "FRONT_DASH";
         };
 
@@ -308,12 +313,18 @@ public final class JujutsuNeonMovementPatchClient {
         int mode = legacyDashMode();
         if (mode == 0 || desiredDashDirection.lengthSqr() < 1.0E-8) return;
 
-        // Reference front dash is fully camera-steered.  A generous turn rate keeps
-        // it responsive while avoiding an instantaneous 180-degree snap in one frame.
-        if (mode == 1 && activePatchedDash == JujutsuNeonMovementPatch.DashKind.FRONT) {
+        // Longitudinal dashes are camera-steered. BACK tracks the exact opposite look vector.
+        boolean longitudinal = mode == 1 &&
+                (activePatchedDash == JujutsuNeonMovementPatch.DashKind.FRONT ||
+                 activePatchedDash == JujutsuNeonMovementPatch.DashKind.BACK);
+        if (longitudinal) {
+            Vec3 target = horizontalForward(mc);
+            if (activePatchedDash == JujutsuNeonMovementPatch.DashKind.BACK) {
+                target = target.scale(-1.0);
+            }
             desiredDashDirection = steerTowards(
                     desiredDashDirection,
-                    horizontalForward(mc),
+                    target,
                     Math.toRadians(34.0)
             );
         }
@@ -321,7 +332,7 @@ public final class JujutsuNeonMovementPatchClient {
         Vec3 actual = wallSlideDirection(mc, desiredDashDirection, mode);
         setLegacyDashDirection(actual);
 
-        if (mode == 1 && activePatchedDash == JujutsuNeonMovementPatch.DashKind.FRONT) {
+        if (longitudinal) {
             JujutsuNeonMovementPatch.sendFrontSteer(actual);
         }
     }
@@ -342,7 +353,7 @@ public final class JujutsuNeonMovementPatchClient {
 
         double yaw = Math.toRadians(mc.player.getYRot());
         Vec3 forward = new Vec3(-Math.sin(yaw), 0.0, Math.cos(yaw));
-        Vec3 right = new Vec3(forward.z, 0.0, -forward.x);
+        Vec3 right = new Vec3(-forward.z, 0.0, forward.x);
         Vec3 result = forward.scale(forwardInput).add(right.scale(strafeInput));
         return result.lengthSqr() > 1.0E-6 ? result.normalize() : Vec3.ZERO;
     }
@@ -556,8 +567,12 @@ public final class JujutsuNeonMovementPatchClient {
                 boolean left = mc.options.keyLeft.isDown() && !mc.options.keyRight.isDown();
                 boolean right = mc.options.keyRight.isDown() && !mc.options.keyLeft.isDown();
 
+                boolean back = !left && !right &&
+                        mc.options.keyDown.isDown() && !mc.options.keyUp.isDown();
+
                 if (left) kind = JujutsuNeonMovementPatch.DashKind.LEFT;
                 else if (right) kind = JujutsuNeonMovementPatch.DashKind.RIGHT;
+                else if (back) kind = JujutsuNeonMovementPatch.DashKind.BACK;
                 else kind = JujutsuNeonMovementPatch.DashKind.FRONT;
             }
 

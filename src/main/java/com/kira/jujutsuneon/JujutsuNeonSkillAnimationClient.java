@@ -47,6 +47,7 @@ public final class JujutsuNeonSkillAnimationClient {
         MAX_BLUE,
         PURPLE,
         FRONT_DASH,
+        BACK_DASH,
         SIDE_DASH_LEFT,
         SIDE_DASH_RIGHT
     }
@@ -149,6 +150,7 @@ public final class JujutsuNeonSkillAnimationClient {
             String active = (String) ACTIVE_ANIM.get(null);
             int ticks = ACTIVE_ANIM_TICKS.getInt(null);
             int length = Math.max(1, ACTIVE_ANIM_LENGTH.getInt(null));
+            if (ticks <= 0 || "NONE".equals(active)) return SkillFrame.NONE;
             float progress = clamp01(1.0f - ticks / (float) length);
 
             return switch (active) {
@@ -156,6 +158,7 @@ public final class JujutsuNeonSkillAnimationClient {
                 case "MAX_BLUE" -> new SkillFrame(Skill.MAX_BLUE, progress);
                 case "PURPLE_CAST", "HOLLOW_PURPLE" -> new SkillFrame(Skill.PURPLE, progress);
                 case "FRONT_DASH" -> new SkillFrame(Skill.FRONT_DASH, progress);
+                case "BACK_DASH" -> new SkillFrame(Skill.BACK_DASH, progress);
                 case "SIDE_DASH_LEFT" -> new SkillFrame(Skill.SIDE_DASH_LEFT, progress);
                 case "SIDE_DASH_RIGHT" -> new SkillFrame(Skill.SIDE_DASH_RIGHT, progress);
                 default -> SkillFrame.NONE;
@@ -294,6 +297,7 @@ public final class JujutsuNeonSkillAnimationClient {
                 case MAX_BLUE -> applyMaximumBlue(localFrame.progress, ageInTicks);
                 case PURPLE -> applyPurple(localFrame.progress, ageInTicks);
                 case FRONT_DASH -> applyFrontDash(localFrame.progress);
+                case BACK_DASH -> applyBackDash(localFrame.progress);
                 case SIDE_DASH_LEFT -> applySideDash(localFrame.progress, -1.0f);
                 case SIDE_DASH_RIGHT -> applySideDash(localFrame.progress, 1.0f);
                 default -> {
@@ -510,6 +514,39 @@ public final class JujutsuNeonSkillAnimationClient {
                     lerp(rightLeg.zRot, rad(4.0f), w));
             rotate(leftLeg,
                     lerp(leftLeg.xRot, rad(-27.0f), w),
+                    lerp(leftLeg.yRot, rad(7.0f), w),
+                    lerp(leftLeg.zRot, rad(-4.0f), w));
+        }
+
+        /** Reverse longitudinal dash: opposite momentum, dedicated silhouette. */
+        private void applyBackDash(float progress) {
+            float enter = smooth(clamp01(progress / 0.12f));
+            float exit = 1.0f - smooth(clamp01((progress - 0.75f) / 0.25f));
+            float w = Math.min(enter, exit);
+            if (w <= 0.001f) return;
+
+            rotate(body,
+                    lerp(body.xRot, rad(-32.0f), w),
+                    lerp(body.yRot, rad(2.0f), w),
+                    lerp(body.zRot, rad(0.0f), w));
+            head.xRot = lerp(head.xRot, head.xRot + rad(16.0f), w);
+            head.zRot = lerp(head.zRot, rad(0.0f), w);
+
+            rotate(rightArm,
+                    lerp(rightArm.xRot, rad(-46.0f), w),
+                    lerp(rightArm.yRot, rad(-11.0f), w),
+                    lerp(rightArm.zRot, rad(10.0f), w));
+            rotate(leftArm,
+                    lerp(leftArm.xRot, rad(-34.0f), w),
+                    lerp(leftArm.yRot, rad(13.0f), w),
+                    lerp(leftArm.zRot, rad(-12.0f), w));
+
+            rotate(rightLeg,
+                    lerp(rightLeg.xRot, rad(-34.0f), w),
+                    lerp(rightLeg.yRot, rad(-5.0f), w),
+                    lerp(rightLeg.zRot, rad(4.0f), w));
+            rotate(leftLeg,
+                    lerp(leftLeg.xRot, rad(24.0f), w),
                     lerp(leftLeg.yRot, rad(7.0f), w),
                     lerp(leftLeg.zRot, rad(-4.0f), w));
         }
