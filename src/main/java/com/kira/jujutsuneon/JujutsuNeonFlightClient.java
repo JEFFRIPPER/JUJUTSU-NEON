@@ -570,23 +570,25 @@ public final class JujutsuNeonFlightClient {
             }
 
             float vertical = Mth.clamp((float) velocity.y, -0.35F, 0.35F);
-            float bob = (float) Math.sin(ageInTicks * 0.18F) * 1.5F * hoverW;
+            // Calm-flight reference: almost upright, composed and weightless.
+            // The body only leans a little until Ctrl/sprint flight takes over.
+            float bob = (float) Math.sin(ageInTicks * 0.16F) * 0.85F * hoverW;
 
             float bodyPitchDeg =
-                    hoverW * (4.0F + bob) +
-                    normalW * 19.0F +
+                    hoverW * (2.5F + bob) +
+                    normalW * 8.5F +
                     boostW * 48.0F;
 
-            if (landingPose) bodyPitchDeg = 10.0F;
-            bodyPitchDeg -= vertical * 20.0F;
+            if (landingPose) bodyPitchDeg = 7.0F;
+            bodyPitchDeg -= vertical * (8.0F + 12.0F * boostW);
 
             float bank = 0.0F;
             Minecraft mc = Minecraft.getInstance();
             if (!landingPose) {
                 if (mc.options.keyLeft.isDown() && !mc.options.keyRight.isDown()) {
-                    bank = 7.5F + 6.0F * boostW;
+                    bank = 3.5F + 10.0F * boostW;
                 } else if (mc.options.keyRight.isDown() && !mc.options.keyLeft.isDown()) {
-                    bank = -7.5F - 6.0F * boostW;
+                    bank = -3.5F - 10.0F * boostW;
                 }
             }
 
@@ -597,26 +599,36 @@ public final class JujutsuNeonFlightClient {
             head.xRot = lerp(head.xRot, head.xRot - rad(bodyPitchDeg * 0.52F), w);
             head.zRot = lerp(head.zRot, rad(-bank * 0.32F), w);
 
-            float rightArmX = hoverW * -5.0F + normalW * 24.0F + boostW * 72.0F;
-            float leftArmX = hoverW * -5.0F + normalW * 24.0F + boostW * 72.0F;
-            float armSpread = normalW * 7.0F + boostW * 13.0F;
+            // Roblox calm-flight reference: arms are lifted and relaxed around the torso,
+            // while the legs hang in a slightly asymmetric tucked pose.  Sprint flight
+            // deliberately retains the much more aggressive aerodynamic silhouette.
+            float rightArmX = hoverW * -31.0F + normalW * -23.0F + boostW * 72.0F;
+            float leftArmX = hoverW * -25.0F + normalW * -19.0F + boostW * 72.0F;
+            float rightArmY = hoverW * -11.0F + normalW * -8.0F;
+            float leftArmY = hoverW * 9.0F + normalW * 7.0F;
+            float armSpread = hoverW * 20.0F + normalW * 16.0F + boostW * 13.0F;
 
-            rightArm.xRot = lerp(rightArm.xRot, rad(rightArmX - vertical * 12.0F), w);
-            leftArm.xRot = lerp(leftArm.xRot, rad(leftArmX - vertical * 12.0F), w);
-            rightArm.zRot = lerp(rightArm.zRot, rad(armSpread + bank * 0.34F), w);
-            leftArm.zRot = lerp(leftArm.zRot, rad(-armSpread + bank * 0.34F), w);
+            rightArm.xRot = lerp(rightArm.xRot, rad(rightArmX - vertical * (4.0F + 8.0F * boostW)), w);
+            leftArm.xRot = lerp(leftArm.xRot, rad(leftArmX - vertical * (4.0F + 8.0F * boostW)), w);
+            rightArm.yRot = lerp(rightArm.yRot, rad(rightArmY), w * (1.0F - boostW));
+            leftArm.yRot = lerp(leftArm.yRot, rad(leftArmY), w * (1.0F - boostW));
+            rightArm.zRot = lerp(rightArm.zRot, rad(armSpread + bank * 0.24F), w);
+            leftArm.zRot = lerp(leftArm.zRot, rad(-armSpread + bank * 0.24F), w);
 
-            float legPitch = hoverW * 2.0F + normalW * 11.0F + boostW * 24.0F;
-            rightLeg.xRot = lerp(rightLeg.xRot, rad(legPitch + 3.0F * normalW), w);
-            leftLeg.xRot = lerp(leftLeg.xRot, rad(legPitch - 3.0F * normalW), w);
-            rightLeg.zRot = lerp(rightLeg.zRot, rad(3.0F + bank * 0.18F), w);
-            leftLeg.zRot = lerp(leftLeg.zRot, rad(-3.0F + bank * 0.18F), w);
+            float rightLegPitch = hoverW * 18.0F + normalW * 14.0F + boostW * 27.0F;
+            float leftLegPitch = hoverW * -9.0F + normalW * -4.0F + boostW * 21.0F;
+            rightLeg.xRot = lerp(rightLeg.xRot, rad(rightLegPitch), w);
+            leftLeg.xRot = lerp(leftLeg.xRot, rad(leftLegPitch), w);
+            rightLeg.zRot = lerp(rightLeg.zRot, rad(5.0F + bank * 0.14F), w);
+            leftLeg.zRot = lerp(leftLeg.zRot, rad(-4.0F + bank * 0.14F), w);
 
             if (landingPose) {
-                rightArm.xRot = lerp(rightArm.xRot, rad(-18.0F), w * 0.65F);
-                leftArm.xRot = lerp(leftArm.xRot, rad(-18.0F), w * 0.65F);
-                rightLeg.xRot = lerp(rightLeg.xRot, rad(8.0F), w);
-                leftLeg.xRot = lerp(leftLeg.xRot, rad(-5.0F), w);
+                rightArm.xRot = lerp(rightArm.xRot, rad(-24.0F), w * 0.72F);
+                leftArm.xRot = lerp(leftArm.xRot, rad(-21.0F), w * 0.72F);
+                rightArm.zRot = lerp(rightArm.zRot, rad(14.0F), w * 0.72F);
+                leftArm.zRot = lerp(leftArm.zRot, rad(-14.0F), w * 0.72F);
+                rightLeg.xRot = lerp(rightLeg.xRot, rad(11.0F), w);
+                leftLeg.xRot = lerp(leftLeg.xRot, rad(-4.0F), w);
             }
 
             syncWearLayers();
