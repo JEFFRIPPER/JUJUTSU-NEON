@@ -3730,11 +3730,9 @@ public class JujutsuNeonMod {
     private static final int DASH_NONE = 0;
     private static final int DASH_FRONT = 1;
     private static final int DASH_SIDE = 2;
-    private static final int DASH_AIR = 3;
 
     private static final long FRONT_DASH_TICKS = 14L;
     private static final long SIDE_DASH_TICKS = 4L;
-    private static final long AIR_DASH_TICKS = 3L;
     private static final float FRONT_DASH_DAMAGE = 16.0F; // 8 сердец
 
     private static void handleMovement(ServerPlayer player, MovementAction action) {
@@ -3781,20 +3779,14 @@ public class JujutsuNeonMod {
         }
     }
 
-    private static boolean isAirDashHeight(ServerPlayer player) {
-        Vec3 start = player.position().add(0.0, 0.05, 0.0);
-        Vec3 end = start.add(0.0, -4.15, 0.0);
-
+    private static boolean dashHasGroundSupport(ServerPlayer player) {
+        if (player.onGround()) return true;
+        Vec3 start = player.position().add(0.0, 0.08, 0.0);
+        Vec3 end = start.add(0.0, -0.36, 0.0);
         BlockHitResult hit = player.level().clip(new ClipContext(
-                start,
-                end,
-                ClipContext.Block.COLLIDER,
-                ClipContext.Fluid.NONE,
-                player
+                start, end, ClipContext.Block.COLLIDER, ClipContext.Fluid.NONE, player
         ));
-
-        if (hit.getType() == HitResult.Type.MISS) return true;
-        return start.y - hit.getLocation().y >= 4.0 - 1.0E-3;
+        return hit.getType() != HitResult.Type.MISS;
     }
 
     private static void startDash(ServerPlayer player, int side) {
@@ -3803,21 +3795,8 @@ public class JujutsuNeonMod {
         ServerLevel level = player.serverLevel();
         long now = level.getGameTime();
 
-        // В воздухе выше 3 блоков любой Q-рывок становится свободным air dash по камере.
-        if (isAirDashHeight(player)) {
-            if (!consumeEnergy(player, 0.8)) return;
-
-            Vec3 dir = player.getLookAngle().normalize();
-            player.getPersistentData().putInt("jn_dash_mode", DASH_AIR);
-            player.getPersistentData().putLong("jn_dash_started", now);
-            player.getPersistentData().putDouble("jn_dash_dx", dir.x);
-            player.getPersistentData().putDouble("jn_dash_dy", dir.y);
-            player.getPersistentData().putDouble("jn_dash_dz", dir.z);
-
-            playSfx(level, player, SFX_DASH, 0.82f, 1.22f);
-            spawnVfx(level, VFX_DASH, player.position().add(0, 0.85, 0), 1);
-            return;
-        }
+        // Air Dash does not exist. Every dash requires ground support.
+        if (!dashHasGroundSupport(player)) return;
 
         long cooldown = player.getPersistentData().getLong("jn_dash_cd");
         if (now < cooldown) return;
@@ -4038,15 +4017,6 @@ public class JujutsuNeonMod {
             return;
         }
 
-        if (mode == DASH_AIR) {
-            if (elapsed >= AIR_DASH_TICKS) {
-                finishDash(player, false);
-                return;
-            }
-
-            player.fallDistance = 0.0F;
-            spawnVfx(level, VFX_TRAIL, player.position().add(0, 0.85, 0), 1);
-        }
     }
 
     private static void performChargedJump(ServerPlayer player, int tier) {
@@ -4253,7 +4223,7 @@ public class JujutsuNeonMod {
 
         double yaw = Math.toRadians(player.getYRot());
         Vec3 forward = new Vec3(-Math.sin(yaw), 0.0, Math.cos(yaw));
-        Vec3 right = new Vec3(forward.z, 0.0, -forward.x);
+        Vec3 right = new Vec3(-forward.z, 0.0, forward.x);
 
         Vec3 dir = forward.scale(forwardInput).add(right.scale(strafeInput));
         return dir.lengthSqr() > 1.0E-4 ? dir.normalize() : Vec3.ZERO;
@@ -4286,65 +4256,24 @@ public class JujutsuNeonMod {
     }
 
     private static boolean isNaturalTreeLog(ServerLevel level, BlockPos start) {
-        BlockState startState = level.getBlockState(start);
-        if (!startState.is(BlockTags.LOGS)) return false;
+        if (!level.getBlockState(start).is(BlockTags.LOGS)) return false;
 
-        List<BlockPos> queue = new ArrayList<>();
-        List<BlockPos> visited = new ArrayList<>();
-        queue.add(start.immutable());
+        BlockState below = level.getBlockState(start.below());
+        if (below.is(Blocks.DIRT) || below.is(Blocks.GRASS_BLOCK) || below.is(Blocks.PODZOL) ||
+                below.is(Blocks.COARSE_DIRT) || below.is(Blocks.ROOTED_DIRT) ||
+                below.is(Blocks.MUD) || below.is(Blocks.MYCELIUM)) {
+            return true;
+        }
 
-        boolean grounded = false;
-        int leavesNearby = 0;
-        int minY = start.getY();
-        int maxY = start.getY();
-
-        for (int qi = 0; qi < queue.size() && visited.size() < 40; qi++) {
-            BlockPos pos = queue.get(qi);
-            if (visited.contains(pos)) continue;
-
-            BlockState state = level.getBlockState(pos);
-            if (!state.is(BlockTags.LOGS)) continue;
-
-            visited.add(pos);
-            minY = Math.min(minY, pos.getY());
-            maxY = Math.max(maxY, pos.getY());
-
-            BlockState below = level.getBlockState(pos.below());
-            if (below.is(Blocks.DIRT) ||
-                    below.is(Blocks.GRASS_BLOCK) ||
-                    below.is(Blocks.PODZOL) ||
-                    below.is(Blocks.COARSE_DIRT) ||
-                    below.is(Blocks.ROOTED_DIRT) ||
-                    below.is(Blocks.MUD) ||
-                    below.is(Blocks.MYCELIUM)) {
-                grounded = true;
-            }
-
-            for (int dx = -2; dx <= 2; dx++) {
-                for (int dy = -2; dy <= 3; dy++) {
-                    for (int dz = -2; dz <= 2; dz++) {
-                        if (Math.abs(dx) + Math.abs(dz) > 3) continue;
-                        if (level.getBlockState(pos.offset(dx, dy, dz)).is(BlockTags.LEAVES)) {
-                            leavesNearby++;
-                            if (leavesNearby >= 4) break;
-                        }
-                    }
-                    if (leavesNearby >= 4) break;
-                }
-                if (leavesNearby >= 4) break;
-            }
-
-            for (Direction direction : Direction.values()) {
-                BlockPos next = pos.relative(direction);
-                if (!visited.contains(next) && level.getBlockState(next).is(BlockTags.LOGS)) {
-                    queue.add(next.immutable());
+        for (int dy = 0; dy <= 6; dy++) {
+            for (int dx = -3; dx <= 3; dx++) {
+                for (int dz = -3; dz <= 3; dz++) {
+                    if (Math.abs(dx) + Math.abs(dz) > 5) continue;
+                    if (level.getBlockState(start.offset(dx, dy, dz)).is(BlockTags.LEAVES)) return true;
                 }
             }
         }
-
-        // Дом из брёвен обычно не имеет одновременно настоящей кроны,
-        // связи с грунтом и вертикального ствола.
-        return grounded && leavesNearby >= 4 && (maxY - minY >= 2);
+        return false;
     }
 
     private static boolean isSuperRunPlant(ServerLevel level, BlockPos pos, BlockState state) {
@@ -4572,6 +4501,7 @@ public class JujutsuNeonMod {
         // Мир взаимодействует уже с фактической позицией игрока, пришедшей с клиента:
         // деревья/листва испаряются, вода получает только вторичный VFX.
         vaporizeSuperRunPlants(player, level);
+        supportSuperRunOnWater(player, level);
         spawnSuperRunEffects(player, level, now);
     }
 
@@ -5545,25 +5475,6 @@ public class JujutsuNeonMod {
             state.wasDown = down;
         }
 
-        private static boolean clientIsAirDashHeight(Minecraft mc) {
-            if (mc.player == null || mc.level == null) return false;
-            if (mc.player.getAbilities().flying) return true;
-
-            Vec3 start = mc.player.position().add(0.0, 0.05, 0.0);
-            Vec3 end = start.add(0.0, -4.15, 0.0);
-
-            BlockHitResult hit = mc.level.clip(new ClipContext(
-                    start,
-                    end,
-                    ClipContext.Block.COLLIDER,
-                    ClipContext.Fluid.NONE,
-                    mc.player
-            ));
-
-            if (hit.getType() == HitResult.Type.MISS) return true;
-            return start.y - hit.getLocation().y >= 4.0 - 1.0E-3;
-        }
-
         private static Vec3 clientHorizontalDirection(Minecraft mc) {
             if (mc.player == null) return Vec3.ZERO;
 
@@ -5674,40 +5585,26 @@ public class JujutsuNeonMod {
 
         private static void startClientDash(Minecraft mc, MovementAction requestedAction) {
             if (!hudBlindfold || mc.player == null || mc.level == null) return;
-            if (hudMaxBlueActive || hudPurpleCasting) return;
-            if (clientDashMode != DASH_NONE) return;
+            if (hudMaxBlueActive || hudPurpleCasting || clientDashMode != DASH_NONE) return;
+            if (!clientHasGroundSupport(mc, 0.36)) return;
 
-            boolean air = clientIsAirDashHeight(mc);
-            Vec3 look = mc.player.getLookAngle().normalize();
+            Vec3 look = mc.player.getLookAngle();
+            Vec3 horizontal = new Vec3(look.x, 0.0, look.z);
+            if (horizontal.lengthSqr() < 1.0E-4) {
+                double yaw = Math.toRadians(mc.player.getYRot());
+                horizontal = new Vec3(-Math.sin(yaw), 0.0, Math.cos(yaw));
+            }
+            horizontal = horizontal.normalize();
+            Vec3 right = new Vec3(-horizontal.z, 0.0, horizontal.x);
 
-            if (air) {
-                clientDashMode = DASH_AIR;
-                clientDashDirection = look;
-            } else if (requestedAction == MovementAction.LEFT_DASH ||
-                    requestedAction == MovementAction.RIGHT_DASH) {
-                Vec3 horizontal = new Vec3(look.x, 0.0, look.z);
-                if (horizontal.lengthSqr() < 1.0E-4) {
-                    double yaw = Math.toRadians(mc.player.getYRot());
-                    horizontal = new Vec3(-Math.sin(yaw), 0.0, Math.cos(yaw));
-                }
-                horizontal = horizontal.normalize();
-
-                Vec3 right = new Vec3(-horizontal.z, 0.0, horizontal.x);
+            if (requestedAction == MovementAction.LEFT_DASH || requestedAction == MovementAction.RIGHT_DASH) {
                 clientDashDirection = requestedAction == MovementAction.LEFT_DASH
-                        ? right.scale(-1.0)
-                        : right;
+                        ? right.scale(-1.0) : right;
                 clientDashMode = DASH_SIDE;
             } else {
-                Vec3 horizontal = new Vec3(look.x, 0.0, look.z);
-                if (horizontal.lengthSqr() < 1.0E-4) {
-                    double yaw = Math.toRadians(mc.player.getYRot());
-                    horizontal = new Vec3(-Math.sin(yaw), 0.0, Math.cos(yaw));
-                }
-                horizontal = horizontal.normalize();
-                clientDashMode = DASH_FRONT;
                 clientDashDirection = requestedAction == MovementAction.BACK_DASH
-                        ? horizontal.scale(-1.0)
-                        : horizontal;
+                        ? horizontal.scale(-1.0) : horizontal;
+                clientDashMode = DASH_FRONT;
             }
 
             clientDashAge = 0;
@@ -5732,27 +5629,22 @@ public class JujutsuNeonMod {
 
             double speed;
             int lifetime;
-            boolean stepUp;
-
             if (clientDashMode == DASH_FRONT) {
                 lifetime = (int) FRONT_DASH_TICKS;
                 double t = Mth.clamp(clientDashAge / (double) FRONT_DASH_TICKS, 0.0, 1.0);
                 speed = 1.68 - 1.30 * t;
-                stepUp = true;
             } else if (clientDashMode == DASH_SIDE) {
                 lifetime = (int) SIDE_DASH_TICKS;
                 speed = 1.28;
-                stepUp = true;
             } else {
-                lifetime = (int) AIR_DASH_TICKS;
-                speed = 1.68; // ~5 блоков за 3 тика
-                stepUp = false;
+                clientDashMode = DASH_NONE;
+                clientDashAge = 0;
+                clientDashDirection = Vec3.ZERO;
+                return;
             }
 
-            // Ground/front/side dash используют тот же 2-блочный slope solver.
-            // Air dash остаётся чистым направленным рывком без автоподъёма.
             if (clientDashAge >= lifetime ||
-                    !tryClientForcedMove(mc, dir.normalize().scale(speed), stepUp)) {
+                    !tryClientForcedMove(mc, dir.normalize().scale(speed), true)) {
                 clientDashMode = DASH_NONE;
                 clientDashAge = 0;
                 clientDashDirection = Vec3.ZERO;
@@ -5760,7 +5652,6 @@ public class JujutsuNeonMod {
                 return;
             }
 
-            // Во время рывка vanilla gravity/input не должны уводить траекторию.
             mc.player.setDeltaMovement(Vec3.ZERO);
             mc.player.fallDistance = 0.0F;
             clientDashAge++;
@@ -5802,43 +5693,115 @@ public class JujutsuNeonMod {
             mc.player.walkAnimation.update(target, moving ? 0.55F : 0.35F);
         }
 
-        private static void tickCustomGroundMovement(Minecraft mc) {
-            if (!hudBlindfold || mc.player == null || mc.level == null) return;
-            if (hudMaxBlueActive || hudPurpleCasting || clientDashMode != DASH_NONE) {
-                updateCustomLocomotionAnimation(mc, false, false);
-                return;
+        private enum ClientMovementState {
+            LOCKED,
+            DASH,
+            FLIGHT,
+            WATER_RUN,
+            WATER,
+            GROUND,
+            AIR
+        }
+
+        private static ClientMovementState resolveMovementState(Minecraft mc, boolean superRun) {
+            if (hudMaxBlueActive || hudPurpleCasting) return ClientMovementState.LOCKED;
+            if (clientDashMode != DASH_NONE) return ClientMovementState.DASH;
+            if (JujutsuNeonFlightClient.isCustomFlightActive()) return ClientMovementState.FLIGHT;
+            if (mc.player != null && mc.player.isInWaterOrBubble()) {
+                return superRun ? ClientMovementState.WATER_RUN : ClientMovementState.WATER;
+            }
+            if (clientHasGroundSupport(mc, 0.34)) return ClientMovementState.GROUND;
+            return ClientMovementState.AIR;
+        }
+
+        private static void smoothGroundDescent(Minecraft mc) {
+            if (mc.player == null || mc.level == null || mc.player.onGround()) return;
+
+            Vec3 start = mc.player.position().add(0.0, 0.06, 0.0);
+            Vec3 end = start.add(0.0, -1.35, 0.0);
+            BlockHitResult hit = mc.level.clip(new ClipContext(
+                    start, end, ClipContext.Block.COLLIDER, ClipContext.Fluid.NONE, mc.player
+            ));
+            if (hit.getType() == HitResult.Type.MISS) return;
+
+            double drop = mc.player.getY() - hit.getLocation().y;
+            if (drop <= 0.02 || drop > 1.25) return;
+
+            double step = Math.min(drop, 0.34);
+            Vec3 down = new Vec3(0.0, -step, 0.0);
+            if (mc.level.noCollision(mc.player, mc.player.getBoundingBox().move(down))) {
+                mc.player.move(MoverType.SELF, down);
+                mc.player.fallDistance = 0.0F;
+            }
+        }
+
+        private static void tickCustomWaterMovement(Minecraft mc, Vec3 dir) {
+            if (mc.player == null) return;
+
+            boolean moving = dir.lengthSqr() >= 1.0E-6;
+            Vec3 old = mc.player.getDeltaMovement();
+            double speed = 0.12;
+            double x = moving ? dir.x * speed : old.x * 0.72;
+            double z = moving ? dir.z * speed : old.z * 0.72;
+            double y = old.y * 0.72;
+
+            if (mc.options.keyJump.isDown() && !mc.options.keyShift.isDown()) {
+                y = Math.min(0.18, y + 0.075);
+            } else if (mc.options.keyShift.isDown() && !mc.options.keyJump.isDown()) {
+                y = Math.max(-0.18, y - 0.075);
+            } else if (mc.player.isUnderWater()) {
+                y += 0.012;
             }
 
-            // Flight has a separate owner and is never mixed with ground/air locomotion.
-            if (mc.player.getAbilities().flying) return;
+            mc.player.setDeltaMovement(x, y, z);
+            mc.player.setSwimming(mc.player.isUnderWater() && moving);
+            mc.player.fallDistance = 0.0F;
+        }
+
+        private static void tickCustomMovement(Minecraft mc) {
+            if (!hudBlindfold || mc.player == null || mc.level == null) return;
 
             Vec3 dir = clientHorizontalDirection(mc);
             boolean moving = dir.lengthSqr() >= 1.0E-6;
             boolean superRun = ClientModEvents.SUPER_SPEED_KEY.isDown();
-            double speed = superRun
-                    ? CUSTOM_RUN_BLOCKS_PER_TICK
-                    : CUSTOM_WALK_BLOCKS_PER_TICK;
+            double speed = superRun ? CUSTOM_RUN_BLOCKS_PER_TICK : CUSTOM_WALK_BLOCKS_PER_TICK;
+            ClientMovementState state = resolveMovementState(mc, superRun);
 
-            if (!moving) {
-                updateCustomLocomotionAnimation(mc, false, superRun);
-                return;
+            switch (state) {
+                case LOCKED -> updateCustomLocomotionAnimation(mc, false, false);
+                case DASH, FLIGHT -> {
+                    // Explicit ownership handoff: another state already owns this tick.
+                }
+                case WATER_RUN -> {
+                    if (!moving || !clientWaterSurfaceRun(mc, dir, speed)) {
+                        tickCustomWaterMovement(mc, dir);
+                    }
+                    updateCustomLocomotionAnimation(mc, moving, true);
+                }
+                case WATER -> {
+                    tickCustomWaterMovement(mc, dir);
+                    updateCustomLocomotionAnimation(mc, moving, false);
+                }
+                case GROUND -> {
+                    mc.player.setSwimming(false);
+                    if (moving) {
+                        tryClientForcedMove(mc, dir.scale(speed), true);
+                        smoothGroundDescent(mc);
+                    } else {
+                        Vec3 v = mc.player.getDeltaMovement();
+                        mc.player.setDeltaMovement(0.0, v.y, 0.0);
+                    }
+                    updateCustomLocomotionAnimation(mc, moving, superRun);
+                }
+                case AIR -> {
+                    mc.player.setSwimming(false);
+                    if (moving) {
+                        Vec3 velocity = mc.player.getDeltaMovement();
+                        mc.player.setDeltaMovement(dir.x * speed, velocity.y, dir.z * speed);
+                    }
+                    updateCustomLocomotionAnimation(mc, moving, superRun);
+                }
             }
-
-            if (superRun && clientWaterSurfaceRun(mc, dir, speed)) {
-                updateCustomLocomotionAnimation(mc, true, true);
-                return;
-            }
-
-            if (clientHasGroundSupport(mc, 0.34)) {
-                // Ground: Jujutsu Neon swept solver owns position/collision.
-                tryClientForcedMove(mc, dir.scale(speed), true);
-            } else if (!mc.player.isInWaterOrBubble()) {
-                // Air: never kill horizontal control. Preserve the jump/fall Y velocity.
-                Vec3 velocity = mc.player.getDeltaMovement();
-                mc.player.setDeltaMovement(dir.x * speed, velocity.y, dir.z * speed);
-            }
-
-            updateCustomLocomotionAnimation(mc, true, superRun);
         }
 
         private static void performClientChargedJump(Minecraft mc, int tier) {
@@ -5873,8 +5836,9 @@ public class JujutsuNeonMod {
             Minecraft mc = Minecraft.getInstance();
             if (!hudBlindfold || mc.player == null || event.getEntity() != mc.player) return;
 
-            // Когда creative flight уже активен — вообще не трогаем vanilla flight input.
-            if (mc.player.getAbilities().flying) return;
+            // Ordinary creative flight remains vanilla. Custom blindfold flight is still
+            // owned by our controller and receives no vanilla motion impulses.
+            if (mc.player.getAbilities().flying && !JujutsuNeonFlightClient.isCustomFlightActive()) return;
 
             // Пока надета повязка, vanilla jump полностью подавлен.
             // Space читается отдельно нашим state machine: поэтому удерживание
@@ -5979,7 +5943,7 @@ public class JujutsuNeonMod {
                 }
             }
 
-            if (hudBlindfold && !mc.player.getAbilities().flying) {
+            if (hudBlindfold && !mc.player.getAbilities().flying && !mc.player.isInWaterOrBubble()) {
                 boolean pressedNow = jumpHeldNow && !jumpChargeWasDown;
                 boolean releasedNow = !jumpHeldNow && jumpChargeWasDown;
 
@@ -6051,40 +6015,7 @@ public class JujutsuNeonMod {
                 jumpPressStartedInAir = false;
             }
 
-            while (ClientModEvents.DASH_KEY.consumeClick()) {
-                // Hard input gate: Q is a dash only with BOTH hands empty.
-                if (!hudBlindfold ||
-                        !mc.player.getMainHandItem().isEmpty() ||
-                        !mc.player.getOffhandItem().isEmpty()) {
-                    continue;
-                }
-
-                boolean left = mc.options.keyLeft.isDown() && !mc.options.keyRight.isDown();
-                boolean right = mc.options.keyRight.isDown() && !mc.options.keyLeft.isDown();
-                boolean back = !left && !right &&
-                        mc.options.keyDown.isDown() && !mc.options.keyUp.isDown();
-
-                MovementAction action;
-                if (left) action = MovementAction.LEFT_DASH;
-                else if (right) action = MovementAction.RIGHT_DASH;
-                else if (back) action = MovementAction.BACK_DASH;
-                else action = MovementAction.FRONT_DASH;
-
-                startClientDash(mc, action);
-                NETWORK.sendToServer(new MovementPacket(action));
-
-                if (clientDashMode == DASH_AIR) {
-                    startAnim("AIR_DASH", 5);
-                } else if (action == MovementAction.LEFT_DASH) {
-                    startAnim("SIDE_DASH_LEFT", 6);
-                } else if (action == MovementAction.RIGHT_DASH) {
-                    startAnim("SIDE_DASH_RIGHT", 6);
-                } else if (action == MovementAction.BACK_DASH) {
-                    startAnim("BACK_DASH", 14);
-                } else {
-                    startAnim("FRONT_DASH", 14);
-                }
-            }
+            // Dash Q is consumed exclusively by JujutsuNeonMovementPatchClient.
 
             boolean speedHeld = ClientModEvents.SUPER_SPEED_KEY.isDown();
             if (speedHeld != lastSpeedHeld) {
@@ -6093,7 +6024,7 @@ public class JujutsuNeonMod {
             }
 
             tickClientDash(mc);
-            tickCustomGroundMovement(mc);
+            tickCustomMovement(mc);
 
             if (hudMaxBlueActive) {
                 if (mc.options.keyUp.isDown() && !mc.options.keyDown.isDown()) {

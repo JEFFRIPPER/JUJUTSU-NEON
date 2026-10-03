@@ -49,6 +49,8 @@ public final class JujutsuNeonFlightClient {
     private static final double LANDING_SPEED = 0.18;
     private static final float NORMAL_FLY_SPEED = 0.05F;
     private static final float BOOST_FLY_SPEED = 0.10F;
+    private static final double NORMAL_VECTOR_SPEED = 0.42;
+    private static final double BOOST_VECTOR_SPEED = 0.82;
 
     private static boolean armedFromChargedJump = false;
     private static int armedTicks = 0;
@@ -234,12 +236,30 @@ public final class JujutsuNeonFlightClient {
     }
 
     private static boolean movementInputHeld(Minecraft mc) {
-        return mc.options.keyUp.isDown() ||
-                mc.options.keyDown.isDown() ||
-                mc.options.keyLeft.isDown() ||
-                mc.options.keyRight.isDown() ||
-                mc.options.keyJump.isDown() ||
-                mc.options.keyShift.isDown();
+        return mc.options.keyUp.isDown() || mc.options.keyDown.isDown() ||
+                mc.options.keyLeft.isDown() || mc.options.keyRight.isDown();
+    }
+
+    private static Vec3 flightInputDirection(Minecraft mc) {
+        if (mc.player == null) return Vec3.ZERO;
+
+        double forwardInput = (mc.options.keyUp.isDown() ? 1.0 : 0.0) -
+                (mc.options.keyDown.isDown() ? 1.0 : 0.0);
+        double strafeInput = (mc.options.keyRight.isDown() ? 1.0 : 0.0) -
+                (mc.options.keyLeft.isDown() ? 1.0 : 0.0);
+        if (Math.abs(forwardInput) < 1.0E-5 && Math.abs(strafeInput) < 1.0E-5) return Vec3.ZERO;
+
+        Vec3 look = mc.player.getLookAngle().normalize();
+        Vec3 horizontalForward = new Vec3(look.x, 0.0, look.z);
+        if (horizontalForward.lengthSqr() < 1.0E-6) {
+            double yaw = Math.toRadians(mc.player.getYRot());
+            horizontalForward = new Vec3(-Math.sin(yaw), 0.0, Math.cos(yaw));
+        }
+        horizontalForward = horizontalForward.normalize();
+        Vec3 right = new Vec3(-horizontalForward.z, 0.0, horizontalForward.x);
+
+        Vec3 result = look.scale(forwardInput).add(right.scale(strafeInput));
+        return result.lengthSqr() > 1.0E-8 ? result.normalize() : Vec3.ZERO;
     }
 
     private static void spawnSprintFlightVfx(Minecraft mc) {
@@ -350,16 +370,17 @@ public final class JujutsuNeonFlightClient {
             return;
         }
 
-        // Keep temporary flight entitlement alive even if another vanilla sync briefly touches abilities.
+        if (mc.player.isInWaterOrBubble()) {
+            endFlight(mc, true);
+            return;
+        }
+
         if (!mc.player.getAbilities().mayfly || !mc.player.getAbilities().flying) {
             mc.player.getAbilities().mayfly = true;
             mc.player.getAbilities().flying = true;
             mc.player.onUpdateAbilities();
         }
 
-        Vec3 currentVelocity = mc.player.getDeltaMovement();
-
-        // Sprint-flight impact is evaluated before normal 3-block auto-landing.
         boolean crash = boost && !landing &&
                 (mc.player.verticalCollision || mc.player.onGround()) &&
                 previousFlightVelocity.y < -0.10 &&
@@ -372,11 +393,15 @@ public final class JujutsuNeonFlightClient {
             return;
         }
 
+        Vec3 inputDirection = flightInputDirection(mc);
+        boolean moving = inputDirection.lengthSqr() > 1.0E-8;
+
         if (!landing) {
-            boolean wantsBoost = JujutsuNeonMod.ClientModEvents.SUPER_SPEED_KEY.isDown() && movementInputHeld(mc);
+            boolean wantsBoost = JujutsuNeonMod.ClientModEvents.SUPER_SPEED_KEY.isDown() && moving;
             setBoost(mc, wantsBoost);
 
-            if (!boost && groundDistance(mc, AUTO_LAND_HEIGHT + 0.25) <= AUTO_LAND_HEIGHT) {
+            if (!boost && groundDistance(mc, AUTO_LAND_HEIGHT + 0.25) <= AUTO_LAND_HEIGHT &&
+                    (!moving || inputDirection.y < -0.08)) {
                 landing = true;
                 setBoost(mc, false);
             }
@@ -384,14 +409,12 @@ public final class JujutsuNeonFlightClient {
 
         if (landing) {
             double distance = groundDistance(mc, AUTO_LAND_HEIGHT + 0.25);
-
             if (mc.player.onGround() || distance <= 0.20) {
                 mc.player.setDeltaMovement(Vec3.ZERO);
                 endFlight(mc, true);
                 return;
             }
 
-            // Smooth committed landing: suppress the feeling of simply falling three blocks.
             Vec3 velocity = mc.player.getDeltaMovement();
             mc.player.getAbilities().setFlyingSpeed(0.02F);
             mc.player.setDeltaMovement(
@@ -401,13 +424,21 @@ public final class JujutsuNeonFlightClient {
             );
             mc.player.fallDistance = 0.0F;
         } else {
+            double speed = boost ? BOOST_VECTOR_SPEED : NORMAL_VECTOR_SPEED;
+            Vec3 target = moving ? inputDirection.scale(speed) : Vec3.ZERO;
+            Vec3 current = mc.player.getDeltaMovement();
+            double blend = boost ? 0.46 : 0.34;
+            Vec3 next = current.lerp(target, blend);
+            if (!moving && next.lengthSqr() < 0.0004) next = Vec3.ZERO;
+
+            mc.player.setDeltaMovement(next);
             mc.player.getAbilities().setFlyingSpeed(boost ? BOOST_FLY_SPEED : NORMAL_FLY_SPEED);
             mc.player.setSprinting(false);
             mc.player.fallDistance = 0.0F;
             spawnSprintFlightVfx(mc);
         }
 
-        previousFlightVelocity = currentVelocity;
+        previousFlightVelocity = mc.player.getDeltaMovement();
     }
 
     @SubscribeEvent(priority = EventPriority.LOWEST)

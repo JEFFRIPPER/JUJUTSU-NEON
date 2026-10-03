@@ -1,39 +1,77 @@
 # JUJUTSU NEON — Movement Contract
 
-This file is a hard contract for movement code. A movement change is invalid if it violates any implemented invariant below.
+This file is a hard contract. A movement change is invalid if any invariant below is violated.
+
+## Authority model
+- Blindfold OFF: vanilla Minecraft movement is untouched.
+- Gojo blindfold ON: Jujutsu Neon owns movement physics.
+- Exactly one movement state may own motion in a tick.
+- Legal client states are: `LOCKED`, `DASH`, `FLIGHT`, `WATER_RUN`, `WATER`, `GROUND`, `AIR`.
+- A state transition must release ownership before the next state writes velocity/position.
+- No second event handler may independently start the same dash or rewrite the same movement vector.
 
 ## Coordinate invariants
-- Camera-forward is the horizontal look vector.
-- Camera-right is **(-forward.z, 0, forward.x)**.
+- Camera-forward is the look-relative forward basis.
+- Camera-right is `(-forward.z, 0, forward.x)`.
 - W = +forward.
 - S = -forward.
 - A = -right.
 - D = +right.
-- No downstream patch is allowed to flip A/D a second time.
+- No downstream patch may invert A/D again.
 
-## Locomotion invariants
-- With the Gojo blindfold equipped, Jujutsu Neon owns movement physics.
-- Vanilla locomotion animation remains visible; the player must never look like a rigid sliding doll during ordinary walking/running.
-- Ground movement and airborne horizontal control must be continuous. Walking off a ledge or jumping must not cause a horizontal stop-frame.
-- Custom locomotion must preserve vertical velocity while applying airborne horizontal control.
-- Only one movement state may own horizontal motion at a time.
+## Ground / air invariants
+- Ordinary walking/running must visibly drive vanilla limb locomotion; no rigid sliding doll.
+- Walking off a ledge may not cause a horizontal stop-frame.
+- Charged jump preserves horizontal momentum.
+- Airborne WASD control preserves vertical velocity.
+- Ascending 1–2 block obstacles may use the existing swept step-up solver.
+- Descending terrain must follow the ground smoothly instead of snapping/rubber-banding.
+- Client collision may never enter a block that still exists authoritatively on the server.
+
+## Water invariants
+- WATER and FLIGHT are mutually exclusive.
+- Entering water may never activate or preserve custom flight.
+- Without Ctrl: custom WATER state behaves like normal swimming, including vertical swim controls.
+- With Ctrl: WATER_RUN owns surface-running only.
+- If surface-running cannot acquire the surface, control falls back to WATER; it never freezes the player.
 
 ## Dash invariants
-- Q may start a dash only when BOTH hands are empty.
+- Air Dash does not exist.
+- A dash may start only with ground support.
+- Q starts a dash only when BOTH hands are empty.
+- Any item in either hand + Q remains Minecraft item-drop behavior; no client prediction and no dash packet.
 - W+Q / neutral+Q = steerable Front Dash.
-- S+Q = steerable Back Dash in the direction opposite the camera.
+- S+Q = steerable Back Dash opposite camera-forward.
 - A+Q = left Side Dash.
 - D+Q = right Side Dash.
-- Front Dash visual pose is a protected reference and must not be degraded by unrelated movement work.
-- Back Dash uses its own full-body animation and the same longitudinal timing family as Front Dash.
-- Server hit direction must follow the same steering direction as the client.
+- Front Dash pose/steering/distance are protected reference behavior.
+- Back Dash uses its own full-body reverse silhouette.
+- Side Dash may bank modestly as one coherent body; it may not fold or dislocate the torso.
+- Server hit direction must match the client steering vector.
 
-## Animation lifecycle invariant
-- When an animation timer reaches zero, its active state must become NONE immediately.
-- A completed dash/skill may not leave its final body pose stuck on ordinary locomotion.
+## Flight invariants
+- Flight may begin only from the charged-jump apex flow.
+- Flight direction follows the camera/look vector: look up = fly up, look down = fly down.
+- W/S travel along/opposite the full look vector. A/D strafe on the camera-relative horizontal right axis.
+- Space/Shift are not the primary vertical flight axes.
+- Ctrl changes flight speed only; it does not hand movement back to Super Run.
+- Entering water immediately ends flight and transfers ownership to WATER.
 
-## Known target invariants for subsequent passes
-- Air Dash is to be removed entirely.
-- Water without Ctrl must use normal swimming; Ctrl may own surface-running only.
-- Flight direction must follow the camera/look vector rather than Space/Shift axes.
-- Trees/collision and downhill descent must never cause rubber-band teleporting.
+## Tree / destruction invariants
+- Client code must NEVER delete a world block as movement prediction.
+- Super Run tree/foliage destruction is server-authoritative.
+- The client may request a small swept path clear, but must wait for authoritative block updates before entering it.
+- Tree detection must be bounded; no per-tick breadth-first traversal of an entire trunk/canopy.
+- A tree base one block above the player is included in the swept clear volume.
+
+## Animation lifecycle invariants
+- Vanilla locomotion is the base pose.
+- Temporary skill/dash pose exists only while its timer/state is active.
+- When a timer reaches zero, active animation becomes `NONE` immediately.
+- Renderer model swaps must be restored in Post and defensively before the next Pre.
+- Purple/Blue/Front Dash reference visuals may not regress due to unrelated movement fixes.
+
+## Red safety invariants
+- The caster is excluded from normal Red custom victims.
+- The caster cannot be hurt or knocked back by their own Red explosion path.
+- Blocks supporting/intersecting the caster are restored/protected from normal Red.
