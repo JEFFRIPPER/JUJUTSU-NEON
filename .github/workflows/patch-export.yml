@@ -27,50 +27,41 @@ jobs:
         with:
           gradle-version: '8.1.1'
 
-      - name: Install audio tools
-        run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq ffmpeg
-
-      - name: Generate resources
-        run: |
-          python3 -m pip install --quiet pillow
-          python3 generate_resources.py
-
-      - name: Build reobfuscated Forge mod
-        run: gradle build --stacktrace --no-daemon
+      - name: Build reobfuscated Forge classes
+        run: gradle reobfJar --stacktrace --no-daemon
 
       - name: Export reobfuscated patch classes as text
         run: |
+          rm -rf patch_payload
+          mkdir -p patch_payload
           python3 - <<'PY'
-          import base64, json, pathlib, zipfile
+          import base64, pathlib, zipfile
 
           jars = sorted(pathlib.Path('build/libs').glob('*.jar'), key=lambda p: p.stat().st_size, reverse=True)
           if not jars:
               raise SystemExit('No built JAR found')
 
           prefix = 'com/kira/jujutsuneon/JujutsuNeonMovementPatch'
-          payload = {}
+          exported = 0
           with zipfile.ZipFile(jars[0], 'r') as zf:
               for name in zf.namelist():
-                  if name.startswith(prefix) and name.endswith('.class'):
-                      payload[name] = base64.b64encode(zf.read(name)).decode('ascii')
+                  if not (name.startswith(prefix) and name.endswith('.class')):
+                      continue
+                  data = base64.b64encode(zf.read(name)).decode('ascii')
+                  out = pathlib.Path('patch_payload') / (pathlib.Path(name).name + '.b64')
+                  out.write_text('\n'.join(data[i:i+76] for i in range(0, len(data), 76)) + '\n', encoding='ascii')
+                  exported += 1
 
-          if not payload:
+          if not exported:
               raise SystemExit('No movement patch classes found in built JAR')
-
-          pathlib.Path('patch_classes.json').write_text(
-              json.dumps(payload, sort_keys=True, separators=(',', ':')),
-              encoding='utf-8'
-          )
-          print('exported', len(payload), 'class files')
+          print('exported', exported, 'class files')
           PY
 
       - name: Commit compiled patch payload
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add patch_classes.json
+          git add -A patch_payload patch_classes.json || true
           if git diff --cached --quiet; then
             echo 'No payload changes'
           else
