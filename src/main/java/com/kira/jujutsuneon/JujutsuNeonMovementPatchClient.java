@@ -291,7 +291,7 @@ public final class JujutsuNeonMovementPatchClient {
         from = from.normalize();
 
         double dot = Math.max(-1.0, Math.min(1.0, from.dot(to)));
-        double crossY = from.z * to.x - from.x * to.z;
+        double crossY = from.x * to.z - from.z * to.x;
         double angle = Math.atan2(crossY, dot);
         double turn = Math.max(-maxRadians, Math.min(maxRadians, angle));
         double c = Math.cos(turn);
