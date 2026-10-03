@@ -1,0 +1,44 @@
+name: Temporary Strict Movement Integration
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  integrate:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Import verified movement pass
+        run: |
+          git fetch origin movement-hard-contract-pass-2
+          git checkout origin/movement-hard-contract-pass-2 -- \
+            MOVEMENT_CONTRACT.md \
+            src/main/java/com/kira/jujutsuneon/JujutsuNeonMod.java \
+            src/main/java/com/kira/jujutsuneon/JujutsuNeonMovementPatch.java \
+            src/main/java/com/kira/jujutsuneon/JujutsuNeonMovementPatchClient.java \
+            src/main/java/com/kira/jujutsuneon/JujutsuNeonFlightClient.java \
+            src/main/java/com/kira/jujutsuneon/JujutsuNeonFlightPatch.java \
+            src/main/java/com/kira/jujutsuneon/JujutsuNeonSkillAnimationClient.java
+
+      - name: Verify imported source
+        run: |
+          if grep -R -E "DASH_AIR|AIR_DASH|DashKind.AIR|preclearSuperRunPath" -n src/main/java/com/kira/jujutsuneon; then exit 1; fi
+          grep -n "enum ClientMovementState" src/main/java/com/kira/jujutsuneon/JujutsuNeonMod.java
+          grep -n "sendSuperRunClear" src/main/java/com/kira/jujutsuneon/JujutsuNeonMovementPatch.java
+          grep -n "look.scale(forwardInput)" src/main/java/com/kira/jujutsuneon/JujutsuNeonFlightClient.java
+
+      - name: Commit verified movement pass
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add MOVEMENT_CONTRACT.md src/main/java/com/kira/jujutsuneon/
+          git commit -m "fix: enforce strict blindfold movement architecture"
+          git push
