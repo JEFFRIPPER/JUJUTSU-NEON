@@ -365,8 +365,9 @@ public final class HollowPurpleReferenceClient {
         Vec3 up = right.cross(direction).normalize();
 
         Vec3 backCenter = eye.subtract(direction.scale(1.30)).add(0.0, -0.18, 0.0);
-        Vec3 redStart = backCenter.add(right.scale(-2.10));
-        Vec3 blueStart = backCenter.add(right.scale(2.10));
+        // Video reference: Blue is on the caster's left, Red on the right.
+        Vec3 blueStart = backCenter.add(right.scale(-2.10));
+        Vec3 redStart = backCenter.add(right.scale(2.10));
         Vec3 mergePoint = eye.add(direction.scale(2.35)).add(0.0, -0.12, 0.0);
 
         float p = Mth.clamp(progress, 0.0f, 1.0f);
