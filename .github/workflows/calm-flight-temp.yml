@@ -1,0 +1,63 @@
+name: Temporary Calm Flight Pose Compile
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  compile:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.1.1'
+      - name: Apply reference calm-flight pose
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('src/main/java/com/kira/jujutsuneon/JujutsuNeonFlightClient.java')
+          s = p.read_text(encoding='utf-8')
+
+          replacements = [
+          ('''            float bob = (float) Math.sin(ageInTicks * 0.18F) * 1.5F * hoverW;\n\n            float bodyPitchDeg =\n                    hoverW * (4.0F + bob) +\n                    normalW * 19.0F +\n                    boostW * 48.0F;\n\n            if (landingPose) bodyPitchDeg = 10.0F;\n            bodyPitchDeg -= vertical * 20.0F;\n''',
+          '''            // Calm-flight reference: almost upright, composed and weightless.\n            // The body only leans a little until Ctrl/sprint flight takes over.\n            float bob = (float) Math.sin(ageInTicks * 0.16F) * 0.85F * hoverW;\n\n            float bodyPitchDeg =\n                    hoverW * (2.5F + bob) +\n                    normalW * 8.5F +\n                    boostW * 48.0F;\n\n            if (landingPose) bodyPitchDeg = 7.0F;\n            bodyPitchDeg -= vertical * (8.0F + 12.0F * boostW);\n'''),
+          ('''                if (mc.options.keyLeft.isDown() && !mc.options.keyRight.isDown()) {\n                    bank = 7.5F + 6.0F * boostW;\n                } else if (mc.options.keyRight.isDown() && !mc.options.keyLeft.isDown()) {\n                    bank = -7.5F - 6.0F * boostW;\n                }\n''',
+          '''                if (mc.options.keyLeft.isDown() && !mc.options.keyRight.isDown()) {\n                    bank = 3.5F + 10.0F * boostW;\n                } else if (mc.options.keyRight.isDown() && !mc.options.keyLeft.isDown()) {\n                    bank = -3.5F - 10.0F * boostW;\n                }\n'''),
+          ('''            float rightArmX = hoverW * -5.0F + normalW * 24.0F + boostW * 72.0F;\n            float leftArmX = hoverW * -5.0F + normalW * 24.0F + boostW * 72.0F;\n            float armSpread = normalW * 7.0F + boostW * 13.0F;\n\n            rightArm.xRot = lerp(rightArm.xRot, rad(rightArmX - vertical * 12.0F), w);\n            leftArm.xRot = lerp(leftArm.xRot, rad(leftArmX - vertical * 12.0F), w);\n            rightArm.zRot = lerp(rightArm.zRot, rad(armSpread + bank * 0.34F), w);\n            leftArm.zRot = lerp(leftArm.zRot, rad(-armSpread + bank * 0.34F), w);\n\n            float legPitch = hoverW * 2.0F + normalW * 11.0F + boostW * 24.0F;\n            rightLeg.xRot = lerp(rightLeg.xRot, rad(legPitch + 3.0F * normalW), w);\n            leftLeg.xRot = lerp(leftLeg.xRot, rad(legPitch - 3.0F * normalW), w);\n            rightLeg.zRot = lerp(rightLeg.zRot, rad(3.0F + bank * 0.18F), w);\n            leftLeg.zRot = lerp(leftLeg.zRot, rad(-3.0F + bank * 0.18F), w);\n''',
+          '''            // Roblox calm-flight reference: arms are lifted and relaxed around the torso,\n            // while the legs hang in a slightly asymmetric tucked pose.  Sprint flight\n            // deliberately retains the much more aggressive aerodynamic silhouette.\n            float rightArmX = hoverW * -31.0F + normalW * -23.0F + boostW * 72.0F;\n            float leftArmX = hoverW * -25.0F + normalW * -19.0F + boostW * 72.0F;\n            float rightArmY = hoverW * -11.0F + normalW * -8.0F;\n            float leftArmY = hoverW * 9.0F + normalW * 7.0F;\n            float armSpread = hoverW * 20.0F + normalW * 16.0F + boostW * 13.0F;\n\n            rightArm.xRot = lerp(rightArm.xRot, rad(rightArmX - vertical * (4.0F + 8.0F * boostW)), w);\n            leftArm.xRot = lerp(leftArm.xRot, rad(leftArmX - vertical * (4.0F + 8.0F * boostW)), w);\n            rightArm.yRot = lerp(rightArm.yRot, rad(rightArmY), w * (1.0F - boostW));\n            leftArm.yRot = lerp(leftArm.yRot, rad(leftArmY), w * (1.0F - boostW));\n            rightArm.zRot = lerp(rightArm.zRot, rad(armSpread + bank * 0.24F), w);\n            leftArm.zRot = lerp(leftArm.zRot, rad(-armSpread + bank * 0.24F), w);\n\n            float rightLegPitch = hoverW * 18.0F + normalW * 14.0F + boostW * 27.0F;\n            float leftLegPitch = hoverW * -9.0F + normalW * -4.0F + boostW * 21.0F;\n            rightLeg.xRot = lerp(rightLeg.xRot, rad(rightLegPitch), w);\n            leftLeg.xRot = lerp(leftLeg.xRot, rad(leftLegPitch), w);\n            rightLeg.zRot = lerp(rightLeg.zRot, rad(5.0F + bank * 0.14F), w);\n            leftLeg.zRot = lerp(leftLeg.zRot, rad(-4.0F + bank * 0.14F), w);\n'''),
+          ('''                rightArm.xRot = lerp(rightArm.xRot, rad(-18.0F), w * 0.65F);\n                leftArm.xRot = lerp(leftArm.xRot, rad(-18.0F), w * 0.65F);\n                rightLeg.xRot = lerp(rightLeg.xRot, rad(8.0F), w);\n                leftLeg.xRot = lerp(leftLeg.xRot, rad(-5.0F), w);\n''',
+          '''                rightArm.xRot = lerp(rightArm.xRot, rad(-24.0F), w * 0.72F);\n                leftArm.xRot = lerp(leftArm.xRot, rad(-21.0F), w * 0.72F);\n                rightArm.zRot = lerp(rightArm.zRot, rad(14.0F), w * 0.72F);\n                leftArm.zRot = lerp(leftArm.zRot, rad(-14.0F), w * 0.72F);\n                rightLeg.xRot = lerp(rightLeg.xRot, rad(11.0F), w);\n                leftLeg.xRot = lerp(leftLeg.xRot, rad(-4.0F), w);\n''')]
+
+          for old, new in replacements:
+              if old not in s:
+                  raise SystemExit('calm-flight patch target not found:\n' + old[:180])
+              s = s.replace(old, new, 1)
+
+          p.write_text(s, encoding='utf-8')
+          PY
+      - name: Forge compile and reobf
+        run: gradle reobfJar --stacktrace --no-daemon
+      - name: Java LOC
+        run: wc -l src/main/java/com/kira/jujutsuneon/*.java
+      - name: Commit verified calm-flight source
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add src/main/java/com/kira/jujutsuneon/JujutsuNeonFlightClient.java
+          if ! git diff --cached --quiet; then
+            git commit -m 'feat: refine calm flight pose from reference [skip ci]'
+            git push
+          fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: CalmFlight-Reobf
+          path: build/libs/*.jar
+          if-no-files-found: error
