@@ -4212,7 +4212,7 @@ public class JujutsuNeonMod {
 
     // Собственная физика перемещения. Никаких Potion MOVEMENT_SPEED.
     private static final double CUSTOM_WALK_BLOCKS_PER_TICK = 0.30; // ~3x vanilla walk
-    private static final double CUSTOM_RUN_BLOCKS_PER_TICK = 0.80;  // ~8x vanilla walk
+    private static final double CUSTOM_RUN_BLOCKS_PER_TICK = 2.40;  // сверхбег на Ctrl (было 0.80, x3)
     private static final long SUPER_RUN_COST_INTERVAL = 40L;        // 2 секунды
     private static final double SUPER_RUN_COST = 1.0;               // 1% CE
 
@@ -4389,14 +4389,9 @@ public class JujutsuNeonMod {
         // Работает именно как бег по поверхности, а не как полёт из глубины воды.
         if (player.getY() < surfaceY - 0.42 || player.getY() > surfaceY + 0.50) return;
 
-        player.setPos(player.getX(), surfaceY + 0.03, player.getZ());
-        player.setDeltaMovement(
-                player.getDeltaMovement().x,
-                0.015,
-                player.getDeltaMovement().z
-        );
+        // Бегом по воде управляет клиент (WATER_RUN). Сервер больше не переставляет
+        // игрока и не отправляет ему скорость: это гасило разгон каждый тик.
         player.fallDistance = 0.0F;
-        player.hurtMarked = true;
 
         if (level.getGameTime() % 2 == 0) {
             level.sendParticles(
@@ -5677,8 +5672,12 @@ public class JujutsuNeonMod {
             clientDashAge++;
         }
 
-        private static boolean clientWaterSurfaceRun(Minecraft mc, Vec3 dir, double speed) {
-            if (mc.player == null || mc.level == null) return false;
+        /**
+         * Высота поверхности воды под игроком, если он у поверхности
+         * (до 0.48 под ней или до 0.65 над ней), иначе NaN.
+         */
+        private static double waterRunSurfaceY(Minecraft mc) {
+            if (mc.player == null || mc.level == null) return Double.NaN;
 
             BlockPos below = BlockPos.containing(
                     mc.player.getX(),
@@ -5687,19 +5686,13 @@ public class JujutsuNeonMod {
             );
 
             var fluid = mc.level.getFluidState(below);
-            if (!fluid.is(FluidTags.WATER)) return false;
+            if (!fluid.is(FluidTags.WATER)) return Double.NaN;
 
             double surfaceY = below.getY() + fluid.getHeight(mc.level, below);
             if (mc.player.getY() < surfaceY - 0.48 || mc.player.getY() > surfaceY + 0.65) {
-                return false;
+                return Double.NaN;
             }
-
-            mc.player.setPos(mc.player.getX(), surfaceY + 0.03, mc.player.getZ());
-            mc.player.setDeltaMovement(Vec3.ZERO);
-            tryClientForcedMove(mc, dir.scale(speed), true);
-            mc.player.setDeltaMovement(0.0, 0.015, 0.0);
-            mc.player.fallDistance = 0.0F;
-            return true;
+            return surfaceY;
         }
 
         private static void updateCustomLocomotionAnimation(
@@ -5727,8 +5720,13 @@ public class JujutsuNeonMod {
             if (hudMaxBlueActive || hudPurpleCasting) return ClientMovementState.LOCKED;
             if (clientDashMode != DASH_NONE) return ClientMovementState.DASH;
             if (JujutsuNeonFlightClient.isCustomFlightActive()) return ClientMovementState.FLIGHT;
+            // С Ctrl поверхность воды — опора: WATER_RUN, если игрок у поверхности
+            // (чуть под ней или чуть над ней). Глубже — обычное плавание.
+            if (superRun && !Double.isNaN(waterRunSurfaceY(mc))) {
+                return ClientMovementState.WATER_RUN;
+            }
             if (mc.player != null && mc.player.isInWaterOrBubble()) {
-                return superRun ? ClientMovementState.WATER_RUN : ClientMovementState.WATER;
+                return ClientMovementState.WATER;
             }
             if (clientHasGroundSupport(mc, 0.34)) return ClientMovementState.GROUND;
             return ClientMovementState.AIR;
@@ -5781,6 +5779,13 @@ public class JujutsuNeonMod {
         private static void tickCustomMovement(Minecraft mc) {
             if (!hudBlindfold || mc.player == null || mc.level == null) return;
 
+            // Во время сверхбега (Ctrl) убираем ванильное покачивание камеры:
+            // на такой скорости оно превращается в тряску.
+            if (ClientModEvents.SUPER_SPEED_KEY.isDown()) {
+                mc.player.oBob = 0.0F;
+                mc.player.bob = 0.0F;
+            }
+
             Vec3 dir = clientHorizontalDirection(mc);
             boolean moving = dir.lengthSqr() >= 1.0E-6;
             boolean superRun = ClientModEvents.SUPER_SPEED_KEY.isDown();
@@ -5793,9 +5798,9 @@ public class JujutsuNeonMod {
                     // Explicit ownership handoff: another state already owns this tick.
                 }
                 case WATER_RUN -> {
-                    if (!moving || !clientWaterSurfaceRun(mc, dir, speed)) {
-                        tickCustomWaterMovement(mc, dir);
-                    }
+                    // Скорость и удержание на поверхности заданы в начале тика
+                    // (applyGroundRunVelocity), двигает обычная физика Minecraft.
+                    mc.player.setSwimming(false);
                     updateCustomLocomotionAnimation(mc, moving, true);
                 }
                 case WATER -> {
@@ -5846,10 +5851,11 @@ public class JujutsuNeonMod {
             }
 
             boolean superRun = ClientModEvents.SUPER_SPEED_KEY.isDown();
-            boolean ground = hudBlindfold
-                    && mc.level != null
-                    && mc.screen == null
-                    && resolveMovementState(mc, superRun) == ClientMovementState.GROUND;
+            ClientMovementState state = hudBlindfold && mc.level != null && mc.screen == null
+                    ? resolveMovementState(mc, superRun)
+                    : ClientMovementState.LOCKED;
+            boolean waterRun = state == ClientMovementState.WATER_RUN;
+            boolean ground = state == ClientMovementState.GROUND || waterRun;
 
             if (ground) {
                 if (!runStepBoosted) {
@@ -5860,11 +5866,20 @@ public class JujutsuNeonMod {
 
                 Vec3 dir = clientHorizontalDirection(mc);
                 Vec3 v = mc.player.getDeltaMovement();
+                double vy = v.y;
+                if (waterRun) {
+                    // Поверхность воды держит игрока: подтягиваем к ней ступни и считаем
+                    // это опорой (шаг вверх на берег, сброс прыжков, без урона от падения).
+                    double target = waterRunSurfaceY(mc) + 0.03;
+                    vy = Mth.clamp(target - mc.player.getY(), -0.30, 0.45);
+                    mc.player.setOnGround(true);
+                    mc.player.fallDistance = 0.0F;
+                }
                 if (dir.lengthSqr() >= 1.0E-6) {
                     double speed = superRun ? CUSTOM_RUN_BLOCKS_PER_TICK : CUSTOM_WALK_BLOCKS_PER_TICK;
-                    mc.player.setDeltaMovement(dir.x * speed, v.y, dir.z * speed);
+                    mc.player.setDeltaMovement(dir.x * speed, vy, dir.z * speed);
                 } else {
-                    mc.player.setDeltaMovement(0.0, v.y, 0.0);
+                    mc.player.setDeltaMovement(0.0, vy, 0.0);
                 }
             } else if (runStepBoosted) {
                 mc.player.setMaxUpStep(savedStepHeight);

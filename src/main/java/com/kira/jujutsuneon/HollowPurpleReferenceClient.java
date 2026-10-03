@@ -365,9 +365,9 @@ public final class HollowPurpleReferenceClient {
     Vec3 up = right.cross(direction).normalize();
 
     Vec3 backCenter = eye.subtract(direction.scale(1.30)).add(0.0, -0.18, 0.0);
-    // За спиной, на полблока вправо и влево от игрока (как в референсе; было 2.10).
-    Vec3 blueStart = backCenter.add(right.scale(-0.50));
-    Vec3 redStart = backCenter.add(right.scale(0.50));
+    // За спиной, по бокам от игрока (как в референсе): 1.25 блока от центра игрока.
+    Vec3 blueStart = backCenter.add(right.scale(-1.25));
+    Vec3 redStart = backCenter.add(right.scale(1.25));
     Vec3 fusionPoint = eye.subtract(direction.scale(1.65)).add(0.0, -0.12, 0.0);
     Vec3 purplePoint = eye.add(direction.scale(2.35)).add(0.0, -0.12, 0.0);
 

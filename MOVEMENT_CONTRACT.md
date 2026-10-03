@@ -26,6 +26,7 @@ This file is a hard contract. A movement change is invalid if any invariant belo
 - Jumps: a short Space press is a normal vanilla jump (0.42, ~1.25 blocks) on ground and in air. Holding Space on ground for 0.75 s (15 ticks) gives a 10-block jump (1.3433). There are no other charge tiers.
 - At most 4 jumps in a row, including the ground jump. The counter resets on ground and in water.
 - Airborne WASD control preserves vertical velocity.
+- Super Run (Ctrl) speed is 2.40 blocks/tick; walking is 0.30. View bobbing is suppressed while Super Run is held.
 - GROUND movement sets velocity at ClientTick START and lets vanilla physics move the player. No post-tick forced `move()` for GROUND: it desyncs body yaw (sideways running), causes jitter and micro-freezes.
 - Ascending 1–2 block obstacles on GROUND uses vanilla step-up with `setMaxUpStep(2.0)` while GROUND owns motion; the previous step height is restored when it releases ownership.
 - A wall of 3+ blocks never freezes movement: the remaining motion slides along the wall (vanilla collision), including in the swept step-up solver used by DASH / WATER_RUN.
@@ -36,7 +37,8 @@ This file is a hard contract. A movement change is invalid if any invariant belo
 - WATER and FLIGHT are mutually exclusive.
 - Entering water may never activate or preserve custom flight.
 - Without Ctrl: custom WATER state behaves like normal swimming, including vertical swim controls.
-- With Ctrl: WATER_RUN owns surface-running only.
+- With Ctrl: WATER_RUN owns surface-running only. The water surface acts as ground: within 0.48 below to 0.65 above the surface the player is held at the surface by velocity at ClientTick START and moved by vanilla physics at Super Run speed (no post-tick forced move).
+- The server never repositions the player or sends velocity for water running; it only spawns effects.
 - If surface-running cannot acquire the surface, control falls back to WATER; it never freezes the player.
 
 ## Dash invariants
