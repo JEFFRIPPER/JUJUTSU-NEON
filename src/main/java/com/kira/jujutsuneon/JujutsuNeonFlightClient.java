@@ -39,12 +39,8 @@ import java.util.Map;
 )
 public final class JujutsuNeonFlightClient {
 
-    private static final double TIER1_VELOCITY = 1.099;
-    private static final double TIER2_VELOCITY = 1.560;
-    private static final double TIER3_VELOCITY = 1.880;
-    private static final double LAUNCH_EPSILON = 0.035;
-
-    private static final double MIN_FLIGHT_HEIGHT = 3.0;
+    // Полёт начинается в верхней точке любого прыжка, если до земли или воды 4+ блока.
+    private static final double MIN_FLIGHT_HEIGHT = 4.0;
     private static final double AUTO_LAND_HEIGHT = 3.0;
     private static final double LANDING_SPEED = 0.18;
     private static final float NORMAL_FLY_SPEED = 0.05F;
@@ -145,13 +141,20 @@ public final class JujutsuNeonFlightClient {
         }
     }
 
-    private static boolean isChargedJumpLaunch(double yVelocity) {
-        return Math.abs(yVelocity - TIER1_VELOCITY) <= LAUNCH_EPSILON ||
-                Math.abs(yVelocity - TIER2_VELOCITY) <= LAUNCH_EPSILON ||
-                Math.abs(yVelocity - TIER3_VELOCITY) <= LAUNCH_EPSILON;
+    /** Вызывается из ClientForgeEvents при каждом прыжке (обычном или заряженном). */
+    public static void onJumpFired() {
+        Minecraft mc = Minecraft.getInstance();
+        if (mc.player == null || customFlight) return;
+        if (!hasBlindfold(mc) || mc.player.getAbilities().flying) return;
+        armFromExistingJump();
     }
 
     private static double groundDistance(Minecraft mc, double maxDistance) {
+        return groundDistance(mc, maxDistance, ClipContext.Fluid.NONE);
+    }
+
+    /** Высота над землёй; с Fluid.ANY поверхность воды тоже считается землёй. */
+    private static double groundDistance(Minecraft mc, double maxDistance, ClipContext.Fluid fluid) {
         if (mc.player == null || mc.level == null) return maxDistance + 1.0;
         if (mc.player.onGround()) return 0.0;
 
@@ -161,7 +164,7 @@ public final class JujutsuNeonFlightClient {
                 start,
                 end,
                 ClipContext.Block.COLLIDER,
-                ClipContext.Fluid.NONE,
+                fluid,
                 mc.player
         ));
 
@@ -356,7 +359,7 @@ public final class JujutsuNeonFlightClient {
 
         if (!crossedApex) return;
 
-        if (groundDistance(mc, MIN_FLIGHT_HEIGHT + 0.35) + 1.0E-4 >= MIN_FLIGHT_HEIGHT) {
+        if (groundDistance(mc, MIN_FLIGHT_HEIGHT + 0.35, ClipContext.Fluid.ANY) + 1.0E-4 >= MIN_FLIGHT_HEIGHT) {
             beginFlight(mc);
         } else {
             armedFromChargedJump = false;
@@ -457,13 +460,7 @@ public final class JujutsuNeonFlightClient {
 
         double currentVerticalVelocity = mc.player.getDeltaMovement().y;
 
-        // Observe, do not modify: these are the exact three existing charged-jump impulses.
-        if (!customFlight && !armedFromChargedJump &&
-                hasBlindfold(mc) &&
-                !mc.player.getAbilities().flying &&
-                isChargedJumpLaunch(currentVerticalVelocity)) {
-            armFromExistingJump();
-        }
+        // Прыжок «взводит» полёт через onJumpFired() (любой прыжок, не только заряженный).
 
         tickArmedJump(mc, currentVerticalVelocity);
         tickFlight(mc);

@@ -4019,6 +4019,12 @@ public class JujutsuNeonMod {
 
     }
 
+    // Прыжки: обычный ванильный и заряженный на 10 блоков (заряд 0.75 с).
+    private static final double NORMAL_JUMP_VELOCITY = 0.42;     // ~1.25 блока
+    private static final double CHARGED_JUMP_VELOCITY = 1.3433;  // ~10 блоков
+    private static final int JUMP_CHARGE_TICKS = 15;             // 0.75 секунды
+    private static final int MAX_JUMPS = 4;                      // включая прыжок с земли
+
     private static void performChargedJump(ServerPlayer player, int tier) {
         if (player == null || !player.isAlive() || player.isSpectator()) return;
         if (!hasGojoBlindfold(player)) {
@@ -4026,24 +4032,23 @@ public class JujutsuNeonMod {
             return;
         }
 
-        int clamped = Mth.clamp(tier, 0, 3);
+        int clamped = Mth.clamp(tier, 0, 1);
         boolean grounded = player.onGround();
 
-        // ЖЁСТКОЕ ПРАВИЛО ПРЫЖКОВ:
-        // - заряд 7/13/18 блоков только с земли;
-        // - в воздухе разрешён только слабый tier 0;
-        // - слабых воздушных прыжков сколько угодно, счётчика/CD нет.
+        // ПРАВИЛО ПРЫЖКОВ:
+        // - tier 0: обычный ванильный прыжок (~1.25 блока), на земле и в воздухе;
+        // - tier 1: заряд 0.75 с, прыжок на 10 блоков, только с земли;
+        // - не больше 4 прыжков подряд (включая прыжок с земли), сброс на земле/в воде.
+        //   Лимит считает клиент; сервер ведёт счётчик для HUD.
         if (!grounded && clamped > 0) return;
 
         // Creative flight принадлежит Minecraft и не смешивается с нашими прыжками.
         if (player.getAbilities().flying) return;
 
-        double yVelocity = switch (clamped) {
-            case 1 -> 1.099; // ~7 блоков
-            case 2 -> 1.560; // ~13 блоков
-            case 3 -> 1.880; // ~18 блоков
-            default -> 0.545; // слабый прыжок ~2 блока, в том числе в воздухе
-        };
+        double yVelocity = clamped == 1 ? CHARGED_JUMP_VELOCITY : NORMAL_JUMP_VELOCITY;
+
+        if (grounded || player.isInWater()) player.getPersistentData().putInt("jn_air_jumps", 0);
+        player.getPersistentData().putInt("jn_air_jumps", player.getPersistentData().getInt("jn_air_jumps") + 1);
 
         Vec3 velocity = player.getDeltaMovement();
         player.setDeltaMovement(
@@ -4622,7 +4627,7 @@ public class JujutsuNeonMod {
                 player.getPersistentData().putBoolean("jn_infinity", false);
                 player.getPersistentData().putInt("jn_air_jumps", 0);
             } else {
-                if (player.onGround()) {
+                if (player.onGround() || player.isInWater()) {
                     player.getPersistentData().putInt("jn_air_jumps", 0);
                 }
 
@@ -5196,6 +5201,7 @@ public class JujutsuNeonMod {
         private static boolean jumpChargeWasDown = false;
         private static int jumpChargeTicks = 0;
         private static boolean jumpPressStartedInAir = false;
+        private static int jumpsUsed = 0; // прыжки подряд, включая прыжок с земли (максимум MAX_JUMPS)
 
         // Полностью собственный movement controller.
         private static int clientDashMode = DASH_NONE;
@@ -5870,18 +5876,13 @@ public class JujutsuNeonMod {
             if (mc.player == null || !hudBlindfold) return;
             if (mc.player.getAbilities().flying) return;
 
-            int clamped = Mth.clamp(tier, 0, 3);
+            int clamped = Mth.clamp(tier, 0, 1);
             boolean grounded = mc.player.onGround();
 
-            // В воздухе никакой зарядки: только слабый tier 0.
+            // В воздухе никакой зарядки: только обычный прыжок.
             if (!grounded && clamped > 0) return;
 
-            double yVelocity = switch (clamped) {
-                case 1 -> 1.099;
-                case 2 -> 1.560;
-                case 3 -> 1.880;
-                default -> 0.545;
-            };
+            double yVelocity = clamped == 1 ? CHARGED_JUMP_VELOCITY : NORMAL_JUMP_VELOCITY;
 
             Vec3 old = mc.player.getDeltaMovement();
             mc.player.setDeltaMovement(old.x, yVelocity, old.z);
@@ -5889,8 +5890,13 @@ public class JujutsuNeonMod {
         }
 
         private static void fireChargedJump(Minecraft mc, int tier) {
+            // Не больше MAX_JUMPS прыжков подряд, включая прыжок с земли.
+            if (jumpsUsed >= MAX_JUMPS) return;
+            jumpsUsed++;
             performClientChargedJump(mc, tier);
             NETWORK.sendToServer(new JumpControlPacket(tier));
+            // Полёт может начаться в верхней точке любого прыжка (если 4+ блока до земли/воды).
+            JujutsuNeonFlightClient.onJumpFired();
         }
 
         @SubscribeEvent
@@ -5996,6 +6002,11 @@ public class JujutsuNeonMod {
 
             boolean jumpHeldNow = mc.options.keyJump.isDown();
 
+            // Счётчик прыжков сбрасывается на земле и в воде.
+            if (mc.player.onGround() || mc.player.isInWaterOrBubble()) {
+                jumpsUsed = 0;
+            }
+
             if (pendingCreativeShortJumpTicks >= 0) {
                 pendingCreativeShortJumpTicks--;
 
@@ -6043,18 +6054,15 @@ public class JujutsuNeonMod {
                 if (!mc.player.getAbilities().flying) {
                     if (jumpHeldNow && !jumpPressStartedInAir) {
                         // Зарядка существует ТОЛЬКО у нажатия, начавшегося на земле.
-                        jumpChargeTicks = Math.min(60, jumpChargeTicks + 1);
+                        jumpChargeTicks = Math.min(JUMP_CHARGE_TICKS, jumpChargeTicks + 1);
                     } else if (releasedNow) {
                         if (jumpPressStartedInAir) {
                             // Воздушный прыжок уже был выполнен на press.
                             // Release ничего больше не делает.
                             jumpChargeTicks = 0;
                         } else {
-                            int tier;
-                            if (jumpChargeTicks >= 60) tier = 3;
-                            else if (jumpChargeTicks >= 40) tier = 2;
-                            else if (jumpChargeTicks >= 20) tier = 1;
-                            else tier = 0;
+                            // 0.75 с и дольше — прыжок на 10 блоков, иначе обычный прыжок.
+                            int tier = jumpChargeTicks >= JUMP_CHARGE_TICKS ? 1 : 0;
 
                             if (tier == 0 && mc.player.getAbilities().mayfly) {
                                 // На земле оставляем короткое окно второго tap
@@ -6443,12 +6451,11 @@ public class JujutsuNeonMod {
             }
 
             // Шкала заряженного прыжка остаётся снизу по центру, но тоже компактная.
-            if (jumpChargeTicks >= 20) {
+            if (jumpChargeTicks >= 3) {
                 int jw = 72;
                 int jx = sw / 2 - jw / 2;
                 int jy = sh - 49;
-                int tier = jumpChargeTicks >= 60 ? 3 : (jumpChargeTicks >= 40 ? 2 : 1);
-                int fill = tier == 1 ? jw / 3 : (tier == 2 ? jw * 2 / 3 : jw);
+                int fill = jw * Math.min(jumpChargeTicks, JUMP_CHARGE_TICKS) / JUMP_CHARGE_TICKS;
 
                 g.fill(jx - 1, jy - 1, jx + jw + 1, jy + 6, 0x88070A10);
                 g.fill(jx, jy, jx + jw, jy + 5, 0xCC151B26);

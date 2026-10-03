@@ -23,6 +23,8 @@ This file is a hard contract. A movement change is invalid if any invariant belo
 - Ordinary walking/running must visibly drive vanilla limb locomotion; no rigid sliding doll.
 - Walking off a ledge may not cause a horizontal stop-frame.
 - Charged jump preserves horizontal momentum.
+- Jumps: a short Space press is a normal vanilla jump (0.42, ~1.25 blocks) on ground and in air. Holding Space on ground for 0.75 s (15 ticks) gives a 10-block jump (1.3433). There are no other charge tiers.
+- At most 4 jumps in a row, including the ground jump. The counter resets on ground and in water.
 - Airborne WASD control preserves vertical velocity.
 - GROUND movement sets velocity at ClientTick START and lets vanilla physics move the player. No post-tick forced `move()` for GROUND: it desyncs body yaw (sideways running), causes jitter and micro-freezes.
 - Ascending 1–2 block obstacles on GROUND uses vanilla step-up with `setMaxUpStep(2.0)` while GROUND owns motion; the previous step height is restored when it releases ownership.
@@ -54,7 +56,8 @@ This file is a hard contract. A movement change is invalid if any invariant belo
 - Server hit direction must match the client steering vector.
 
 ## Flight invariants
-- Flight may begin only from the charged-jump apex flow.
+- Flight begins automatically at the apex of ANY jump (normal or charged) if the player is 4+ blocks above ground; a water surface counts as ground for this check. Falling without a jump never starts flight.
+- Auto-landing threshold stays at 3 blocks.
 - Flight direction follows the camera/look vector: look up = fly up, look down = fly down.
 - W/S travel along/opposite the full look vector. A/D strafe on the camera-relative horizontal right axis.
 - Space/Shift are not the primary vertical flight axes.

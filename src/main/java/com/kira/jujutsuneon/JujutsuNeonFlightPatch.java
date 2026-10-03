@@ -52,7 +52,7 @@ public final class JujutsuNeonFlightPatch {
 
     private static final float NORMAL_FLY_SPEED = 0.05F;
     private static final float BOOST_FLY_SPEED = 0.10F;
-    private static final double START_MIN_HEIGHT = 3.0;
+    private static final double START_MIN_HEIGHT = 4.0; // 4+ блока до земли или воды
     private static final double IMPACT_VALIDATE_HEIGHT = 1.45;
     private static final double IMPACT_RADIUS = 3.25;
     private static final float IMPACT_DAMAGE = 40.0F; // 20 hearts
@@ -106,13 +106,18 @@ public final class JujutsuNeonFlightPatch {
     }
 
     private static double groundDistance(ServerPlayer player, double maxDistance) {
+        return groundDistance(player, maxDistance, ClipContext.Fluid.NONE);
+    }
+
+    /** Высота над землёй; с Fluid.ANY поверхность воды тоже считается землёй. */
+    private static double groundDistance(ServerPlayer player, double maxDistance, ClipContext.Fluid fluid) {
         Vec3 start = player.position().add(0.0, 0.08, 0.0);
         Vec3 end = start.add(0.0, -Math.max(0.25, maxDistance), 0.0);
         BlockHitResult hit = player.level().clip(new ClipContext(
                 start,
                 end,
                 ClipContext.Block.COLLIDER,
-                ClipContext.Fluid.NONE,
+                fluid,
                 player
         ));
 
@@ -134,7 +139,7 @@ public final class JujutsuNeonFlightPatch {
         if (!player.isAlive() || player.isSpectator()) return;
         if (!hasBlindfold(player)) return;
         if (player.onGround()) return;
-        if (groundDistance(player, START_MIN_HEIGHT + 0.35) + 1.0E-4 < START_MIN_HEIGHT) return;
+        if (groundDistance(player, START_MIN_HEIGHT + 0.35, ClipContext.Fluid.ANY) + 1.0E-4 < START_MIN_HEIGHT) return;
 
         var data = player.getPersistentData();
 
