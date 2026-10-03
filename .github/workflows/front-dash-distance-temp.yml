@@ -29,9 +29,9 @@ jobs:
           old_client='speed = 1.32 - 1.02 * t;'
           if s.count(old_server) != 1:
               raise SystemExit(f'expected one server speed formula, found {s.count(old_server)}')
-          if s.count(old_client) != 1:
-              raise SystemExit(f'expected one client speed formula, found {s.count(old_client)}')
           s=s.replace(old_server,'double speed = 1.68 - 1.30 * t;',1)
+          if s.count(old_client) != 1:
+              raise SystemExit(f'expected one client speed formula after server replacement, found {s.count(old_client)}')
           s=s.replace(old_client,'speed = 1.68 - 1.30 * t;',1)
           p.write_text(s,encoding='utf-8')
           PY
