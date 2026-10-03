@@ -24,7 +24,9 @@ import net.minecraftforge.fml.common.Mod;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.util.ArrayDeque;
+import java.util.ArrayList;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Set;
 
 /** Client half of the movement compatibility layer. */
@@ -403,17 +405,27 @@ public final class JujutsuNeonMovementPatchClient {
         int maxY = (int) Math.floor(sweep.maxY);
         int maxZ = (int) Math.floor(sweep.maxZ);
 
+        // Important: classify the whole swept volume against the unchanged world first.
+        // Removing the bottom log immediately can make the next log stop looking like
+        // part of a naturally grounded tree and reintroduce the collision bug.
+        List<BlockPos> toRemove = new ArrayList<>();
+
         for (int x = minX; x <= maxX; x++) {
             for (int y = minY; y <= maxY; y++) {
                 for (int z = minZ; z <= maxZ; z++) {
                     BlockPos pos = new BlockPos(x, y, z);
                     BlockState state = mc.level.getBlockState(pos);
-                    if (!isSuperRunBreakable(mc.level, pos, state)) continue;
-
-                    // Prediction only: no drops are created client-side.
-                    mc.level.setBlock(pos, Blocks.AIR.defaultBlockState(), 11);
+                    if (isSuperRunBreakable(mc.level, pos, state)) {
+                        toRemove.add(pos.immutable());
+                    }
                 }
             }
+        }
+
+        for (BlockPos pos : toRemove) {
+            // Prediction only: no drops are created client-side. The server performs
+            // the same authoritative no-drop vaporization for the travelled path.
+            mc.level.setBlock(pos, Blocks.AIR.defaultBlockState(), 11);
         }
     }
 
