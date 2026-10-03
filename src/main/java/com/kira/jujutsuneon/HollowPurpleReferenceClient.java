@@ -364,17 +364,15 @@ public final class HollowPurpleReferenceClient {
     Vec3 right = rightFor(direction);
     Vec3 up = right.cross(direction).normalize();
 
-    // Red и Blue — по бокам от игрока на уровне груди, чуть впереди (как в референсе).
-    Vec3 sideCenter = eye.add(direction.scale(0.70)).add(0.0, -0.45, 0.0);
-    Vec3 blueStart = sideCenter.add(right.scale(-0.95));
-    Vec3 redStart = sideCenter.add(right.scale(0.95));
+    Vec3 backCenter = eye.subtract(direction.scale(1.30)).add(0.0, -0.18, 0.0);
+    Vec3 blueStart = backCenter.add(right.scale(-2.10));
+    Vec3 redStart = backCenter.add(right.scale(2.10));
+    Vec3 fusionPoint = eye.subtract(direction.scale(1.65)).add(0.0, -0.12, 0.0);
     Vec3 purplePoint = eye.add(direction.scale(2.35)).add(0.0, -0.12, 0.0);
-    // Сливаются перед игроком — там же, где рождается Hollow Purple.
-    Vec3 fusionPoint = purplePoint;
 
     float p = Mth.clamp(progress, 0.0f, 1.0f);
 
-    // Red/Blue materialize at the caster's sides.
+    // Red/Blue materialize behind the caster.
     if (p < 0.32f) {
         float grow = (float) smooth(p / 0.32f);
         float radius = 0.08f + grow * 0.40f; // было 0.16 + grow * 1.10
@@ -384,7 +382,7 @@ public final class HollowPurpleReferenceClient {
         return;
     }
 
-    // Red/Blue converge in front of the caster and disappear into Purple.
+    // Red/Blue converge and disappear ONLY behind the caster.
     if (p < 0.58f) {
         float merge = (float) smooth((p - 0.32f) / 0.26f);
         Vec3 red = redStart.lerp(fusionPoint, merge);
