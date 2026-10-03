@@ -278,7 +278,7 @@ public final class JujutsuNeonFlightPatch {
         var data = player.getPersistentData();
         if (!data.getBoolean(TAG_ACTIVE)) return;
 
-        if (!player.isAlive() || player.isSpectator() || !hasBlindfold(player)) {
+        if (!player.isAlive() || player.isSpectator() || !hasBlindfold(player) || player.isInWaterOrBubble()) {
             stopFlight(player);
             return;
         }

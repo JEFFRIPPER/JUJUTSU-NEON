@@ -556,39 +556,48 @@ public final class JujutsuNeonSkillAnimationClient {
          * The body banks into the dash while the head counter-rotates toward control.
          */
         private void applySideDash(float progress, float side) {
-            float enter = smooth(clamp01(progress / 0.15f));
-            float exit = 1.0f - smooth(clamp01((progress - 0.70f) / 0.30f));
+            float enter = smooth(clamp01(progress / 0.18f));
+            float exit = 1.0f - smooth(clamp01((progress - 0.66f) / 0.34f));
             float w = Math.min(enter, exit);
             if (w <= 0.001f) return;
 
             rotate(body,
-                    lerp(body.xRot, rad(17.0f), w),
-                    lerp(body.yRot, rad(-10.0f * side), w),
-                    lerp(body.zRot, rad(-31.0f * side), w));
+                    lerp(body.xRot, rad(10.0f), w),
+                    lerp(body.yRot, rad(-6.0f * side), w),
+                    lerp(body.zRot, rad(-11.0f * side), w));
 
-            head.xRot = lerp(head.xRot, head.xRot - rad(7.0f), w);
-            head.yRot = lerp(head.yRot, head.yRot + rad(7.0f * side), w);
-            head.zRot = lerp(head.zRot, rad(13.0f * side), w);
+            head.xRot = lerp(head.xRot, head.xRot - rad(4.0f), w);
+            head.yRot = lerp(head.yRot, head.yRot + rad(5.0f * side), w);
+            head.zRot = lerp(head.zRot, rad(6.0f * side), w);
 
-            // The outside arm trails; the inside arm braces across the movement.
-            rotate(rightArm,
-                    lerp(rightArm.xRot, rad(side > 0.0f ? 48.0f : -24.0f), w),
-                    lerp(rightArm.yRot, rad(side > 0.0f ? -16.0f : 31.0f), w),
-                    lerp(rightArm.zRot, rad(side > 0.0f ? 24.0f : 39.0f), w));
-            rotate(leftArm,
-                    lerp(leftArm.xRot, rad(side > 0.0f ? -24.0f : 48.0f), w),
-                    lerp(leftArm.yRot, rad(side > 0.0f ? -31.0f : 16.0f), w),
-                    lerp(leftArm.zRot, rad(side > 0.0f ? -39.0f : -24.0f), w));
+            if (side > 0.0f) {
+                rotate(rightArm,
+                        lerp(rightArm.xRot, rad(30.0f), w),
+                        lerp(rightArm.yRot, rad(-10.0f), w),
+                        lerp(rightArm.zRot, rad(16.0f), w));
+                rotate(leftArm,
+                        lerp(leftArm.xRot, rad(-18.0f), w),
+                        lerp(leftArm.yRot, rad(-18.0f), w),
+                        lerp(leftArm.zRot, rad(-20.0f), w));
+            } else {
+                rotate(rightArm,
+                        lerp(rightArm.xRot, rad(-18.0f), w),
+                        lerp(rightArm.yRot, rad(18.0f), w),
+                        lerp(rightArm.zRot, rad(20.0f), w));
+                rotate(leftArm,
+                        lerp(leftArm.xRot, rad(30.0f), w),
+                        lerp(leftArm.yRot, rad(10.0f), w),
+                        lerp(leftArm.zRot, rad(-16.0f), w));
+            }
 
-            // Mirrored scissor/tuck creates the sideways skid silhouette from either side.
             rotate(rightLeg,
-                    lerp(rightLeg.xRot, rad(side > 0.0f ? 31.0f : -19.0f), w),
-                    lerp(rightLeg.yRot, rad(-7.0f * side), w),
-                    lerp(rightLeg.zRot, rad(11.0f * side), w));
+                    lerp(rightLeg.xRot, rad(side > 0.0f ? 18.0f : -10.0f), w),
+                    lerp(rightLeg.yRot, rad(-4.0f * side), w),
+                    lerp(rightLeg.zRot, rad(5.0f * side), w));
             rotate(leftLeg,
-                    lerp(leftLeg.xRot, rad(side > 0.0f ? -19.0f : 31.0f), w),
-                    lerp(leftLeg.yRot, rad(7.0f * side), w),
-                    lerp(leftLeg.zRot, rad(-11.0f * side), w));
+                    lerp(leftLeg.xRot, rad(side > 0.0f ? -10.0f : 18.0f), w),
+                    lerp(leftLeg.yRot, rad(4.0f * side), w),
+                    lerp(leftLeg.zRot, rad(-5.0f * side), w));
         }
 
         private void syncWearLayers() {
