@@ -245,7 +245,7 @@ public final class JujutsuNeonSkillAnimationClient {
         PlayerModel<AbstractClientPlayer> original = rendererModel(renderer);
         if (original == null || original instanceof AnimatedPlayerModel) return;
 
-        boolean slim = "slim".equals(event.getEntity().getModelName());
+        boolean slim = "slim".equals(((AbstractClientPlayer) event.getEntity()).getModelName());
         AnimatedPlayerModel animated = animatedModel(slim);
         copyRendererState(original, animated, frame);
 
