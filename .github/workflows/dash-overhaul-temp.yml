@@ -1,0 +1,136 @@
+name: Temporary Reference Dash Overhaul
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  compile:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.1.1'
+
+      - name: Apply reference dash overhaul
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          # ------------------------------------------------------------
+          # Server: add live steering packet for the front dash.
+          # ------------------------------------------------------------
+          p = Path('src/main/java/com/kira/jujutsuneon/JujutsuNeonMovementPatch.java')
+          s = p.read_text(encoding='utf-8')
+
+          old = '''        PATCH_NETWORK.registerMessage(\n                0,\n                DashPacket.class,\n                DashPacket::encode,\n                DashPacket::decode,\n                DashPacket::handle\n        );\n'''
+          new = '''        PATCH_NETWORK.registerMessage(\n                0,\n                DashPacket.class,\n                DashPacket::encode,\n                DashPacket::decode,\n                DashPacket::handle\n        );\n        PATCH_NETWORK.registerMessage(\n                1,\n                FrontSteerPacket.class,\n                FrontSteerPacket::encode,\n                FrontSteerPacket::decode,\n                FrontSteerPacket::handle\n        );\n'''
+          if old not in s: raise SystemExit('movement server registration target missing')
+          s = s.replace(old, new, 1)
+
+          old = '''    public static void sendDash(DashKind kind) {\n        PATCH_NETWORK.sendToServer(new DashPacket(kind));\n    }\n\n    private record DashPacket(DashKind kind) {\n'''
+          new = '''    public static void sendDash(DashKind kind) {\n        PATCH_NETWORK.sendToServer(new DashPacket(kind));\n    }\n\n    /** Keep server hit detection aligned with the camera-steered front dash. */\n    public static void sendFrontSteer(Vec3 direction) {\n        Vec3 horizontal = new Vec3(direction.x, 0.0, direction.z);\n        if (horizontal.lengthSqr() < 1.0E-8) return;\n        horizontal = horizontal.normalize();\n        PATCH_NETWORK.sendToServer(new FrontSteerPacket(horizontal.x, horizontal.z));\n    }\n\n    private record DashPacket(DashKind kind) {\n'''
+          if old not in s: raise SystemExit('sendDash target missing')
+          s = s.replace(old, new, 1)
+
+          old = '''    private static boolean hasBlindfold(ServerPlayer player) {\n'''
+          new = '''    private record FrontSteerPacket(double x, double z) {\n        static void encode(FrontSteerPacket msg, FriendlyByteBuf buf) {\n            buf.writeDouble(msg.x);\n            buf.writeDouble(msg.z);\n        }\n\n        static FrontSteerPacket decode(FriendlyByteBuf buf) {\n            return new FrontSteerPacket(buf.readDouble(), buf.readDouble());\n        }\n\n        static void handle(FrontSteerPacket msg, Supplier<NetworkEvent.Context> contextSupplier) {\n            NetworkEvent.Context context = contextSupplier.get();\n            context.enqueueWork(() -> {\n                ServerPlayer player = context.getSender();\n                if (player == null || !player.isAlive() || player.isSpectator()) return;\n                if (!hasBlindfold(player) || !handsEmpty(player)) return;\n                if (player.getPersistentData().getInt("jn_dash_mode") != 1) return;\n\n                Vec3 direction = new Vec3(msg.x, 0.0, msg.z);\n                if (!Double.isFinite(direction.x) || !Double.isFinite(direction.z) ||\n                        direction.lengthSqr() < 1.0E-8) return;\n\n                direction = direction.normalize();\n                player.getPersistentData().putDouble("jn_dash_dx", direction.x);\n                player.getPersistentData().putDouble("jn_dash_dy", 0.0);\n                player.getPersistentData().putDouble("jn_dash_dz", direction.z);\n            });\n            context.setPacketHandled(true);\n        }\n    }\n\n    private static boolean hasBlindfold(ServerPlayer player) {\n'''
+          if old not in s: raise SystemExit('server steer insertion target missing')
+          s = s.replace(old, new, 1)
+          p.write_text(s, encoding='utf-8')
+
+          # ------------------------------------------------------------
+          # Client movement: steer FRONT throughout the dash.
+          # ------------------------------------------------------------
+          p = Path('src/main/java/com/kira/jujutsuneon/JujutsuNeonMovementPatchClient.java')
+          s = p.read_text(encoding='utf-8')
+
+          old = '''    private static Vec3 desiredDashDirection = Vec3.ZERO;\n    private static boolean previousRawJumpHeld = false;\n'''
+          new = '''    private static Vec3 desiredDashDirection = Vec3.ZERO;\n    private static JujutsuNeonMovementPatch.DashKind activePatchedDash = null;\n    private static boolean previousRawJumpHeld = false;\n'''
+          if old not in s: raise SystemExit('client dash state target missing')
+          s = s.replace(old, new, 1)
+
+          old = '''        desiredDashDirection = correctedDashDirection(mc, kind);\n        setLegacyDashDirection(desiredDashDirection);\n        JujutsuNeonMovementPatch.sendDash(kind);\n'''
+          new = '''        desiredDashDirection = correctedDashDirection(mc, kind);\n        activePatchedDash = kind;\n        setLegacyDashDirection(desiredDashDirection);\n        JujutsuNeonMovementPatch.sendDash(kind);\n'''
+          if old not in s: raise SystemExit('client start dash target missing')
+          s = s.replace(old, new, 1)
+
+          old = '''    private static void adjustDashForWallSlide(Minecraft mc) {\n        int mode = legacyDashMode();\n        if (mode == 0 || desiredDashDirection.lengthSqr() < 1.0E-8) return;\n        setLegacyDashDirection(wallSlideDirection(mc, desiredDashDirection, mode));\n    }\n'''
+          new = '''    private static Vec3 steerTowards(Vec3 current, Vec3 target, double maxRadians) {\n        Vec3 from = new Vec3(current.x, 0.0, current.z);\n        Vec3 to = new Vec3(target.x, 0.0, target.z);\n        if (to.lengthSqr() < 1.0E-8) return from;\n        to = to.normalize();\n        if (from.lengthSqr() < 1.0E-8) return to;\n        from = from.normalize();\n\n        double dot = Math.max(-1.0, Math.min(1.0, from.dot(to)));\n        double crossY = from.z * to.x - from.x * to.z;\n        double angle = Math.atan2(crossY, dot);\n        double turn = Math.max(-maxRadians, Math.min(maxRadians, angle));\n        double c = Math.cos(turn);\n        double sn = Math.sin(turn);\n        Vec3 rotated = new Vec3(\n                from.x * c - from.z * sn,\n                0.0,\n                from.x * sn + from.z * c\n        );\n        return rotated.lengthSqr() > 1.0E-8 ? rotated.normalize() : to;\n    }\n\n    private static void adjustDashForWallSlide(Minecraft mc) {\n        int mode = legacyDashMode();\n        if (mode == 0 || desiredDashDirection.lengthSqr() < 1.0E-8) return;\n\n        // Reference front dash is fully camera-steered.  A generous turn rate keeps\n        // it responsive while avoiding an instantaneous 180-degree snap in one frame.\n        if (mode == 1 && activePatchedDash == JujutsuNeonMovementPatch.DashKind.FRONT) {\n            desiredDashDirection = steerTowards(\n                    desiredDashDirection,\n                    horizontalForward(mc),\n                    Math.toRadians(34.0)\n            );\n        }\n\n        Vec3 actual = wallSlideDirection(mc, desiredDashDirection, mode);\n        setLegacyDashDirection(actual);\n\n        if (mode == 1 && activePatchedDash == JujutsuNeonMovementPatch.DashKind.FRONT) {\n            JujutsuNeonMovementPatch.sendFrontSteer(actual);\n        }\n    }\n'''
+          if old not in s: raise SystemExit('wall-slide target missing')
+          s = s.replace(old, new, 1)
+
+          old = '''        if (!blindfold || mc.screen != null || mc.player.getAbilities().flying) {\n            desiredDashDirection = Vec3.ZERO;\n            blockedAirJumpUntilRelease = false;\n'''
+          new = '''        if (!blindfold || mc.screen != null || mc.player.getAbilities().flying) {\n            desiredDashDirection = Vec3.ZERO;\n            activePatchedDash = null;\n            blockedAirJumpUntilRelease = false;\n'''
+          if old not in s: raise SystemExit('client early reset target missing')
+          s = s.replace(old, new, 1)
+
+          old = '''        if (legacyDashMode() == 0) {\n            desiredDashDirection = Vec3.ZERO;\n        }\n'''
+          new = '''        if (legacyDashMode() == 0) {\n            desiredDashDirection = Vec3.ZERO;\n            activePatchedDash = null;\n        }\n'''
+          if old not in s: raise SystemExit('client low reset target missing')
+          s = s.replace(old, new, 1)
+          p.write_text(s, encoding='utf-8')
+
+          # ------------------------------------------------------------
+          # Full-body reference animations: FRONT + mirrored SIDE.
+          # Existing animation states already supply exact dash timings.
+          # ------------------------------------------------------------
+          p = Path('src/main/java/com/kira/jujutsuneon/JujutsuNeonSkillAnimationClient.java')
+          s = p.read_text(encoding='utf-8')
+
+          old = '''        MAX_BLUE,\n        PURPLE\n'''
+          new = '''        MAX_BLUE,\n        PURPLE,\n        FRONT_DASH,\n        SIDE_DASH_LEFT,\n        SIDE_DASH_RIGHT\n'''
+          if old not in s: raise SystemExit('skill enum target missing')
+          s = s.replace(old, new, 1)
+
+          old = '''                case "PURPLE_CAST", "HOLLOW_PURPLE" -> new SkillFrame(Skill.PURPLE, progress);\n                default -> SkillFrame.NONE;\n'''
+          new = '''                case "PURPLE_CAST", "HOLLOW_PURPLE" -> new SkillFrame(Skill.PURPLE, progress);\n                case "FRONT_DASH" -> new SkillFrame(Skill.FRONT_DASH, progress);\n                case "SIDE_DASH_LEFT" -> new SkillFrame(Skill.SIDE_DASH_LEFT, progress);\n                case "SIDE_DASH_RIGHT" -> new SkillFrame(Skill.SIDE_DASH_RIGHT, progress);\n                default -> SkillFrame.NONE;\n'''
+          if old not in s: raise SystemExit('skill frame switch target missing')
+          s = s.replace(old, new, 1)
+
+          old = '''                case MAX_BLUE -> applyMaximumBlue(localFrame.progress, ageInTicks);\n                case PURPLE -> applyPurple(localFrame.progress, ageInTicks);\n                default -> {\n'''
+          new = '''                case MAX_BLUE -> applyMaximumBlue(localFrame.progress, ageInTicks);\n                case PURPLE -> applyPurple(localFrame.progress, ageInTicks);\n                case FRONT_DASH -> applyFrontDash(localFrame.progress);\n                case SIDE_DASH_LEFT -> applySideDash(localFrame.progress, -1.0f);\n                case SIDE_DASH_RIGHT -> applySideDash(localFrame.progress, 1.0f);\n                default -> {\n'''
+          if old not in s: raise SystemExit('animation apply switch target missing')
+          s = s.replace(old, new, 1)
+
+          marker = '''        private void syncWearLayers() {\n'''
+          insert = '''        /**\n         * Reference front dash.  This is a deliberate full-body burst pose, not a\n         * sped-up vanilla run: rapid compression -> long forward drive -> recovery.\n         */\n        private void applyFrontDash(float progress) {\n            float enter = smooth(clamp01(progress / 0.12f));\n            float exit = 1.0f - smooth(clamp01((progress - 0.75f) / 0.25f));\n            float w = Math.min(enter, exit);\n            if (w <= 0.001f) return;\n\n            // Strong forward commitment while the head remains readable instead of\n            // rotating down with the torso like a rigid mannequin.\n            rotate(body,\n                    lerp(body.xRot, rad(43.0f), w),\n                    lerp(body.yRot, rad(-2.0f), w),\n                    lerp(body.zRot, rad(0.0f), w));\n            head.xRot = lerp(head.xRot, head.xRot - rad(21.0f), w);\n            head.zRot = lerp(head.zRot, rad(0.0f), w);\n\n            // Compact aerodynamic arms; slight asymmetry keeps the silhouette alive.\n            rotate(rightArm,\n                    lerp(rightArm.xRot, rad(54.0f), w),\n                    lerp(rightArm.yRot, rad(-13.0f), w),\n                    lerp(rightArm.zRot, rad(12.0f), w));\n            rotate(leftArm,\n                    lerp(leftArm.xRot, rad(38.0f), w),\n                    lerp(leftArm.yRot, rad(15.0f), w),\n                    lerp(leftArm.zRot, rad(-14.0f), w));\n\n            // One leg drives backward while the other tucks under the body.\n            rotate(rightLeg,\n                    lerp(rightLeg.xRot, rad(39.0f), w),\n                    lerp(rightLeg.yRot, rad(-5.0f), w),\n                    lerp(rightLeg.zRot, rad(4.0f), w));\n            rotate(leftLeg,\n                    lerp(leftLeg.xRot, rad(-27.0f), w),\n                    lerp(leftLeg.yRot, rad(7.0f), w),\n                    lerp(leftLeg.zRot, rad(-4.0f), w));\n        }\n\n        /**\n         * Mirrored side-dash pose from the reference.  side=-1 is left, +1 is right.\n         * The body banks into the dash while the head counter-rotates toward control.\n         */\n        private void applySideDash(float progress, float side) {\n            float enter = smooth(clamp01(progress / 0.15f));\n            float exit = 1.0f - smooth(clamp01((progress - 0.70f) / 0.30f));\n            float w = Math.min(enter, exit);\n            if (w <= 0.001f) return;\n\n            rotate(body,\n                    lerp(body.xRot, rad(17.0f), w),\n                    lerp(body.yRot, rad(-10.0f * side), w),\n                    lerp(body.zRot, rad(-31.0f * side), w));\n\n            head.xRot = lerp(head.xRot, head.xRot - rad(7.0f), w);\n            head.yRot = lerp(head.yRot, head.yRot + rad(7.0f * side), w);\n            head.zRot = lerp(head.zRot, rad(13.0f * side), w);\n\n            // The outside arm trails; the inside arm braces across the movement.\n            rotate(rightArm,\n                    lerp(rightArm.xRot, rad(side > 0.0f ? 48.0f : -24.0f), w),\n                    lerp(rightArm.yRot, rad(side > 0.0f ? -16.0f : 31.0f), w),\n                    lerp(rightArm.zRot, rad(side > 0.0f ? 24.0f : 39.0f), w));\n            rotate(leftArm,\n                    lerp(leftArm.xRot, rad(side > 0.0f ? -24.0f : 48.0f), w),\n                    lerp(leftArm.yRot, rad(side > 0.0f ? -31.0f : 16.0f), w),\n                    lerp(leftArm.zRot, rad(side > 0.0f ? -39.0f : -24.0f), w));\n\n            // Mirrored scissor/tuck creates the sideways skid silhouette from either side.\n            rotate(rightLeg,\n                    lerp(rightLeg.xRot, rad(side > 0.0f ? 31.0f : -19.0f), w),\n                    lerp(rightLeg.yRot, rad(-7.0f * side), w),\n                    lerp(rightLeg.zRot, rad(11.0f * side), w));\n            rotate(leftLeg,\n                    lerp(leftLeg.xRot, rad(side > 0.0f ? -19.0f : 31.0f), w),\n                    lerp(leftLeg.yRot, rad(7.0f * side), w),\n                    lerp(leftLeg.zRot, rad(-11.0f * side), w));\n        }\n\n'''
+          if marker not in s: raise SystemExit('animation method insertion marker missing')
+          s = s.replace(marker, insert + marker, 1)
+          p.write_text(s, encoding='utf-8')
+          PY
+
+      - name: Forge compile and reobf
+        run: gradle reobfJar --stacktrace --no-daemon
+
+      - name: Java LOC and diff
+        run: |
+          wc -l src/main/java/com/kira/jujutsuneon/*.java
+          git diff --stat
+          git diff --numstat
+
+      - name: Commit verified dash source
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add src/main/java/com/kira/jujutsuneon/JujutsuNeonMovementPatch.java \
+                  src/main/java/com/kira/jujutsuneon/JujutsuNeonMovementPatchClient.java \
+                  src/main/java/com/kira/jujutsuneon/JujutsuNeonSkillAnimationClient.java
+          if ! git diff --cached --quiet; then
+            git commit -m 'feat: add reference front and side dash animations [skip ci]'
+            git push
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: DashOverhaul-Reobf
+          path: build/libs/*.jar
+          if-no-files-found: error
