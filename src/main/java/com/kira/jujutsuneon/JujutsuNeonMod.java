@@ -4212,7 +4212,7 @@ public class JujutsuNeonMod {
 
     // Собственная физика перемещения. Никаких Potion MOVEMENT_SPEED.
     private static final double CUSTOM_WALK_BLOCKS_PER_TICK = 0.30; // ~3x vanilla walk
-    private static final double CUSTOM_RUN_BLOCKS_PER_TICK = 2.40;  // сверхбег на Ctrl (было 0.80, x3)
+    private static final double CUSTOM_RUN_BLOCKS_PER_TICK = 1.20;  // сверхбег на Ctrl (было 2.40, /2)
     private static final long SUPER_RUN_COST_INTERVAL = 40L;        // 2 секунды
     private static final double SUPER_RUN_COST = 1.0;               // 1% CE
 

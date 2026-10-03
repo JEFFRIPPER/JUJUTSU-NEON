@@ -26,7 +26,7 @@ This file is a hard contract. A movement change is invalid if any invariant belo
 - Jumps: a short Space press is a normal vanilla jump (0.42, ~1.25 blocks) on ground and in air. Holding Space on ground for 0.75 s (15 ticks) gives a 10-block jump (1.3433). There are no other charge tiers.
 - At most 4 jumps in a row, including the ground jump. The counter resets on ground and in water.
 - Airborne WASD control preserves vertical velocity.
-- Super Run (Ctrl) speed is 2.40 blocks/tick; walking is 0.30. View bobbing is suppressed while Super Run is held.
+- Super Run (Ctrl) speed is 1.20 blocks/tick; walking is 0.30. View bobbing is suppressed while Super Run is held.
 - GROUND movement sets velocity at ClientTick START and lets vanilla physics move the player. No post-tick forced `move()` for GROUND: it desyncs body yaw (sideways running), causes jitter and micro-freezes.
 - Ascending 1–2 block obstacles on GROUND uses vanilla step-up with `setMaxUpStep(2.0)` while GROUND owns motion; the previous step height is restored when it releases ownership.
 - A wall of 3+ blocks never freezes movement: the remaining motion slides along the wall (vanilla collision), including in the swept step-up solver used by DASH / WATER_RUN.
