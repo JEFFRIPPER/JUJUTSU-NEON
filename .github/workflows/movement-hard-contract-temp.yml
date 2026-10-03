@@ -1,0 +1,1350 @@
+name: Temporary Hard Movement Contract Pass
+
+on:
+  push:
+    branches: [movement-hard-contract-pass-2]
+
+jobs:
+  patch-and-build:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.1.1'
+
+      - name: Apply strict movement architecture pass
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          root = Path('src/main/java/com/kira/jujutsuneon')
+
+          # ------------------------------------------------------------------
+          # 1) Hard movement contract
+          # ------------------------------------------------------------------
+          contract = Path('MOVEMENT_CONTRACT.md')
+          contract.write_text('''# JUJUTSU NEON — Movement Contract
+
+This file is a hard contract. A movement change is invalid if any invariant below is violated.
+
+## Authority model
+- Blindfold OFF: vanilla Minecraft movement is untouched.
+- Gojo blindfold ON: Jujutsu Neon owns movement physics.
+- Exactly one movement state may own motion in a tick.
+- Legal client states are: `LOCKED`, `DASH`, `FLIGHT`, `WATER_RUN`, `WATER`, `GROUND`, `AIR`.
+- A state transition must release ownership before the next state writes velocity/position.
+- No second event handler may independently start the same dash or rewrite the same movement vector.
+
+## Coordinate invariants
+- Camera-forward is the look-relative forward basis.
+- Camera-right is `(-forward.z, 0, forward.x)`.
+- W = +forward.
+- S = -forward.
+- A = -right.
+- D = +right.
+- No downstream patch may invert A/D again.
+
+## Ground / air invariants
+- Ordinary walking/running must visibly drive vanilla limb locomotion; no rigid sliding doll.
+- Walking off a ledge may not cause a horizontal stop-frame.
+- Charged jump preserves horizontal momentum.
+- Airborne WASD control preserves vertical velocity.
+- Ascending 1–2 block obstacles may use the existing swept step-up solver.
+- Descending terrain must follow the ground smoothly instead of snapping/rubber-banding.
+- Client collision may never enter a block that still exists authoritatively on the server.
+
+## Water invariants
+- WATER and FLIGHT are mutually exclusive.
+- Entering water may never activate or preserve custom flight.
+- Without Ctrl: custom WATER state behaves like normal swimming, including vertical swim controls.
+- With Ctrl: WATER_RUN owns surface-running only.
+- If surface-running cannot acquire the surface, control falls back to WATER; it never freezes the player.
+
+## Dash invariants
+- Air Dash does not exist.
+- A dash may start only with ground support.
+- Q starts a dash only when BOTH hands are empty.
+- Any item in either hand + Q remains Minecraft item-drop behavior; no client prediction and no dash packet.
+- W+Q / neutral+Q = steerable Front Dash.
+- S+Q = steerable Back Dash opposite camera-forward.
+- A+Q = left Side Dash.
+- D+Q = right Side Dash.
+- Front Dash pose/steering/distance are protected reference behavior.
+- Back Dash uses its own full-body reverse silhouette.
+- Side Dash may bank modestly as one coherent body; it may not fold or dislocate the torso.
+- Server hit direction must match the client steering vector.
+
+## Flight invariants
+- Flight may begin only from the charged-jump apex flow.
+- Flight direction follows the camera/look vector: look up = fly up, look down = fly down.
+- W/S travel along/opposite the full look vector. A/D strafe on the camera-relative horizontal right axis.
+- Space/Shift are not the primary vertical flight axes.
+- Ctrl changes flight speed only; it does not hand movement back to Super Run.
+- Entering water immediately ends flight and transfers ownership to WATER.
+
+## Tree / destruction invariants
+- Client code must NEVER delete a world block as movement prediction.
+- Super Run tree/foliage destruction is server-authoritative.
+- The client may request a small swept path clear, but must wait for authoritative block updates before entering it.
+- Tree detection must be bounded; no per-tick breadth-first traversal of an entire trunk/canopy.
+- A tree base one block above the player is included in the swept clear volume.
+
+## Animation lifecycle invariants
+- Vanilla locomotion is the base pose.
+- Temporary skill/dash pose exists only while its timer/state is active.
+- When a timer reaches zero, active animation becomes `NONE` immediately.
+- Renderer model swaps must be restored in Post and defensively before the next Pre.
+- Purple/Blue/Front Dash reference visuals may not regress due to unrelated movement fixes.
+
+## Red safety invariants
+- The caster is excluded from normal Red custom victims.
+- The caster cannot be hurt or knocked back by their own Red explosion path.
+- Blocks supporting/intersecting the caster are restored/protected from normal Red.
+''', encoding='utf-8')
+
+          # ------------------------------------------------------------------
+          # 2) Rewrite client movement compatibility layer: one dash input owner,
+          #    no Air Dash, no client-side tree deletion.
+          # ------------------------------------------------------------------
+          movement_client = root / 'JujutsuNeonMovementPatchClient.java'
+          movement_client.write_text(r'''package com.kira.jujutsuneon;
+
+import net.minecraft.client.Minecraft;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.particles.ParticleTypes;
+import net.minecraft.tags.FluidTags;
+import net.minecraft.world.entity.EquipmentSlot;
+import net.minecraft.world.level.ClipContext;
+import net.minecraft.world.phys.AABB;
+import net.minecraft.world.phys.BlockHitResult;
+import net.minecraft.world.phys.HitResult;
+import net.minecraft.world.phys.Vec3;
+import net.minecraftforge.api.distmarker.Dist;
+import net.minecraftforge.event.TickEvent;
+import net.minecraftforge.eventbus.api.EventPriority;
+import net.minecraftforge.eventbus.api.SubscribeEvent;
+import net.minecraftforge.fml.common.Mod;
+
+import java.lang.reflect.Field;
+import java.lang.reflect.Method;
+
+/**
+ * Client side of the strict blindfold movement contract.
+ *
+ * This class owns the Q decision and dash steering only. It must never delete world
+ * blocks locally. Ground/air/water locomotion remains in ClientForgeEvents and flight
+ * remains in JujutsuNeonFlightClient, with mutually exclusive state ownership.
+ */
+@Mod.EventBusSubscriber(
+        modid = JujutsuNeonMod.MODID,
+        bus = Mod.EventBusSubscriber.Bus.FORGE,
+        value = Dist.CLIENT
+)
+public final class JujutsuNeonMovementPatchClient {
+
+    private static final Class<?> CLIENT_EVENTS_CLASS;
+    private static final Class<?> MOVEMENT_ACTION_CLASS;
+    private static final Method START_CLIENT_DASH;
+    private static final Method START_ANIM;
+    private static final Field CLIENT_DASH_MODE;
+    private static final Field CLIENT_DASH_DIRECTION;
+    private static final Field HUD_MAX_BLUE_ACTIVE;
+    private static final Field HUD_PURPLE_CASTING;
+
+    private static Vec3 desiredDashDirection = Vec3.ZERO;
+    private static JujutsuNeonMovementPatch.DashKind activePatchedDash = null;
+    private static long lastDashStartTick = -1000L;
+    private static long lastSuperRunClearRequestTick = -1000L;
+
+    static {
+        try {
+            CLIENT_EVENTS_CLASS = Class.forName("com.kira.jujutsuneon.JujutsuNeonMod$ClientForgeEvents");
+            MOVEMENT_ACTION_CLASS = Class.forName("com.kira.jujutsuneon.JujutsuNeonMod$MovementAction");
+
+            START_CLIENT_DASH = CLIENT_EVENTS_CLASS.getDeclaredMethod(
+                    "startClientDash", Minecraft.class, MOVEMENT_ACTION_CLASS
+            );
+            START_CLIENT_DASH.setAccessible(true);
+
+            START_ANIM = CLIENT_EVENTS_CLASS.getDeclaredMethod("startAnim", String.class, int.class);
+            START_ANIM.setAccessible(true);
+
+            CLIENT_DASH_MODE = CLIENT_EVENTS_CLASS.getDeclaredField("clientDashMode");
+            CLIENT_DASH_MODE.setAccessible(true);
+
+            CLIENT_DASH_DIRECTION = CLIENT_EVENTS_CLASS.getDeclaredField("clientDashDirection");
+            CLIENT_DASH_DIRECTION.setAccessible(true);
+
+            HUD_MAX_BLUE_ACTIVE = CLIENT_EVENTS_CLASS.getDeclaredField("hudMaxBlueActive");
+            HUD_MAX_BLUE_ACTIVE.setAccessible(true);
+
+            HUD_PURPLE_CASTING = CLIENT_EVENTS_CLASS.getDeclaredField("hudPurpleCasting");
+            HUD_PURPLE_CASTING.setAccessible(true);
+        } catch (ReflectiveOperationException exception) {
+            throw new ExceptionInInitializerError(exception);
+        }
+    }
+
+    private JujutsuNeonMovementPatchClient() {}
+
+    private static boolean hasBlindfold(Minecraft mc) {
+        return mc.player != null &&
+                mc.player.getItemBySlot(EquipmentSlot.HEAD).is(JujutsuNeonMod.GOJO_BLINDFOLD.get());
+    }
+
+    private static boolean handsEmpty(Minecraft mc) {
+        return mc.player != null && mc.player.getMainHandItem().isEmpty() && mc.player.getOffhandItem().isEmpty();
+    }
+
+    private static boolean techniqueLocksMovement() {
+        try {
+            return HUD_MAX_BLUE_ACTIVE.getBoolean(null) || HUD_PURPLE_CASTING.getBoolean(null);
+        } catch (IllegalAccessException exception) {
+            return true;
+        }
+    }
+
+    private static int legacyDashMode() {
+        try {
+            return CLIENT_DASH_MODE.getInt(null);
+        } catch (IllegalAccessException exception) {
+            return 0;
+        }
+    }
+
+    private static void setLegacyDashDirection(Vec3 direction) {
+        try {
+            CLIENT_DASH_DIRECTION.set(null, direction);
+        } catch (IllegalAccessException ignored) {
+        }
+    }
+
+    private static boolean hasGroundSupport(Minecraft mc, double distance) {
+        if (mc.player == null || mc.level == null) return false;
+        if (mc.player.onGround()) return true;
+
+        Vec3 start = mc.player.position().add(0.0, 0.08, 0.0);
+        Vec3 end = start.add(0.0, -Math.max(0.10, distance), 0.0);
+        BlockHitResult hit = mc.level.clip(new ClipContext(
+                start, end, ClipContext.Block.COLLIDER, ClipContext.Fluid.NONE, mc.player
+        ));
+        return hit.getType() != HitResult.Type.MISS;
+    }
+
+    private static Vec3 horizontalForward(Minecraft mc) {
+        Vec3 look = mc.player.getLookAngle();
+        Vec3 horizontal = new Vec3(look.x, 0.0, look.z);
+        if (horizontal.lengthSqr() < 1.0E-6) {
+            double yaw = Math.toRadians(mc.player.getYRot());
+            horizontal = new Vec3(-Math.sin(yaw), 0.0, Math.cos(yaw));
+        }
+        return horizontal.normalize();
+    }
+
+    private static Vec3 correctedDashDirection(Minecraft mc, JujutsuNeonMovementPatch.DashKind kind) {
+        Vec3 forward = horizontalForward(mc);
+        Vec3 right = new Vec3(-forward.z, 0.0, forward.x).normalize();
+        return switch (kind) {
+            case LEFT -> right.scale(-1.0);
+            case RIGHT -> right;
+            case BACK -> forward.scale(-1.0);
+            case FRONT -> forward;
+        };
+    }
+
+    private static Object movementAction(String name) {
+        for (Object constant : MOVEMENT_ACTION_CLASS.getEnumConstants()) {
+            if (constant instanceof Enum<?> value && value.name().equals(name)) return constant;
+        }
+        throw new IllegalArgumentException("Unknown movement action: " + name);
+    }
+
+    private static void startLegacyAnimation(JujutsuNeonMovementPatch.DashKind kind) {
+        String animation = switch (kind) {
+            case BACK -> "BACK_DASH";
+            case LEFT -> "SIDE_DASH_LEFT";
+            case RIGHT -> "SIDE_DASH_RIGHT";
+            case FRONT -> "FRONT_DASH";
+        };
+        int ticks = switch (kind) {
+            case LEFT, RIGHT -> 8;
+            case FRONT, BACK -> 14;
+        };
+
+        try {
+            START_ANIM.invoke(null, animation, ticks);
+        } catch (ReflectiveOperationException ignored) {
+        }
+    }
+
+    private static boolean startPatchedDash(Minecraft mc, JujutsuNeonMovementPatch.DashKind kind) {
+        if (mc.player == null || mc.level == null) return false;
+        if (!hasGroundSupport(mc, 0.36)) return false;
+
+        long now = mc.level.getGameTime();
+        if (now - lastDashStartTick < 10L) return false;
+
+        String legacyAction = switch (kind) {
+            case LEFT -> "LEFT_DASH";
+            case RIGHT -> "RIGHT_DASH";
+            case BACK -> "BACK_DASH";
+            case FRONT -> "FRONT_DASH";
+        };
+
+        try {
+            START_CLIENT_DASH.invoke(null, mc, movementAction(legacyAction));
+        } catch (ReflectiveOperationException exception) {
+            return false;
+        }
+
+        if (legacyDashMode() == 0) return false;
+
+        desiredDashDirection = correctedDashDirection(mc, kind);
+        activePatchedDash = kind;
+        setLegacyDashDirection(desiredDashDirection);
+        JujutsuNeonMovementPatch.sendDash(kind);
+        startLegacyAnimation(kind);
+        lastDashStartTick = now;
+        return true;
+    }
+
+    private static boolean canStepUp(Minecraft mc, Vec3 direction, double probe) {
+        if (mc.player == null || mc.level == null) return false;
+        AABB box = mc.player.getBoundingBox();
+        Vec3 horizontal = direction.scale(probe);
+        for (double lift = 0.125; lift <= 2.0001; lift += 0.125) {
+            if (mc.level.noCollision(mc.player, box.move(horizontal.x, lift, horizontal.z))) return true;
+        }
+        return false;
+    }
+
+    private static Vec3 wallSlideDirection(Minecraft mc, Vec3 desired, int dashMode) {
+        if (mc.player == null || mc.level == null || desired.lengthSqr() < 1.0E-8) return desired;
+
+        Vec3 direction = new Vec3(desired.x, 0.0, desired.z).normalize();
+        AABB box = mc.player.getBoundingBox();
+        double probe = 0.18;
+        Vec3 fullStep = direction.scale(probe);
+
+        if (mc.level.noCollision(mc.player, box.move(fullStep))) return direction;
+        if (canStepUp(mc, direction, probe)) return direction;
+
+        boolean xFree = Math.abs(direction.x) > 1.0E-5 &&
+                mc.level.noCollision(mc.player, box.move(direction.x * probe, 0.0, 0.0));
+        boolean zFree = Math.abs(direction.z) > 1.0E-5 &&
+                mc.level.noCollision(mc.player, box.move(0.0, 0.0, direction.z * probe));
+
+        if (xFree && zFree) {
+            return Math.abs(direction.x) >= Math.abs(direction.z)
+                    ? new Vec3(Math.signum(direction.x), 0.0, 0.0)
+                    : new Vec3(0.0, 0.0, Math.signum(direction.z));
+        }
+        if (xFree) return new Vec3(Math.signum(direction.x), 0.0, 0.0);
+        if (zFree) return new Vec3(0.0, 0.0, Math.signum(direction.z));
+        return direction;
+    }
+
+    private static Vec3 steerTowards(Vec3 current, Vec3 target, double maxRadians) {
+        Vec3 from = new Vec3(current.x, 0.0, current.z);
+        Vec3 to = new Vec3(target.x, 0.0, target.z);
+        if (to.lengthSqr() < 1.0E-8) return from;
+        to = to.normalize();
+        if (from.lengthSqr() < 1.0E-8) return to;
+        from = from.normalize();
+
+        double dot = Math.max(-1.0, Math.min(1.0, from.dot(to)));
+        double crossY = from.x * to.z - from.z * to.x;
+        double angle = Math.atan2(crossY, dot);
+        double turn = Math.max(-maxRadians, Math.min(maxRadians, angle));
+        double c = Math.cos(turn);
+        double sn = Math.sin(turn);
+        Vec3 rotated = new Vec3(
+                from.x * c - from.z * sn,
+                0.0,
+                from.x * sn + from.z * c
+        );
+        return rotated.lengthSqr() > 1.0E-8 ? rotated.normalize() : to;
+    }
+
+    private static void adjustDashForWallSlide(Minecraft mc) {
+        int mode = legacyDashMode();
+        if (mode == 0 || desiredDashDirection.lengthSqr() < 1.0E-8) return;
+
+        boolean longitudinal = mode == 1 &&
+                (activePatchedDash == JujutsuNeonMovementPatch.DashKind.FRONT ||
+                 activePatchedDash == JujutsuNeonMovementPatch.DashKind.BACK);
+
+        if (longitudinal) {
+            Vec3 target = horizontalForward(mc);
+            if (activePatchedDash == JujutsuNeonMovementPatch.DashKind.BACK) target = target.scale(-1.0);
+            desiredDashDirection = steerTowards(desiredDashDirection, target, Math.toRadians(34.0));
+        }
+
+        Vec3 actual = wallSlideDirection(mc, desiredDashDirection, mode);
+        setLegacyDashDirection(actual);
+        if (longitudinal) JujutsuNeonMovementPatch.sendFrontSteer(actual);
+    }
+
+    private static Vec3 customMovementDirection(Minecraft mc) {
+        if (mc.player == null) return Vec3.ZERO;
+
+        double forwardInput = (mc.options.keyUp.isDown() ? 1.0 : 0.0) -
+                (mc.options.keyDown.isDown() ? 1.0 : 0.0);
+        double strafeInput = (mc.options.keyRight.isDown() ? 1.0 : 0.0) -
+                (mc.options.keyLeft.isDown() ? 1.0 : 0.0);
+
+        if (Math.abs(forwardInput) < 1.0E-4 && Math.abs(strafeInput) < 1.0E-4) return Vec3.ZERO;
+
+        Vec3 forward = horizontalForward(mc);
+        Vec3 right = new Vec3(-forward.z, 0.0, forward.x);
+        Vec3 result = forward.scale(forwardInput).add(right.scale(strafeInput));
+        return result.lengthSqr() > 1.0E-6 ? result.normalize() : Vec3.ZERO;
+    }
+
+    /**
+     * Server-authoritative vegetation clearing. The client only asks when its next
+     * swept step is physically blocked; it never replaces a local block with AIR.
+     */
+    private static void requestSuperRunClear(Minecraft mc, Vec3 direction) {
+        if (mc.player == null || mc.level == null || direction.lengthSqr() < 1.0E-8) return;
+
+        Vec3 step = direction.normalize().scale(0.95);
+        if (mc.level.noCollision(mc.player, mc.player.getBoundingBox().move(step))) return;
+
+        long now = mc.level.getGameTime();
+        if (now - lastSuperRunClearRequestTick < 2L) return;
+        lastSuperRunClearRequestTick = now;
+        JujutsuNeonMovementPatch.sendSuperRunClear(direction);
+    }
+
+    private static void spawnWaterRunPredictionVfx(Minecraft mc) {
+        if (mc.player == null || mc.level == null) return;
+
+        BlockPos below = BlockPos.containing(mc.player.getX(), mc.player.getY() - 0.18, mc.player.getZ());
+        var fluid = mc.level.getFluidState(below);
+        if (!fluid.is(FluidTags.WATER)) return;
+
+        double surfaceY = below.getY() + fluid.getHeight(mc.level, below);
+        if (mc.player.getY() < surfaceY - 0.48 || mc.player.getY() > surfaceY + 0.65) return;
+        if ((mc.level.getGameTime() & 1L) != 0L) return;
+
+        for (int i = 0; i < 6; i++) {
+            double angle = Math.PI * 2.0 * i / 6.0;
+            double radius = 0.28 + (i % 2) * 0.10;
+            mc.level.addParticle(
+                    i % 2 == 0 ? ParticleTypes.SPLASH : ParticleTypes.ELECTRIC_SPARK,
+                    mc.player.getX() + Math.cos(angle) * radius,
+                    surfaceY + 0.06,
+                    mc.player.getZ() + Math.sin(angle) * radius,
+                    Math.cos(angle) * 0.07,
+                    0.08,
+                    Math.sin(angle) * 0.07
+            );
+        }
+    }
+
+    @SubscribeEvent(priority = EventPriority.HIGHEST)
+    public static void onClientTickHigh(TickEvent.ClientTickEvent event) {
+        if (event.phase != TickEvent.Phase.END) return;
+
+        Minecraft mc = Minecraft.getInstance();
+        if (mc.player == null || mc.level == null) return;
+
+        if (!hasBlindfold(mc) || mc.screen != null || mc.player.getAbilities().flying) {
+            desiredDashDirection = Vec3.ZERO;
+            activePatchedDash = null;
+            return;
+        }
+
+        // This is the ONLY Q consumer for custom dash. If an item is held, the
+        // custom mapping is consumed without starting prediction; vanilla Drop Item
+        // remains free to perform its normal Q action.
+        while (JujutsuNeonMod.ClientModEvents.DASH_KEY.consumeClick()) {
+            if (!handsEmpty(mc)) continue;
+            if (techniqueLocksMovement()) continue;
+            if (legacyDashMode() != 0) continue;
+            if (!hasGroundSupport(mc, 0.36)) continue; // Air Dash does not exist.
+
+            boolean left = mc.options.keyLeft.isDown() && !mc.options.keyRight.isDown();
+            boolean right = mc.options.keyRight.isDown() && !mc.options.keyLeft.isDown();
+            boolean back = !left && !right && mc.options.keyDown.isDown() && !mc.options.keyUp.isDown();
+
+            JujutsuNeonMovementPatch.DashKind kind;
+            if (left) kind = JujutsuNeonMovementPatch.DashKind.LEFT;
+            else if (right) kind = JujutsuNeonMovementPatch.DashKind.RIGHT;
+            else if (back) kind = JujutsuNeonMovementPatch.DashKind.BACK;
+            else kind = JujutsuNeonMovementPatch.DashKind.FRONT;
+
+            startPatchedDash(mc, kind);
+        }
+
+        adjustDashForWallSlide(mc);
+
+        if (JujutsuNeonMod.ClientModEvents.SUPER_SPEED_KEY.isDown() &&
+                legacyDashMode() == 0 && !techniqueLocksMovement()) {
+            Vec3 direction = customMovementDirection(mc);
+            if (direction.lengthSqr() > 1.0E-8) {
+                requestSuperRunClear(mc, direction);
+                spawnWaterRunPredictionVfx(mc);
+            }
+        }
+
+        if (legacyDashMode() == 0) {
+            desiredDashDirection = Vec3.ZERO;
+            activePatchedDash = null;
+        }
+    }
+}
+''', encoding='utf-8')
+
+          # ------------------------------------------------------------------
+          # 3) Rewrite server movement patch: no Air Dash + authoritative tree clear.
+          # ------------------------------------------------------------------
+          movement_server = root / 'JujutsuNeonMovementPatch.java'
+          movement_server.write_text(r'''package com.kira.jujutsuneon;
+
+import net.minecraft.core.BlockPos;
+import net.minecraft.network.FriendlyByteBuf;
+import net.minecraft.resources.ResourceLocation;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.tags.BlockTags;
+import net.minecraft.world.entity.EquipmentSlot;
+import net.minecraft.world.entity.ExperienceOrb;
+import net.minecraft.world.entity.item.ItemEntity;
+import net.minecraft.world.level.ClipContext;
+import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.phys.AABB;
+import net.minecraft.world.phys.BlockHitResult;
+import net.minecraft.world.phys.HitResult;
+import net.minecraft.world.phys.Vec3;
+import net.minecraftforge.event.entity.EntityJoinLevelEvent;
+import net.minecraftforge.event.entity.living.LivingAttackEvent;
+import net.minecraftforge.event.entity.living.LivingHurtEvent;
+import net.minecraftforge.event.entity.living.LivingKnockBackEvent;
+import net.minecraftforge.event.level.ExplosionEvent;
+import net.minecraftforge.eventbus.api.EventPriority;
+import net.minecraftforge.eventbus.api.SubscribeEvent;
+import net.minecraftforge.fml.common.Mod;
+import net.minecraftforge.network.NetworkEvent;
+import net.minecraftforge.network.NetworkRegistry;
+import net.minecraftforge.network.simple.SimpleChannel;
+
+import java.lang.reflect.Method;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.function.Supplier;
+
+/** Server authority for dash direction, Super Run path clearing and Red owner safety. */
+@Mod.EventBusSubscriber(modid = JujutsuNeonMod.MODID, bus = Mod.EventBusSubscriber.Bus.FORGE)
+public final class JujutsuNeonMovementPatch {
+
+    private static final String PATCH_PROTOCOL = "2";
+    private static final SimpleChannel PATCH_NETWORK = NetworkRegistry.newSimpleChannel(
+            new ResourceLocation(JujutsuNeonMod.MODID, "movement_fix"),
+            () -> PATCH_PROTOCOL, PATCH_PROTOCOL::equals, PATCH_PROTOCOL::equals
+    );
+
+    static {
+        PATCH_NETWORK.registerMessage(0, DashPacket.class, DashPacket::encode, DashPacket::decode, DashPacket::handle);
+        PATCH_NETWORK.registerMessage(1, FrontSteerPacket.class, FrontSteerPacket::encode, FrontSteerPacket::decode, FrontSteerPacket::handle);
+        PATCH_NETWORK.registerMessage(2, SuperRunClearPacket.class, SuperRunClearPacket::encode, SuperRunClearPacket::decode, SuperRunClearPacket::handle);
+    }
+
+    private JujutsuNeonMovementPatch() {}
+
+    public enum DashKind { FRONT, BACK, LEFT, RIGHT }
+
+    public static void sendDash(DashKind kind) {
+        PATCH_NETWORK.sendToServer(new DashPacket(kind));
+    }
+
+    public static void sendFrontSteer(Vec3 direction) {
+        Vec3 horizontal = new Vec3(direction.x, 0.0, direction.z);
+        if (horizontal.lengthSqr() < 1.0E-8) return;
+        horizontal = horizontal.normalize();
+        PATCH_NETWORK.sendToServer(new FrontSteerPacket(horizontal.x, horizontal.z));
+    }
+
+    public static void sendSuperRunClear(Vec3 direction) {
+        Vec3 horizontal = new Vec3(direction.x, 0.0, direction.z);
+        if (horizontal.lengthSqr() < 1.0E-8) return;
+        horizontal = horizontal.normalize();
+        PATCH_NETWORK.sendToServer(new SuperRunClearPacket(horizontal.x, horizontal.z));
+    }
+
+    private record DashPacket(DashKind kind) {
+        static void encode(DashPacket msg, FriendlyByteBuf buf) { buf.writeEnum(msg.kind); }
+        static DashPacket decode(FriendlyByteBuf buf) { return new DashPacket(buf.readEnum(DashKind.class)); }
+        static void handle(DashPacket msg, Supplier<NetworkEvent.Context> supplier) {
+            NetworkEvent.Context context = supplier.get();
+            context.enqueueWork(() -> {
+                ServerPlayer player = context.getSender();
+                if (player != null) handlePatchedDash(player, msg.kind);
+            });
+            context.setPacketHandled(true);
+        }
+    }
+
+    private record FrontSteerPacket(double x, double z) {
+        static void encode(FrontSteerPacket msg, FriendlyByteBuf buf) {
+            buf.writeDouble(msg.x); buf.writeDouble(msg.z);
+        }
+        static FrontSteerPacket decode(FriendlyByteBuf buf) {
+            return new FrontSteerPacket(buf.readDouble(), buf.readDouble());
+        }
+        static void handle(FrontSteerPacket msg, Supplier<NetworkEvent.Context> supplier) {
+            NetworkEvent.Context context = supplier.get();
+            context.enqueueWork(() -> {
+                ServerPlayer player = context.getSender();
+                if (player == null || !player.isAlive() || player.isSpectator()) return;
+                if (!hasBlindfold(player) || !handsEmpty(player)) return;
+                if (player.getPersistentData().getInt("jn_dash_mode") != 1) return;
+
+                Vec3 direction = new Vec3(msg.x, 0.0, msg.z);
+                if (!Double.isFinite(direction.x) || !Double.isFinite(direction.z) || direction.lengthSqr() < 1.0E-8) return;
+                direction = direction.normalize();
+                player.getPersistentData().putDouble("jn_dash_dx", direction.x);
+                player.getPersistentData().putDouble("jn_dash_dy", 0.0);
+                player.getPersistentData().putDouble("jn_dash_dz", direction.z);
+            });
+            context.setPacketHandled(true);
+        }
+    }
+
+    private record SuperRunClearPacket(double x, double z) {
+        static void encode(SuperRunClearPacket msg, FriendlyByteBuf buf) {
+            buf.writeDouble(msg.x); buf.writeDouble(msg.z);
+        }
+        static SuperRunClearPacket decode(FriendlyByteBuf buf) {
+            return new SuperRunClearPacket(buf.readDouble(), buf.readDouble());
+        }
+        static void handle(SuperRunClearPacket msg, Supplier<NetworkEvent.Context> supplier) {
+            NetworkEvent.Context context = supplier.get();
+            context.enqueueWork(() -> {
+                ServerPlayer player = context.getSender();
+                if (player == null || !player.isAlive() || player.isSpectator()) return;
+                if (!hasBlindfold(player) || player.getAbilities().flying) return;
+                if (!player.getPersistentData().getBoolean("jn_super_speed")) return;
+                if (player.getPersistentData().getInt("jn_dash_mode") != 0) return;
+
+                Vec3 direction = new Vec3(msg.x, 0.0, msg.z);
+                if (!Double.isFinite(direction.x) || !Double.isFinite(direction.z) || direction.lengthSqr() < 1.0E-8) return;
+                clearSuperRunPath(player, direction.normalize());
+            });
+            context.setPacketHandled(true);
+        }
+    }
+
+    private static boolean hasBlindfold(ServerPlayer player) {
+        return player.getItemBySlot(EquipmentSlot.HEAD).is(JujutsuNeonMod.GOJO_BLINDFOLD.get());
+    }
+
+    private static boolean handsEmpty(ServerPlayer player) {
+        return player.getMainHandItem().isEmpty() && player.getOffhandItem().isEmpty();
+    }
+
+    private static boolean hasGroundSupport(ServerPlayer player, double distance) {
+        if (player.onGround()) return true;
+        Vec3 start = player.position().add(0.0, 0.08, 0.0);
+        Vec3 end = start.add(0.0, -Math.max(0.10, distance), 0.0);
+        BlockHitResult hit = player.level().clip(new ClipContext(
+                start, end, ClipContext.Block.COLLIDER, ClipContext.Fluid.NONE, player
+        ));
+        return hit.getType() != HitResult.Type.MISS;
+    }
+
+    private static Vec3 horizontalForward(ServerPlayer player) {
+        Vec3 look = player.getLookAngle();
+        Vec3 horizontal = new Vec3(look.x, 0.0, look.z);
+        if (horizontal.lengthSqr() < 1.0E-6) {
+            double yaw = Math.toRadians(player.getYRot());
+            horizontal = new Vec3(-Math.sin(yaw), 0.0, Math.cos(yaw));
+        }
+        return horizontal.normalize();
+    }
+
+    private static Vec3 correctedDirection(ServerPlayer player, DashKind kind) {
+        Vec3 forward = horizontalForward(player);
+        Vec3 right = new Vec3(-forward.z, 0.0, forward.x).normalize();
+        return switch (kind) {
+            case LEFT -> right.scale(-1.0);
+            case RIGHT -> right;
+            case BACK -> forward.scale(-1.0);
+            case FRONT -> forward;
+        };
+    }
+
+    private static void invokeOriginalStartDash(ServerPlayer player, int side) {
+        try {
+            Method method = JujutsuNeonMod.class.getDeclaredMethod("startDash", ServerPlayer.class, int.class);
+            method.setAccessible(true);
+            method.invoke(null, player, side);
+        } catch (ReflectiveOperationException exception) {
+            throw new IllegalStateException("Unable to invoke Jujutsu Neon dash controller", exception);
+        }
+    }
+
+    private static void handlePatchedDash(ServerPlayer player, DashKind kind) {
+        if (!player.isAlive() || player.isSpectator()) return;
+        if (!hasBlindfold(player) || !handsEmpty(player) || player.getAbilities().flying) return;
+        if (!hasGroundSupport(player, 0.36)) return;
+
+        int side = switch (kind) {
+            case LEFT -> -1;
+            case RIGHT -> 1;
+            case BACK -> 2;
+            case FRONT -> 0;
+        };
+
+        invokeOriginalStartDash(player, side);
+        if (player.getPersistentData().getInt("jn_dash_mode") == 0) return;
+
+        Vec3 direction = correctedDirection(player, kind);
+        player.getPersistentData().putDouble("jn_dash_dx", direction.x);
+        player.getPersistentData().putDouble("jn_dash_dy", 0.0);
+        player.getPersistentData().putDouble("jn_dash_dz", direction.z);
+    }
+
+    private static boolean naturalGround(BlockState state) {
+        return state.is(Blocks.DIRT) || state.is(Blocks.GRASS_BLOCK) || state.is(Blocks.PODZOL) ||
+                state.is(Blocks.COARSE_DIRT) || state.is(Blocks.ROOTED_DIRT) ||
+                state.is(Blocks.MUD) || state.is(Blocks.MYCELIUM);
+    }
+
+    /** Bounded natural-tree heuristic: no trunk/canopy BFS in a movement tick. */
+    private static boolean isNaturalTreeLog(ServerLevel level, BlockPos pos) {
+        if (!level.getBlockState(pos).is(BlockTags.LOGS)) return false;
+        if (naturalGround(level.getBlockState(pos.below()))) return true;
+
+        for (int dy = 0; dy <= 6; dy++) {
+            for (int dx = -3; dx <= 3; dx++) {
+                for (int dz = -3; dz <= 3; dz++) {
+                    if (Math.abs(dx) + Math.abs(dz) > 5) continue;
+                    if (level.getBlockState(pos.offset(dx, dy, dz)).is(BlockTags.LEAVES)) return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    private static boolean superRunBreakable(ServerLevel level, BlockPos pos, BlockState state) {
+        if (state.isAir()) return false;
+        if (state.is(BlockTags.LEAVES) || state.is(BlockTags.FLOWERS) || state.is(BlockTags.SAPLINGS)) return true;
+        if (state.is(BlockTags.LOGS)) return isNaturalTreeLog(level, pos);
+        return state.is(Blocks.GRASS) || state.is(Blocks.TALL_GRASS) || state.is(Blocks.FERN) ||
+                state.is(Blocks.LARGE_FERN) || state.is(Blocks.VINE) || state.is(Blocks.DEAD_BUSH) ||
+                state.is(Blocks.SWEET_BERRY_BUSH) || state.is(Blocks.AZALEA) ||
+                state.is(Blocks.FLOWERING_AZALEA) || state.is(Blocks.BAMBOO) || state.is(Blocks.SUGAR_CANE);
+    }
+
+    private static void clearSuperRunPath(ServerPlayer player, Vec3 direction) {
+        ServerLevel level = player.serverLevel();
+        AABB sweep = player.getBoundingBox()
+                .expandTowards(direction.scale(1.35))
+                .inflate(0.16, 1.05, 0.16);
+
+        List<BlockPos> remove = new ArrayList<>();
+        for (int x = (int)Math.floor(sweep.minX); x <= (int)Math.floor(sweep.maxX) && remove.size() < 32; x++) {
+            for (int y = (int)Math.floor(sweep.minY); y <= (int)Math.floor(sweep.maxY) && remove.size() < 32; y++) {
+                for (int z = (int)Math.floor(sweep.minZ); z <= (int)Math.floor(sweep.maxZ) && remove.size() < 32; z++) {
+                    BlockPos pos = new BlockPos(x, y, z);
+                    if (!level.hasChunkAt(pos)) continue;
+                    BlockState state = level.getBlockState(pos);
+                    if (superRunBreakable(level, pos, state)) remove.add(pos.immutable());
+                }
+            }
+        }
+
+        // Classify first, mutate second: removing the base log must not change the
+        // classification of the next trunk block inside this same authoritative pass.
+        for (BlockPos pos : remove) {
+            BlockState state = level.getBlockState(pos);
+            if (!state.isAir()) level.setBlock(pos, Blocks.AIR.defaultBlockState(), 3);
+        }
+    }
+
+    @SubscribeEvent(priority = EventPriority.HIGHEST)
+    public static void onRedExplosionDetonate(ExplosionEvent.Detonate event) {
+        event.getAffectedEntities().removeIf(entity -> entity instanceof ServerPlayer player &&
+                player.getPersistentData().getBoolean("jn_red_explosion_blocks_only"));
+    }
+
+    @SubscribeEvent(priority = EventPriority.HIGHEST)
+    public static void onRedOwnerAttack(LivingAttackEvent event) {
+        if (event.getEntity() instanceof ServerPlayer player &&
+                player.getPersistentData().getBoolean("jn_red_explosion_blocks_only")) {
+            event.setCanceled(true);
+        }
+    }
+
+    @SubscribeEvent(priority = EventPriority.HIGHEST)
+    public static void onRedOwnerHurt(LivingHurtEvent event) {
+        if (event.getEntity() instanceof ServerPlayer player &&
+                player.getPersistentData().getBoolean("jn_red_explosion_blocks_only")) {
+            event.setCanceled(true);
+        }
+    }
+
+    @SubscribeEvent(priority = EventPriority.HIGHEST)
+    public static void onRedOwnerKnockback(LivingKnockBackEvent event) {
+        if (event.getEntity() instanceof ServerPlayer player &&
+                player.getPersistentData().getBoolean("jn_red_explosion_blocks_only")) {
+            event.setCanceled(true);
+        }
+    }
+
+    @SubscribeEvent(priority = EventPriority.HIGHEST)
+    public static void onTechniqueDropSpawn(EntityJoinLevelEvent event) {
+        if (event.getLevel().isClientSide()) return;
+        if (!(event.getLevel() instanceof ServerLevel level)) return;
+        if (!(event.getEntity() instanceof ItemEntity) && !(event.getEntity() instanceof ExperienceOrb)) return;
+
+        for (ServerPlayer player : level.players()) {
+            if (!player.getPersistentData().getBoolean("jn_red_explosion_blocks_only")) continue;
+            if (player.distanceToSqr(event.getEntity()) > 144.0) continue;
+            event.setCanceled(true);
+            return;
+        }
+    }
+}
+''', encoding='utf-8')
+
+          # ------------------------------------------------------------------
+          # 4) Main controller surgery.
+          # ------------------------------------------------------------------
+          mod = root / 'JujutsuNeonMod.java'
+          s = mod.read_text(encoding='utf-8')
+
+          # Remove legacy Air Dash constants.
+          s = s.replace('''    private static final int DASH_SIDE = 2;\n    private static final int DASH_AIR = 3;\n\n    private static final long FRONT_DASH_TICKS = 14L;\n    private static final long SIDE_DASH_TICKS = 4L;\n    private static final long AIR_DASH_TICKS = 3L;\n''', '''    private static final int DASH_SIDE = 2;\n\n    private static final long FRONT_DASH_TICKS = 14L;\n    private static final long SIDE_DASH_TICKS = 4L;\n''')
+
+          # Replace server Air Dash height helper with strict ground support helper.
+          s, n = re.subn(r'''    private static boolean isAirDashHeight\(ServerPlayer player\) \{.*?\n    \}\n\n    private static void startDash''', r'''    private static boolean dashHasGroundSupport(ServerPlayer player) {
+        if (player.onGround()) return true;
+        Vec3 start = player.position().add(0.0, 0.08, 0.0);
+        Vec3 end = start.add(0.0, -0.36, 0.0);
+        BlockHitResult hit = player.level().clip(new ClipContext(
+                start, end, ClipContext.Block.COLLIDER, ClipContext.Fluid.NONE, player
+        ));
+        return hit.getType() != HitResult.Type.MISS;
+    }
+
+    private static void startDash''', s, count=1, flags=re.S)
+          assert n == 1, 'server Air Dash helper replacement failed'
+
+          # Delete automatic server Air Dash branch and reject airborne dash instead.
+          old = '''        // В воздухе выше 3 блоков любой Q-рывок становится свободным air dash по камере.\n        if (isAirDashHeight(player)) {\n            if (!consumeEnergy(player, 0.8)) return;\n\n            Vec3 dir = player.getLookAngle().normalize();\n            player.getPersistentData().putInt("jn_dash_mode", DASH_AIR);\n            player.getPersistentData().putLong("jn_dash_started", now);\n            player.getPersistentData().putDouble("jn_dash_dx", dir.x);\n            player.getPersistentData().putDouble("jn_dash_dy", dir.y);\n            player.getPersistentData().putDouble("jn_dash_dz", dir.z);\n\n            playSfx(level, player, SFX_DASH, 0.82f, 1.22f);\n            spawnVfx(level, VFX_DASH, player.position().add(0, 0.85, 0), 1);\n            return;\n        }\n\n'''
+          assert old in s, 'server air dash branch not found'
+          s = s.replace(old, '        // Air Dash does not exist. Every dash requires ground support.\n        if (!dashHasGroundSupport(player)) return;\n\n', 1)
+
+          # Remove server AIR tick state.
+          s, n = re.subn(r'''\n        if \(mode == DASH_AIR\) \{.*?\n        \}\n(?=    \}\n\n    private static void performChargedJump)''', '\n', s, count=1, flags=re.S)
+          assert n == 1, 'server DASH_AIR tick block removal failed'
+
+          # Correct server-side camera-right helper used by any fallback movement code.
+          s = s.replace('Vec3 right = new Vec3(forward.z, 0.0, -forward.x);',
+                        'Vec3 right = new Vec3(-forward.z, 0.0, forward.x);')
+
+          # Replace expensive whole-tree BFS with bounded evidence scan.
+          s, n = re.subn(r'''    private static boolean isNaturalTreeLog\(ServerLevel level, BlockPos start\) \{.*?\n    \}\n\n    private static boolean isSuperRunPlant''', r'''    private static boolean isNaturalTreeLog(ServerLevel level, BlockPos start) {
+        if (!level.getBlockState(start).is(BlockTags.LOGS)) return false;
+
+        BlockState below = level.getBlockState(start.below());
+        if (below.is(Blocks.DIRT) || below.is(Blocks.GRASS_BLOCK) || below.is(Blocks.PODZOL) ||
+                below.is(Blocks.COARSE_DIRT) || below.is(Blocks.ROOTED_DIRT) ||
+                below.is(Blocks.MUD) || below.is(Blocks.MYCELIUM)) {
+            return true;
+        }
+
+        // Bounded natural-tree evidence. Never traverse an entire connected trunk/canopy
+        // from the movement tick; that was one of the sources of movement hitching.
+        for (int dy = 0; dy <= 6; dy++) {
+            for (int dx = -3; dx <= 3; dx++) {
+                for (int dz = -3; dz <= 3; dz++) {
+                    if (Math.abs(dx) + Math.abs(dz) > 5) continue;
+                    if (level.getBlockState(start.offset(dx, dy, dz)).is(BlockTags.LEAVES)) return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    private static boolean isSuperRunPlant''', s, count=1, flags=re.S)
+          assert n == 1, 'tree classifier replacement failed'
+
+          # Server surface run and client surface run now agree on the same state.
+          s = s.replace('''        vaporizeSuperRunPlants(player, level);\n        spawnSuperRunEffects(player, level, now);''',
+                        '''        vaporizeSuperRunPlants(player, level);\n        supportSuperRunOnWater(player, level);\n        spawnSuperRunEffects(player, level, now);''', 1)
+
+          # Remove client Air Dash height helper entirely.
+          s, n = re.subn(r'''        private static boolean clientIsAirDashHeight\(Minecraft mc\) \{.*?\n        \}\n\n        private static Vec3 clientHorizontalDirection''',
+                         '        private static Vec3 clientHorizontalDirection', s, count=1, flags=re.S)
+          assert n == 1, 'client air height helper removal failed'
+
+          # Replace client dash starter: ground-only, no auto Air Dash.
+          s, n = re.subn(r'''        private static void startClientDash\(Minecraft mc, MovementAction requestedAction\) \{.*?\n        \}\n\n        private static void tickClientDash''', r'''        private static void startClientDash(Minecraft mc, MovementAction requestedAction) {
+            if (!hudBlindfold || mc.player == null || mc.level == null) return;
+            if (hudMaxBlueActive || hudPurpleCasting || clientDashMode != DASH_NONE) return;
+            if (!clientHasGroundSupport(mc, 0.36)) return;
+
+            Vec3 look = mc.player.getLookAngle();
+            Vec3 horizontal = new Vec3(look.x, 0.0, look.z);
+            if (horizontal.lengthSqr() < 1.0E-4) {
+                double yaw = Math.toRadians(mc.player.getYRot());
+                horizontal = new Vec3(-Math.sin(yaw), 0.0, Math.cos(yaw));
+            }
+            horizontal = horizontal.normalize();
+            Vec3 right = new Vec3(-horizontal.z, 0.0, horizontal.x);
+
+            if (requestedAction == MovementAction.LEFT_DASH || requestedAction == MovementAction.RIGHT_DASH) {
+                clientDashDirection = requestedAction == MovementAction.LEFT_DASH
+                        ? right.scale(-1.0) : right;
+                clientDashMode = DASH_SIDE;
+            } else {
+                clientDashDirection = requestedAction == MovementAction.BACK_DASH
+                        ? horizontal.scale(-1.0) : horizontal;
+                clientDashMode = DASH_FRONT;
+            }
+
+            clientDashAge = 0;
+            mc.player.setDeltaMovement(Vec3.ZERO);
+        }
+
+        private static void tickClientDash''', s, count=1, flags=re.S)
+          assert n == 1, 'client dash starter replacement failed'
+
+          # Replace dash tick: only FRONT/BACK and SIDE exist.
+          s, n = re.subn(r'''        private static void tickClientDash\(Minecraft mc\) \{.*?\n        \}\n\n        private static boolean clientWaterSurfaceRun''', r'''        private static void tickClientDash(Minecraft mc) {
+            if (clientDashMode == DASH_NONE || mc.player == null) return;
+
+            if (!hudBlindfold || hudMaxBlueActive || hudPurpleCasting) {
+                clientDashMode = DASH_NONE;
+                clientDashAge = 0;
+                clientDashDirection = Vec3.ZERO;
+                return;
+            }
+
+            Vec3 dir = clientDashDirection;
+            if (dir.lengthSqr() < 1.0E-6) {
+                clientDashMode = DASH_NONE;
+                return;
+            }
+
+            double speed;
+            int lifetime;
+            if (clientDashMode == DASH_FRONT) {
+                lifetime = (int) FRONT_DASH_TICKS;
+                double t = Mth.clamp(clientDashAge / (double) FRONT_DASH_TICKS, 0.0, 1.0);
+                speed = 1.68 - 1.30 * t;
+            } else if (clientDashMode == DASH_SIDE) {
+                lifetime = (int) SIDE_DASH_TICKS;
+                speed = 1.28;
+            } else {
+                clientDashMode = DASH_NONE;
+                clientDashAge = 0;
+                clientDashDirection = Vec3.ZERO;
+                return;
+            }
+
+            if (clientDashAge >= lifetime ||
+                    !tryClientForcedMove(mc, dir.normalize().scale(speed), true)) {
+                clientDashMode = DASH_NONE;
+                clientDashAge = 0;
+                clientDashDirection = Vec3.ZERO;
+                mc.player.setDeltaMovement(Vec3.ZERO);
+                return;
+            }
+
+            mc.player.setDeltaMovement(Vec3.ZERO);
+            mc.player.fallDistance = 0.0F;
+            clientDashAge++;
+        }
+
+        private static boolean clientWaterSurfaceRun''', s, count=1, flags=re.S)
+          assert n == 1, 'client dash tick replacement failed'
+
+          # Replace ground-only controller with explicit single-owner state machine.
+          s, n = re.subn(r'''        private static void tickCustomGroundMovement\(Minecraft mc\) \{.*?\n        \}\n\n        private static void performClientChargedJump''', r'''        private enum ClientMovementState {
+            LOCKED,
+            DASH,
+            FLIGHT,
+            WATER_RUN,
+            WATER,
+            GROUND,
+            AIR
+        }
+
+        private static ClientMovementState resolveMovementState(Minecraft mc, boolean superRun) {
+            if (hudMaxBlueActive || hudPurpleCasting) return ClientMovementState.LOCKED;
+            if (clientDashMode != DASH_NONE) return ClientMovementState.DASH;
+            if (JujutsuNeonFlightClient.isCustomFlightActive()) return ClientMovementState.FLIGHT;
+            if (mc.player != null && mc.player.isInWaterOrBubble()) {
+                return superRun ? ClientMovementState.WATER_RUN : ClientMovementState.WATER;
+            }
+            if (clientHasGroundSupport(mc, 0.34)) return ClientMovementState.GROUND;
+            return ClientMovementState.AIR;
+        }
+
+        private static void smoothGroundDescent(Minecraft mc) {
+            if (mc.player == null || mc.level == null || mc.player.onGround()) return;
+
+            Vec3 start = mc.player.position().add(0.0, 0.06, 0.0);
+            Vec3 end = start.add(0.0, -1.35, 0.0);
+            BlockHitResult hit = mc.level.clip(new ClipContext(
+                    start, end, ClipContext.Block.COLLIDER, ClipContext.Fluid.NONE, mc.player
+            ));
+            if (hit.getType() == HitResult.Type.MISS) return;
+
+            double drop = mc.player.getY() - hit.getLocation().y;
+            if (drop <= 0.02 || drop > 1.25) return;
+
+            // Follow terrain over several ticks instead of one hard 1-block snap.
+            double step = Math.min(drop, 0.34);
+            Vec3 down = new Vec3(0.0, -step, 0.0);
+            if (mc.level.noCollision(mc.player, mc.player.getBoundingBox().move(down))) {
+                mc.player.move(MoverType.SELF, down);
+                mc.player.fallDistance = 0.0F;
+            }
+        }
+
+        private static void tickCustomWaterMovement(Minecraft mc, Vec3 dir) {
+            if (mc.player == null) return;
+
+            boolean moving = dir.lengthSqr() >= 1.0E-6;
+            Vec3 old = mc.player.getDeltaMovement();
+            double speed = 0.12;
+            double x = moving ? dir.x * speed : old.x * 0.72;
+            double z = moving ? dir.z * speed : old.z * 0.72;
+            double y = old.y * 0.72;
+
+            if (mc.options.keyJump.isDown() && !mc.options.keyShift.isDown()) {
+                y = Math.min(0.18, y + 0.075);
+            } else if (mc.options.keyShift.isDown() && !mc.options.keyJump.isDown()) {
+                y = Math.max(-0.18, y - 0.075);
+            } else if (mc.player.isUnderWater()) {
+                y += 0.012;
+            }
+
+            mc.player.setDeltaMovement(x, y, z);
+            mc.player.setSwimming(mc.player.isUnderWater() && moving);
+            mc.player.fallDistance = 0.0F;
+        }
+
+        private static void tickCustomMovement(Minecraft mc) {
+            if (!hudBlindfold || mc.player == null || mc.level == null) return;
+
+            Vec3 dir = clientHorizontalDirection(mc);
+            boolean moving = dir.lengthSqr() >= 1.0E-6;
+            boolean superRun = ClientModEvents.SUPER_SPEED_KEY.isDown();
+            double speed = superRun ? CUSTOM_RUN_BLOCKS_PER_TICK : CUSTOM_WALK_BLOCKS_PER_TICK;
+            ClientMovementState state = resolveMovementState(mc, superRun);
+
+            switch (state) {
+                case LOCKED -> updateCustomLocomotionAnimation(mc, false, false);
+                case DASH, FLIGHT -> {
+                    // Explicit ownership handoff: another state already owns this tick.
+                }
+                case WATER_RUN -> {
+                    if (!moving || !clientWaterSurfaceRun(mc, dir, speed)) {
+                        tickCustomWaterMovement(mc, dir);
+                    }
+                    updateCustomLocomotionAnimation(mc, moving, true);
+                }
+                case WATER -> {
+                    tickCustomWaterMovement(mc, dir);
+                    updateCustomLocomotionAnimation(mc, moving, false);
+                }
+                case GROUND -> {
+                    mc.player.setSwimming(false);
+                    if (moving) {
+                        tryClientForcedMove(mc, dir.scale(speed), true);
+                        smoothGroundDescent(mc);
+                    } else {
+                        Vec3 v = mc.player.getDeltaMovement();
+                        mc.player.setDeltaMovement(0.0, v.y, 0.0);
+                    }
+                    updateCustomLocomotionAnimation(mc, moving, superRun);
+                }
+                case AIR -> {
+                    mc.player.setSwimming(false);
+                    if (moving) {
+                        Vec3 velocity = mc.player.getDeltaMovement();
+                        mc.player.setDeltaMovement(dir.x * speed, velocity.y, dir.z * speed);
+                    }
+                    // No input means preserve existing horizontal momentum; never hard-stop
+                    // merely because the feet left the final ground block.
+                    updateCustomLocomotionAnimation(mc, moving, superRun);
+                }
+            }
+        }
+
+        private static void performClientChargedJump''', s, count=1, flags=re.S)
+          assert n == 1, 'state machine replacement failed'
+
+          # Input suppression: custom flight is still custom, ordinary creative flight remains vanilla.
+          s = s.replace('''            // Когда creative flight уже активен — вообще не трогаем vanilla flight input.\n            if (mc.player.getAbilities().flying) return;\n''',
+                        '''            // Ordinary creative flight remains vanilla. Custom blindfold flight is still\n            // owned by our controller and therefore receives no vanilla motion impulses.\n            if (mc.player.getAbilities().flying && !JujutsuNeonFlightClient.isCustomFlightActive()) return;\n''', 1)
+
+          # Water owns Space/Shift; never start charged/air jump logic while swimming.
+          s = s.replace('if (hudBlindfold && !mc.player.getAbilities().flying) {\n                boolean pressedNow',
+                        'if (hudBlindfold && !mc.player.getAbilities().flying && !mc.player.isInWaterOrBubble()) {\n                boolean pressedNow', 1)
+
+          # Delete duplicate legacy Q consumer. MovementPatchClient is the single Q owner.
+          s, n = re.subn(r'''\n            while \(ClientModEvents\.DASH_KEY\.consumeClick\(\)\) \{.*?\n            \}\n\n            boolean speedHeld''',
+                         '\n            // Dash Q is consumed exclusively by JujutsuNeonMovementPatchClient.\n\n            boolean speedHeld',
+                         s, count=1, flags=re.S)
+          assert n == 1, 'duplicate Q handler removal failed'
+
+          s = s.replace('            tickCustomGroundMovement(mc);', '            tickCustomMovement(mc);', 1)
+
+          mod.write_text(s, encoding='utf-8')
+
+          # ------------------------------------------------------------------
+          # 5) Camera-directed flight.
+          # ------------------------------------------------------------------
+          flight = root / 'JujutsuNeonFlightClient.java'
+          f = flight.read_text(encoding='utf-8')
+          f = f.replace('''    private static final float NORMAL_FLY_SPEED = 0.05F;\n    private static final float BOOST_FLY_SPEED = 0.10F;\n''', '''    private static final float NORMAL_FLY_SPEED = 0.05F;\n    private static final float BOOST_FLY_SPEED = 0.10F;\n    private static final double NORMAL_VECTOR_SPEED = 0.42;\n    private static final double BOOST_VECTOR_SPEED = 0.82;\n''')
+
+          f, n = re.subn(r'''    private static boolean movementInputHeld\(Minecraft mc\) \{.*?\n    \}\n''', r'''    private static boolean movementInputHeld(Minecraft mc) {
+        return mc.options.keyUp.isDown() || mc.options.keyDown.isDown() ||
+                mc.options.keyLeft.isDown() || mc.options.keyRight.isDown();
+    }
+
+    private static Vec3 flightInputDirection(Minecraft mc) {
+        if (mc.player == null) return Vec3.ZERO;
+
+        double forwardInput = (mc.options.keyUp.isDown() ? 1.0 : 0.0) -
+                (mc.options.keyDown.isDown() ? 1.0 : 0.0);
+        double strafeInput = (mc.options.keyRight.isDown() ? 1.0 : 0.0) -
+                (mc.options.keyLeft.isDown() ? 1.0 : 0.0);
+        if (Math.abs(forwardInput) < 1.0E-5 && Math.abs(strafeInput) < 1.0E-5) return Vec3.ZERO;
+
+        Vec3 look = mc.player.getLookAngle().normalize();
+        Vec3 horizontalForward = new Vec3(look.x, 0.0, look.z);
+        if (horizontalForward.lengthSqr() < 1.0E-6) {
+            double yaw = Math.toRadians(mc.player.getYRot());
+            horizontalForward = new Vec3(-Math.sin(yaw), 0.0, Math.cos(yaw));
+        }
+        horizontalForward = horizontalForward.normalize();
+        Vec3 right = new Vec3(-horizontalForward.z, 0.0, horizontalForward.x);
+
+        // Forward/back owns the FULL camera vector, including pitch. Strafe remains
+        // horizontal so A/D cannot accidentally inject vertical motion.
+        Vec3 result = look.scale(forwardInput).add(right.scale(strafeInput));
+        return result.lengthSqr() > 1.0E-8 ? result.normalize() : Vec3.ZERO;
+    }
+''', f, count=1, flags=re.S)
+          assert n == 1, 'flight input helper replacement failed'
+
+          f, n = re.subn(r'''    private static void tickFlight\(Minecraft mc\) \{.*?\n    \}\n\n    @SubscribeEvent\(priority = EventPriority\.LOWEST\)''', r'''    private static void tickFlight(Minecraft mc) {
+        if (mc.player == null || mc.level == null || !customFlight) return;
+
+        if (!mc.player.isAlive() || mc.player.isSpectator() || !hasBlindfold(mc)) {
+            endFlight(mc, true);
+            return;
+        }
+
+        // WATER owns movement. Flight may never survive a water transition.
+        if (mc.player.isInWaterOrBubble()) {
+            endFlight(mc, true);
+            return;
+        }
+
+        if (!mc.player.getAbilities().mayfly || !mc.player.getAbilities().flying) {
+            mc.player.getAbilities().mayfly = true;
+            mc.player.getAbilities().flying = true;
+            mc.player.onUpdateAbilities();
+        }
+
+        boolean crash = boost && !landing &&
+                (mc.player.verticalCollision || mc.player.onGround()) &&
+                previousFlightVelocity.y < -0.10 &&
+                previousFlightVelocity.lengthSqr() > 0.035;
+
+        if (crash) {
+            localImpactFlash(mc);
+            JujutsuNeonFlightPatch.send(JujutsuNeonFlightPatch.Action.IMPACT);
+            endFlight(mc, false);
+            return;
+        }
+
+        Vec3 inputDirection = flightInputDirection(mc);
+        boolean moving = inputDirection.lengthSqr() > 1.0E-8;
+
+        if (!landing) {
+            boolean wantsBoost = JujutsuNeonMod.ClientModEvents.SUPER_SPEED_KEY.isDown() && moving;
+            setBoost(mc, wantsBoost);
+
+            // Hovering low or intentionally flying downward commits to landing.
+            if (!boost && groundDistance(mc, AUTO_LAND_HEIGHT + 0.25) <= AUTO_LAND_HEIGHT &&
+                    (!moving || inputDirection.y < -0.08)) {
+                landing = true;
+                setBoost(mc, false);
+            }
+        }
+
+        if (landing) {
+            double distance = groundDistance(mc, AUTO_LAND_HEIGHT + 0.25);
+            if (mc.player.onGround() || distance <= 0.20) {
+                mc.player.setDeltaMovement(Vec3.ZERO);
+                endFlight(mc, true);
+                return;
+            }
+
+            Vec3 velocity = mc.player.getDeltaMovement();
+            mc.player.getAbilities().setFlyingSpeed(0.02F);
+            mc.player.setDeltaMovement(
+                    velocity.x * 0.38,
+                    -Math.min(LANDING_SPEED, Math.max(0.08, distance * 0.12)),
+                    velocity.z * 0.38
+            );
+            mc.player.fallDistance = 0.0F;
+        } else {
+            double speed = boost ? BOOST_VECTOR_SPEED : NORMAL_VECTOR_SPEED;
+            Vec3 target = moving ? inputDirection.scale(speed) : Vec3.ZERO;
+            Vec3 current = mc.player.getDeltaMovement();
+            double blend = boost ? 0.46 : 0.34;
+            Vec3 next = current.lerp(target, blend);
+            if (!moving && next.lengthSqr() < 0.0004) next = Vec3.ZERO;
+
+            mc.player.setDeltaMovement(next);
+            mc.player.getAbilities().setFlyingSpeed(boost ? BOOST_FLY_SPEED : NORMAL_FLY_SPEED);
+            mc.player.setSprinting(false);
+            mc.player.fallDistance = 0.0F;
+            spawnSprintFlightVfx(mc);
+        }
+
+        previousFlightVelocity = mc.player.getDeltaMovement();
+    }
+
+    @SubscribeEvent(priority = EventPriority.LOWEST)''', f, count=1, flags=re.S)
+          assert n == 1, 'flight tick replacement failed'
+          flight.write_text(f, encoding='utf-8')
+
+          # Server flight also yields immediately to WATER.
+          flight_server = root / 'JujutsuNeonFlightPatch.java'
+          fs = flight_server.read_text(encoding='utf-8')
+          fs = fs.replace('''        if (!player.isAlive() || player.isSpectator() || !hasBlindfold(player)) {\n            stopFlight(player);\n            return;\n        }\n''', '''        if (!player.isAlive() || player.isSpectator() || !hasBlindfold(player) || player.isInWaterOrBubble()) {\n            stopFlight(player);\n            return;\n        }\n''', 1)
+          flight_server.write_text(fs, encoding='utf-8')
+
+          # ------------------------------------------------------------------
+          # 6) Side dash visual: coherent modest lateral bank, guaranteed mirrored.
+          # ------------------------------------------------------------------
+          anim = root / 'JujutsuNeonSkillAnimationClient.java'
+          a = anim.read_text(encoding='utf-8')
+          a, n = re.subn(r'''        private void applySideDash\(float progress, float side\) \{.*?\n        \}\n\n        private void syncWearLayers''', r'''        private void applySideDash(float progress, float side) {
+            float enter = smooth(clamp01(progress / 0.18f));
+            float exit = 1.0f - smooth(clamp01((progress - 0.66f) / 0.34f));
+            float w = Math.min(enter, exit);
+            if (w <= 0.001f) return;
+
+            // The whole avatar leans as one coherent lateral skid. Keep the bank
+            // deliberately modest: the previous 31-degree torso roll looked dislocated.
+            rotate(body,
+                    lerp(body.xRot, rad(10.0f), w),
+                    lerp(body.yRot, rad(-6.0f * side), w),
+                    lerp(body.zRot, rad(-11.0f * side), w));
+
+            head.xRot = lerp(head.xRot, head.xRot - rad(4.0f), w);
+            head.yRot = lerp(head.yRot, head.yRot + rad(5.0f * side), w);
+            head.zRot = lerp(head.zRot, rad(6.0f * side), w);
+
+            float outsideArmX = 30.0f;
+            float insideArmX = -18.0f;
+            if (side > 0.0f) {
+                rotate(rightArm,
+                        lerp(rightArm.xRot, rad(outsideArmX), w),
+                        lerp(rightArm.yRot, rad(-10.0f), w),
+                        lerp(rightArm.zRot, rad(16.0f), w));
+                rotate(leftArm,
+                        lerp(leftArm.xRot, rad(insideArmX), w),
+                        lerp(leftArm.yRot, rad(-18.0f), w),
+                        lerp(leftArm.zRot, rad(-20.0f), w));
+            } else {
+                rotate(rightArm,
+                        lerp(rightArm.xRot, rad(insideArmX), w),
+                        lerp(rightArm.yRot, rad(18.0f), w),
+                        lerp(rightArm.zRot, rad(20.0f), w));
+                rotate(leftArm,
+                        lerp(leftArm.xRot, rad(outsideArmX), w),
+                        lerp(leftArm.yRot, rad(10.0f), w),
+                        lerp(leftArm.zRot, rad(-16.0f), w));
+            }
+
+            rotate(rightLeg,
+                    lerp(rightLeg.xRot, rad(side > 0.0f ? 18.0f : -10.0f), w),
+                    lerp(rightLeg.yRot, rad(-4.0f * side), w),
+                    lerp(rightLeg.zRot, rad(5.0f * side), w));
+            rotate(leftLeg,
+                    lerp(leftLeg.xRot, rad(side > 0.0f ? -10.0f : 18.0f), w),
+                    lerp(leftLeg.yRot, rad(4.0f * side), w),
+                    lerp(leftLeg.zRot, rad(-5.0f * side), w));
+        }
+
+        private void syncWearLayers''', a, count=1, flags=re.S)
+          assert n == 1, 'side dash pose replacement failed'
+          anim.write_text(a, encoding='utf-8')
+
+          # ------------------------------------------------------------------
+          # Contract/source assertions. These fail the build before Gradle if a
+          # forbidden legacy path survived the surgery.
+          # ------------------------------------------------------------------
+          all_java = '\n'.join(p.read_text(encoding='utf-8') for p in root.glob('*.java'))
+          assert 'DashKind.AIR' not in all_java
+          assert 'DASH_AIR' not in all_java
+          assert 'AIR_DASH' not in all_java
+          assert 'preclearSuperRunPath' not in all_java
+          assert 'mc.level.setBlock(pos, Blocks.AIR.defaultBlockState(), 11)' not in all_java
+          assert 'enum ClientMovementState' in s
+          assert 'case WATER_RUN' in s and 'case WATER' in s and 'case AIR' in s
+          assert 'JujutsuNeonFlightClient.isCustomFlightActive()' in s
+          assert 'look.scale(forwardInput)' in f
+          assert 'player.isInWaterOrBubble()' in f
+          assert 'sendSuperRunClear' in movement_server.read_text(encoding='utf-8')
+          assert 'Client-side prediction' not in movement_client.read_text(encoding='utf-8')
+
+          print('STRICT MOVEMENT CONTRACT SOURCE CHECKS: PASS')
+          for p in [contract, movement_client, movement_server, mod, flight, flight_server, anim]:
+              print(p, sum(1 for _ in p.open(encoding='utf-8')))
+          PY
+
+      - name: Commit movement pass
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add MOVEMENT_CONTRACT.md src/main/java/com/kira/jujutsuneon/
+          git commit -m "fix: enforce hard blindfold movement contract"
+          git push
+
+      - name: Build Forge mod
+        run: gradle build --stacktrace --no-daemon
+
+      - name: Verify no forbidden movement paths remain
+        run: |
+          ! grep -R "DASH_AIR\|AIR_DASH\|DashKind.AIR\|preclearSuperRunPath" -n src/main/java/com/kira/jujutsuneon
+          grep -n "enum ClientMovementState" src/main/java/com/kira/jujutsuneon/JujutsuNeonMod.java
+          grep -n "sendSuperRunClear" src/main/java/com/kira/jujutsuneon/JujutsuNeonMovementPatch.java
+          grep -n "look.scale(forwardInput)" src/main/java/com/kira/jujutsuneon/JujutsuNeonFlightClient.java
+
+      - name: Count Java lines
+        run: |
+          find src/main/java -name '*.java' -print0 | xargs -0 wc -l
+
+      - name: Upload reobfuscated JAR
+        uses: actions/upload-artifact@v4
+        with:
+          name: Hard-Movement-Contract-Reobf
+          path: build/libs/*.jar
+          if-no-files-found: error
