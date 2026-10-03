@@ -353,106 +353,97 @@ public final class HollowPurpleReferenceClient {
     }
 
     private static void renderCast(
-            PoseStack pose,
-            Vec3 camera,
-            Vec3 eye,
-            Vec3 direction,
-            float progress,
-            float alpha,
-            double time
-    ) {
-        Vec3 right = rightFor(direction);
-        Vec3 up = right.cross(direction).normalize();
+        PoseStack pose,
+        Vec3 camera,
+        Vec3 eye,
+        Vec3 direction,
+        float progress,
+        float alpha,
+        double time
+) {
+    Vec3 right = rightFor(direction);
+    Vec3 up = right.cross(direction).normalize();
 
-        Vec3 backCenter = eye.subtract(direction.scale(1.30)).add(0.0, -0.18, 0.0);
-        // Video reference: Blue is on the caster's left, Red on the right.
-        Vec3 blueStart = backCenter.add(right.scale(-2.10));
-        Vec3 redStart = backCenter.add(right.scale(2.10));
-        Vec3 mergePoint = eye.add(direction.scale(2.35)).add(0.0, -0.12, 0.0);
+    Vec3 backCenter = eye.subtract(direction.scale(1.30)).add(0.0, -0.18, 0.0);
+    Vec3 blueStart = backCenter.add(right.scale(-2.10));
+    Vec3 redStart = backCenter.add(right.scale(2.10));
+    Vec3 fusionPoint = eye.subtract(direction.scale(1.65)).add(0.0, -0.12, 0.0);
+    Vec3 purplePoint = eye.add(direction.scale(2.35)).add(0.0, -0.12, 0.0);
 
-        float p = Mth.clamp(progress, 0.0f, 1.0f);
+    float p = Mth.clamp(progress, 0.0f, 1.0f);
 
-        // 0.00 - 0.32: Red/Blue materialize as true 3D Limitless orbs.
-        if (p < 0.32f) {
-            float grow = (float) smooth(p / 0.32f);
-            float radius = 0.16f + grow * 1.10f;
-            renderLimitlessModel(pose, camera, redStart, direction, radius, alpha, time, false);
-            renderLimitlessModel(pose, camera, blueStart, direction, radius, alpha, time, true);
-            renderEnergyBridge(pose, camera, redStart, blueStart, alpha * grow * 0.28f, time, 11.0);
-            return;
-        }
-
-        // 0.32 - 0.58: visible convergence. The two colored bodies remain separate
-        // until the very end, matching the reference instead of cross-fading sprites.
-        if (p < 0.58f) {
-            float merge = (float) smooth((p - 0.32f) / 0.26f);
-            Vec3 red = redStart.lerp(mergePoint, merge);
-            Vec3 blue = blueStart.lerp(mergePoint, merge);
-            float radius = 1.26f - merge * 0.56f;
-
-            renderLimitlessModel(pose, camera, red, direction, radius, alpha * (1.0f - merge * 0.18f), time, false);
-            renderLimitlessModel(pose, camera, blue, direction, radius, alpha * (1.0f - merge * 0.18f), time, true);
-            renderEnergyBridge(pose, camera, red, blue, alpha * (0.42f + merge * 0.35f), time, 19.0);
-
-            float seed = (float) smooth((merge - 0.38f) / 0.62f);
-            if (seed > 0.001f) {
-                Vec3 midpoint = red.lerp(blue, 0.5);
-                renderPurpleModel(pose, camera, midpoint, direction,
-                        0.14f + seed * 0.72f,
-                        alpha * seed,
-                        time,
-                        0.62f + seed * 0.22f,
-                        seed * 0.35f);
-            }
-            return;
-        }
-
-        // 0.58 - 0.74: the two Limitless poles collapse into a compact Purple seed.
-        if (p < 0.74f) {
-            float fusion = (float) smooth((p - 0.58f) / 0.16f);
-            float radius = 0.72f + fusion * 0.54f;
-            renderPurpleModel(pose, camera, mergePoint, direction, radius, alpha, time,
-                    0.86f + fusion * 0.08f, 0.18f + fusion * 0.22f);
-
-            additiveBlend();
-            for (int i = 0; i < 3; i++) {
-                Vec3 normal = safeDirection(direction
-                        .add(right.scale((i - 1) * 0.34))
-                        .add(up.scale((1 - i) * 0.23)));
-                drawFracturedRingAt(pose, camera, mergePoint, normal,
-                        radius * (1.42f + i * 0.17f),
-                        radius * 0.040f,
-                        time * (2.6 + i * 0.44),
-                        i == 1 ? MAGENTA : PURPLE,
-                        LAVENDER,
-                        alpha * (0.52f - i * 0.06f),
-                        0.08f,
-                        17.0 + i * 13.0,
-                        false);
-            }
-            return;
-        }
-
-        // 0.74 - 1.00: charge, exposure drop, white-hot core and pre-release
-        // spatial rupture. The last 14% intentionally fills a large part of the view.
-        float charge = (float) smooth((p - 0.74f) / 0.26f);
-        float pulse = 1.0f + (float) Math.sin(time * 0.84) * (0.025f + charge * 0.020f);
-        float radius = (1.20f + charge * 0.84f) * pulse;
-        float stress = (float) smooth((p - 0.84f) / 0.16f);
-
-        renderPurpleModel(pose, camera, mergePoint, direction, radius, alpha, time,
-                0.94f + charge * 0.06f, 0.28f + stress * 0.58f);
-
-        renderCompressionCage(pose, camera, mergePoint, direction, right, up,
-                radius, stress, alpha, time);
-
-        if (stress > 0.001f) {
-            renderPreReleaseRupture(pose, camera, mergePoint, direction, right, up,
-                    radius, stress, alpha, time);
-        }
+    // Red/Blue materialize behind the caster.
+    if (p < 0.32f) {
+        float grow = (float) smooth(p / 0.32f);
+        float radius = 0.16f + grow * 1.10f;
+        renderLimitlessModel(pose, camera, redStart, direction, radius, alpha, time, false);
+        renderLimitlessModel(pose, camera, blueStart, direction, radius, alpha, time, true);
+        renderEnergyBridge(pose, camera, redStart, blueStart, alpha * grow * 0.28f, time, 11.0);
+        return;
     }
 
-    private static void renderLimitlessModel(
+    // Red/Blue converge and disappear ONLY behind the caster.
+    if (p < 0.58f) {
+        float merge = (float) smooth((p - 0.32f) / 0.26f);
+        Vec3 red = redStart.lerp(fusionPoint, merge);
+        Vec3 blue = blueStart.lerp(fusionPoint, merge);
+        float vanish = (float) smooth((merge - 0.70f) / 0.30f);
+        float poleAlpha = alpha * (1.0f - vanish);
+        float radius = 1.26f - merge * 0.82f;
+
+        if (poleAlpha > 0.01f) {
+            renderLimitlessModel(pose, camera, red, direction, radius, poleAlpha, time, false);
+            renderLimitlessModel(pose, camera, blue, direction, radius, poleAlpha, time, true);
+            renderEnergyBridge(pose, camera, red, blue,
+                    alpha * (0.42f + merge * 0.35f) * (1.0f - vanish), time, 19.0);
+        }
+        return;
+    }
+
+    // After the rear fusion is gone, Purple is born separately IN FRONT.
+    if (p < 0.74f) {
+        float birth = (float) smooth((p - 0.58f) / 0.16f);
+        float radius = 0.10f + birth * 1.16f;
+        float purpleAlpha = alpha * birth;
+        renderPurpleModel(pose, camera, purplePoint, direction, radius, purpleAlpha, time,
+                0.86f + birth * 0.08f, 0.12f + birth * 0.28f);
+
+        additiveBlend();
+        for (int i = 0; i < 3; i++) {
+            Vec3 normal = safeDirection(direction
+                    .add(right.scale((i - 1) * 0.34))
+                    .add(up.scale((1 - i) * 0.23)));
+            drawFracturedRingAt(pose, camera, purplePoint, normal,
+                    radius * (1.42f + i * 0.17f),
+                    Math.max(0.010f, radius * 0.040f),
+                    time * (2.6 + i * 0.44),
+                    i == 1 ? MAGENTA : PURPLE,
+                    LAVENDER,
+                    purpleAlpha * (0.52f - i * 0.06f),
+                    0.08f,
+                    17.0 + i * 13.0,
+                    false);
+        }
+        return;
+    }
+
+    // Preserve the successful front charge/growth/release phase.
+    float charge = (float) smooth((p - 0.74f) / 0.26f);
+    float pulse = 1.0f + (float) Math.sin(time * 0.84) * (0.025f + charge * 0.020f);
+    float radius = (1.20f + charge * 0.84f) * pulse;
+    float stress = (float) smooth((p - 0.84f) / 0.16f);
+
+    renderPurpleModel(pose, camera, purplePoint, direction, radius, alpha, time,
+            0.94f + charge * 0.06f, 0.28f + stress * 0.58f);
+    renderCompressionCage(pose, camera, purplePoint, direction, right, up,
+            radius, stress, alpha, time);
+    if (stress > 0.001f) {
+        renderPreReleaseRupture(pose, camera, purplePoint, direction, right, up,
+                radius, stress, alpha, time);
+    }
+}
+
+private static void renderLimitlessModel(
             PoseStack pose,
             Vec3 camera,
             Vec3 position,
