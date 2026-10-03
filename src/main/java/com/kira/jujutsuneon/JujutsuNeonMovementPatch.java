@@ -51,6 +51,13 @@ public final class JujutsuNeonMovementPatch {
                 DashPacket::decode,
                 DashPacket::handle
         );
+        PATCH_NETWORK.registerMessage(
+                1,
+                FrontSteerPacket.class,
+                FrontSteerPacket::encode,
+                FrontSteerPacket::decode,
+                FrontSteerPacket::handle
+        );
     }
 
     private JujutsuNeonMovementPatch() {}
@@ -64,6 +71,14 @@ public final class JujutsuNeonMovementPatch {
 
     public static void sendDash(DashKind kind) {
         PATCH_NETWORK.sendToServer(new DashPacket(kind));
+    }
+
+    /** Keep server hit detection aligned with the camera-steered front dash. */
+    public static void sendFrontSteer(Vec3 direction) {
+        Vec3 horizontal = new Vec3(direction.x, 0.0, direction.z);
+        if (horizontal.lengthSqr() < 1.0E-8) return;
+        horizontal = horizontal.normalize();
+        PATCH_NETWORK.sendToServer(new FrontSteerPacket(horizontal.x, horizontal.z));
     }
 
     private record DashPacket(DashKind kind) {
@@ -80,6 +95,37 @@ public final class JujutsuNeonMovementPatch {
             context.enqueueWork(() -> {
                 ServerPlayer player = context.getSender();
                 if (player != null) handlePatchedDash(player, msg.kind);
+            });
+            context.setPacketHandled(true);
+        }
+    }
+
+    private record FrontSteerPacket(double x, double z) {
+        static void encode(FrontSteerPacket msg, FriendlyByteBuf buf) {
+            buf.writeDouble(msg.x);
+            buf.writeDouble(msg.z);
+        }
+
+        static FrontSteerPacket decode(FriendlyByteBuf buf) {
+            return new FrontSteerPacket(buf.readDouble(), buf.readDouble());
+        }
+
+        static void handle(FrontSteerPacket msg, Supplier<NetworkEvent.Context> contextSupplier) {
+            NetworkEvent.Context context = contextSupplier.get();
+            context.enqueueWork(() -> {
+                ServerPlayer player = context.getSender();
+                if (player == null || !player.isAlive() || player.isSpectator()) return;
+                if (!hasBlindfold(player) || !handsEmpty(player)) return;
+                if (player.getPersistentData().getInt("jn_dash_mode") != 1) return;
+
+                Vec3 direction = new Vec3(msg.x, 0.0, msg.z);
+                if (!Double.isFinite(direction.x) || !Double.isFinite(direction.z) ||
+                        direction.lengthSqr() < 1.0E-8) return;
+
+                direction = direction.normalize();
+                player.getPersistentData().putDouble("jn_dash_dx", direction.x);
+                player.getPersistentData().putDouble("jn_dash_dy", 0.0);
+                player.getPersistentData().putDouble("jn_dash_dz", direction.z);
             });
             context.setPacketHandled(true);
         }

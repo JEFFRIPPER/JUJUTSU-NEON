@@ -47,6 +47,7 @@ public final class JujutsuNeonMovementPatchClient {
     private static final Field HUD_PURPLE_CASTING;
 
     private static Vec3 desiredDashDirection = Vec3.ZERO;
+    private static JujutsuNeonMovementPatch.DashKind activePatchedDash = null;
     private static boolean previousRawJumpHeld = false;
     private static boolean blockedAirJumpUntilRelease = false;
     private static boolean restoreJumpKey = false;
@@ -229,6 +230,7 @@ public final class JujutsuNeonMovementPatchClient {
         if (legacyDashMode() == 0) return false;
 
         desiredDashDirection = correctedDashDirection(mc, kind);
+        activePatchedDash = kind;
         setLegacyDashDirection(desiredDashDirection);
         JujutsuNeonMovementPatch.sendDash(kind);
         startLegacyAnimation(kind);
@@ -280,10 +282,48 @@ public final class JujutsuNeonMovementPatchClient {
         return direction;
     }
 
+    private static Vec3 steerTowards(Vec3 current, Vec3 target, double maxRadians) {
+        Vec3 from = new Vec3(current.x, 0.0, current.z);
+        Vec3 to = new Vec3(target.x, 0.0, target.z);
+        if (to.lengthSqr() < 1.0E-8) return from;
+        to = to.normalize();
+        if (from.lengthSqr() < 1.0E-8) return to;
+        from = from.normalize();
+
+        double dot = Math.max(-1.0, Math.min(1.0, from.dot(to)));
+        double crossY = from.z * to.x - from.x * to.z;
+        double angle = Math.atan2(crossY, dot);
+        double turn = Math.max(-maxRadians, Math.min(maxRadians, angle));
+        double c = Math.cos(turn);
+        double sn = Math.sin(turn);
+        Vec3 rotated = new Vec3(
+                from.x * c - from.z * sn,
+                0.0,
+                from.x * sn + from.z * c
+        );
+        return rotated.lengthSqr() > 1.0E-8 ? rotated.normalize() : to;
+    }
+
     private static void adjustDashForWallSlide(Minecraft mc) {
         int mode = legacyDashMode();
         if (mode == 0 || desiredDashDirection.lengthSqr() < 1.0E-8) return;
-        setLegacyDashDirection(wallSlideDirection(mc, desiredDashDirection, mode));
+
+        // Reference front dash is fully camera-steered.  A generous turn rate keeps
+        // it responsive while avoiding an instantaneous 180-degree snap in one frame.
+        if (mode == 1 && activePatchedDash == JujutsuNeonMovementPatch.DashKind.FRONT) {
+            desiredDashDirection = steerTowards(
+                    desiredDashDirection,
+                    horizontalForward(mc),
+                    Math.toRadians(34.0)
+            );
+        }
+
+        Vec3 actual = wallSlideDirection(mc, desiredDashDirection, mode);
+        setLegacyDashDirection(actual);
+
+        if (mode == 1 && activePatchedDash == JujutsuNeonMovementPatch.DashKind.FRONT) {
+            JujutsuNeonMovementPatch.sendFrontSteer(actual);
+        }
     }
 
     private static Vec3 customMovementDirection(Minecraft mc) {
@@ -490,6 +530,7 @@ public final class JujutsuNeonMovementPatchClient {
         boolean blindfold = hasBlindfold(mc);
         if (!blindfold || mc.screen != null || mc.player.getAbilities().flying) {
             desiredDashDirection = Vec3.ZERO;
+            activePatchedDash = null;
             blockedAirJumpUntilRelease = false;
             previousRawJumpHeld = rawJumpHeldThisTick;
             return;
@@ -556,6 +597,7 @@ public final class JujutsuNeonMovementPatchClient {
 
         if (legacyDashMode() == 0) {
             desiredDashDirection = Vec3.ZERO;
+            activePatchedDash = null;
         }
     }
 }
