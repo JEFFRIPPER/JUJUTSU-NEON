@@ -1,0 +1,16 @@
+{
+  "jars": [
+    {
+      "identifier": {
+        "group": "dev.kosmx.player-anim",
+        "artifact": "player-animation-lib-forge"
+      },
+      "version": {
+        "range": "[1.0.2-rc1+1.20,)",
+        "artifactVersion": "1.0.2-rc1+1.20"
+      },
+      "path": "META-INF/jarjar/player-animation-lib-forge-1.0.2-rc1+1.20.jar",
+      "isObfuscated": false
+    }
+  ]
+}

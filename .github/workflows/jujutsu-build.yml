@@ -40,7 +40,10 @@ jobs:
         run: gradle build --stacktrace --no-daemon
 
       - name: Show output
-        run: ls -lah build/libs/
+        run: |
+          ls -lah build/libs/
+          unzip -l build/libs/*.jar | grep -E "META-INF/jarjar|THIRD_PARTY" || (echo "jarjar missing" && exit 1)
+          unzip -p build/libs/*.jar META-INF/jarjar/metadata.json
 
       - name: Upload JAR
         uses: actions/upload-artifact@v4

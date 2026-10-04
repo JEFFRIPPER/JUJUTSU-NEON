@@ -36,6 +36,9 @@ repositories {}
 
 dependencies {
     minecraft "net.minecraftforge:forge:${minecraft_version}-${forge_version}"
+    // Player Animator (KosmX, MIT). Уже в продакшн-именах (SRG), поэтому только для компиляции
+    // и вшивается внутрь нашего jar как есть (Forge Jar-in-Jar), см. jar { ... } ниже.
+    compileOnly files('libs/player-animation-lib-forge-1.0.2-rc1+1.20.jar')
 }
 
 tasks.named('processResources', ProcessResources).configure {
@@ -67,5 +70,15 @@ jar {
             'Implementation-Vendor': 'Kira / SQUAD'
         ])
     }
+    // Вшитые библиотеки: игроку по-прежнему нужен один .jar.
+    from('libs') {
+        include 'player-animation-lib-forge-1.0.2-rc1+1.20.jar'
+        into 'META-INF/jarjar'
+    }
+    from('src/jarjar') {
+        include 'metadata.json'
+        into 'META-INF/jarjar'
+    }
+    from('THIRD_PARTY_NOTICES.md')
     finalizedBy 'reobfJar'
 }
