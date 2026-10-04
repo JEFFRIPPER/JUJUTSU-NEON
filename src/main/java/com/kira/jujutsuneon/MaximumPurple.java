@@ -259,6 +259,7 @@ public final class MaximumPurple {
             JujutsuNeonMod.requireBlindfoldMessage(player);
             return;
         }
+        if (DomainExpansion.blocksActions(player)) return;
         if (JujutsuNeonMod.isHollowPurpleCasting(player) || JujutsuNeonMod.isMaximumBlueActive(player)) {
             player.displayClientMessage(Component.literal("Другая техника ещё активна").withStyle(ChatFormatting.GRAY), true);
             return;
@@ -326,7 +327,16 @@ public final class MaximumPurple {
             }
 
             if (cast.age >= T_HIDDEN_CARVE && !cast.destructionDone) {
-                if (cast.columns == null) buildColumns(cast);
+                if (cast.columns == null) {
+                    // Внутри территории ломать нечего, а за её стены удар не выходит.
+                    if (DomainExpansion.isInsideAny(cast.level, cast.feet.add(0.0, 1.0, 0.0))) {
+                        cast.hiddenDone = true;
+                        cast.destructionDone = true;
+                        cast.age++;
+                        continue;
+                    }
+                    buildColumns(cast);
+                }
                 if (cast.age < T_WHITE_FULL) {
                     if (!cast.hiddenDone) carveHidden(cast);
                 } else {
@@ -517,7 +527,7 @@ public final class MaximumPurple {
                 }
                 pos.set(x, y, z);
                 BlockState state = chunk.getBlockState(pos);
-                if (!state.isAir() && !isProtected(state)) {
+                if (!state.isAir() && !isProtected(state) && !DomainExpansion.denyTechniqueEdit(level, pos, null)) {
                     if (state.hasBlockEntity()) Clearable.tryClear(level.getBlockEntity(pos));
                     level.setBlock(pos, air, BLOCK_FLAGS);
                 }

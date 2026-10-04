@@ -30,9 +30,18 @@ final class MaximumPurpleAnimation {
     }
 
     static void play(AbstractClientPlayer player) {
+        play(player, ID);
+    }
+
+    /** Любая наша анимация из assets/jujutsu_neon/player_animation (например, "domain_cast"). */
+    static void play(AbstractClientPlayer player, String name) {
+        play(player, new ResourceLocation(JujutsuNeonMod.MODID, name));
+    }
+
+    private static void play(AbstractClientPlayer player, ResourceLocation id) {
         if (player == null) return;
         try {
-            KeyframeAnimation animation = PlayerAnimationRegistry.getAnimation(ID);
+            KeyframeAnimation animation = PlayerAnimationRegistry.getAnimation(id);
             if (animation == null) return;
             ModifierLayer<IAnimation> layer = layer(player);
             if (layer == null) return;

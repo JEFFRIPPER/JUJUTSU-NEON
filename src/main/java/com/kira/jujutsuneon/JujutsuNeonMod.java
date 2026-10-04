@@ -207,6 +207,10 @@ public class JujutsuNeonMod {
     public static final RegistryObject<SoundEvent> SFX_DASH = sound("dash");
     public static final RegistryObject<SoundEvent> SFX_MAX_PURPLE_THEME = sound("max_purple_theme");
     public static final RegistryObject<SoundEvent> SFX_MAX_PURPLE_THEME_WORLD = sound("max_purple_theme_world");
+    public static final RegistryObject<SoundEvent> SFX_DOMAIN_VOICE = sound("domain_voice");
+    public static final RegistryObject<SoundEvent> SFX_DOMAIN_VOICE_WORLD = sound("domain_voice_world");
+    public static final RegistryObject<SoundEvent> SFX_DOMAIN_SHATTER = sound("domain_shatter");
+    public static final RegistryObject<SoundEvent> SFX_DOMAIN_SHATTER_WORLD = sound("domain_shatter_world");
 
     public static final RegistryObject<Item> GOJO_BLINDFOLD = ITEMS.register(
             "gojo_blindfold",
@@ -231,6 +235,7 @@ public class JujutsuNeonMod {
         ITEMS.register(modBus);
         SOUNDS.register(modBus);
         PARTICLES.register(modBus);
+        DomainExpansion.register(modBus);
         modBus.addListener(this::addToCreativeTab);
 
         NETWORK.registerMessage(
@@ -327,9 +332,7 @@ public class JujutsuNeonMod {
         HOLLOW_PURPLE,
         CURSED_BARRAGE,
         INFINITY_TOGGLE,
-        DOMAIN,
-        RCT,
-        TELEPORT
+        RCT
     }
 
     private enum MovementAction {
@@ -399,9 +402,7 @@ public class JujutsuNeonMod {
             case HOLLOW_PURPLE -> 45.0;
             case CURSED_BARRAGE -> 22.0;
             case INFINITY_TOGGLE -> player.getPersistentData().getBoolean("jn_infinity") ? 0.0 : 10.0;
-            case DOMAIN -> 68.0;
             case RCT -> 30.0;
-            case TELEPORT -> 18.0;
         };
     }
 
@@ -415,6 +416,8 @@ public class JujutsuNeonMod {
 
         // Во время Максимального Фиолетового другие техники недоступны.
         if (MaximumPurple.isActive(player)) return;
+        // Обездвижен территорией или сам кастует территорию.
+        if (DomainExpansion.blocksActions(player)) return;
 
         if (isHollowPurpleCasting(player) && ability != Ability.HOLLOW_PURPLE) {
             player.displayClientMessage(
@@ -463,9 +466,7 @@ public class JujutsuNeonMod {
             }
             case CURSED_BARRAGE -> { castCursedBarrage(player); setCooldown(player, ability, 180); }
             case INFINITY_TOGGLE -> { castInfinityToggle(player); setCooldown(player, ability, 20); }
-            case DOMAIN -> { castDomain(player); setCooldown(player, ability, 600); }
             case RCT -> { castRCT(player); setCooldown(player, ability, 260); }
-            case TELEPORT -> { castTeleport(player); setCooldown(player, ability, 120); }
         }
     }
 
@@ -1492,6 +1493,7 @@ public class JujutsuNeonMod {
     }
 
     private static boolean canMaximumBlueConsume(ServerLevel level, ServerPlayer owner, BlockPos pos) {
+        if (DomainExpansion.denyTechniqueEdit(level, pos, owner)) return false;
         BlockState state = level.getBlockState(pos);
         if (state.isAir()) return false;
         if (state.hasBlockEntity()) return false;
@@ -2180,6 +2182,7 @@ public class JujutsuNeonMod {
             BlockPos pos,
             BlockState state
     ) {
+        if (DomainExpansion.denyTechniqueEdit(level, pos, owner)) return false;
         if (state.isAir() && state.getFluidState().isEmpty()) return false;
         if (isOwnerSafeBlock(owner, pos)) return false;
         if (isPurpleProtectedTechnicalBlock(state)) return false;
@@ -3050,6 +3053,7 @@ public class JujutsuNeonMod {
             BlockPos pos,
             BlockState state
     ) {
+        if (DomainExpansion.denyTechniqueEdit(level, pos, owner)) return false;
         if (state.isAir() && state.getFluidState().isEmpty()) return false;
         if (isOwnerSafeBlock(owner, pos)) return false;
 
@@ -3640,98 +3644,6 @@ public class JujutsuNeonMod {
         );
     }
 
-    private static void castTeleport(ServerPlayer player) {
-        ServerLevel level = player.serverLevel();
-        playSfx(level, player, SFX_TELEPORT, 1.0f, 1.0f);
-        Vec3 start = player.position();
-        spawnVfx(level, VFX_TELEPORT, start.add(0, 1.0, 0), 1);
-        spawnStylizedShockwave(level, start.add(0, 0.8, 0), 1.7,
-                new Vector3f(0.18f, 0.78f, 1.0f));
-        spawnRadialStar(level, start.add(0, 1.0, 0),
-                new Vector3f(0.12f, 0.88f, 1.0f),
-                new Vector3f(0.65f, 0.02f, 1.0f),
-                10, 2.2);
-        Vec3 dir = player.getLookAngle().normalize();
-        Vec3 chosen = start;
-
-        for (double d = 12.0; d >= 2.0; d -= 0.5) {
-            Vec3 candidate = start.add(dir.scale(d));
-            Vec3 delta = candidate.subtract(start);
-            AABB moved = player.getBoundingBox().move(delta);
-            if (level.noCollision(player, moved)) {
-                chosen = candidate;
-                break;
-            }
-        }
-
-        spawnNeonSphere(level, start.add(0, 1.0, 0), 0.9,
-                new Vector3f(0.1f, 0.8f, 1.0f), new Vector3f(0.65f, 0.0f, 1.0f));
-        player.teleportTo(chosen.x, chosen.y, chosen.z);
-        spawnVfx(level, VFX_TELEPORT, chosen.add(0, 1.0, 0), 1);
-        spawnStylizedShockwave(level, chosen.add(0, 0.8, 0), 1.9,
-                new Vector3f(0.18f, 0.78f, 1.0f));
-        spawnVfx(level, VFX_TRAIL, chosen.add(0, 1.0, 0), 2);
-        level.playSound(null, chosen.x, chosen.y, chosen.z, SoundEvents.ENDERMAN_TELEPORT,
-                SoundSource.PLAYERS, 0.75f, 1.20f);
-        player.fallDistance = 0;
-        spawnNeonSphere(level, chosen.add(0, 1.0, 0), 0.9,
-                new Vector3f(0.1f, 0.8f, 1.0f), new Vector3f(0.65f, 0.0f, 1.0f));
-
-        player.displayClientMessage(
-                Component.literal("LIMITLESS BLINK").withStyle(ChatFormatting.AQUA, ChatFormatting.BOLD),
-                true
-        );
-    }
-
-    private static void castDomain(ServerPlayer player) {
-        ServerLevel level = player.serverLevel();
-        handSign(player);
-        playSfx(level, player, SFX_DOMAIN, 1.4f, 0.85f);
-        long now = level.getGameTime();
-
-        player.getPersistentData().putLong("jn_domain_until", now + 120);
-        player.getPersistentData().putLong("jn_domain_last_pulse", 0);
-
-        Vec3 center = player.position().add(0, 0.2, 0);
-        spawnVfx(level, VFX_DOMAIN, center.add(0, 1.4, 0), 2);
-        spawnStylizedShockwave(level, center, 6.5, new Vector3f(0.35f, 0.03f, 1.0f));
-        spawnRadialStar(level, center.add(0, 1.2, 0),
-                new Vector3f(0.10f, 0.85f, 1.0f),
-                new Vector3f(0.58f, 0.02f, 1.0f),
-                24, 7.0);
-        spawnDome(level, center, 7.0,
-                new Vector3f(0.08f, 0.75f, 1.0f),
-                new Vector3f(0.48f, 0.02f, 1.0f));
-        playEnergyLayer(level, center, 1.1f, 0.72f);
-        playImpactLayer(level, center, 0.85f, 0.62f);
-
-        for (int r = 1; r <= 4; r++) {
-            spawnNeonRing(
-                    level,
-                    center,
-                    r * 1.2,
-                    r % 2 == 0
-                            ? new Vector3f(0.25f, 0.05f, 1.0f)
-                            : new Vector3f(0.0f, 0.85f, 1.0f)
-            );
-        }
-
-        level.sendParticles(
-                ParticleTypes.END_ROD,
-                center.x, center.y + 1.0, center.z,
-                100,
-                4.5, 1.2, 4.5,
-                0.02
-        );
-
-        player.displayClientMessage(
-                Component.literal("DOMAIN EXPANSION")
-                        .withStyle(ChatFormatting.LIGHT_PURPLE, ChatFormatting.BOLD),
-                true
-        );
-    }
-
-
     private static final int DASH_NONE = 0;
     private static final int DASH_FRONT = 1;
     private static final int DASH_SIDE = 2;
@@ -3742,6 +3654,7 @@ public class JujutsuNeonMod {
 
     private static void handleMovement(ServerPlayer player, MovementAction action) {
         if (player == null || !player.isAlive() || player.isSpectator()) return;
+        if (action != MovementAction.SPEED_OFF && DomainExpansion.blocksActions(player)) return;
 
         if (isHollowPurpleCasting(player)) {
             if (action == MovementAction.SPEED_OFF) {
@@ -4287,6 +4200,7 @@ public class JujutsuNeonMod {
     }
 
     private static boolean isSuperRunPlant(ServerLevel level, BlockPos pos, BlockState state) {
+        if (DomainExpansion.denyTechniqueEdit(level, pos, null)) return false;
         if (state.isAir()) return false;
 
         if (state.is(BlockTags.LEAVES) ||
@@ -4639,11 +4553,10 @@ public class JujutsuNeonMod {
 
                 boolean speed = player.getPersistentData().getBoolean("jn_super_speed");
                 boolean infinity = player.getPersistentData().getBoolean("jn_infinity");
-                boolean domain = player.getPersistentData().getLong("jn_domain_until") > now;
 
                 // В режиме сверхбега энергия не регенерирует: расход строго 1% за 2 секунды.
                 double regen = speed ? 0.0 : 0.28;
-                if (infinity || domain) regen *= 0.45;
+                if (infinity) regen *= 0.45;
                 setEnergy(player, getEnergy(player) + regen);
 
                 tickBlindfoldRun(player, level, now);
@@ -4654,35 +4567,6 @@ public class JujutsuNeonMod {
                     sendDust(level, p, new Vector3f(0.08f, 0.82f, 1.0f), 0.9f);
                 }
 
-                // DOMAIN.
-                long until = player.getPersistentData().getLong("jn_domain_until");
-                if (until > now) {
-                    if (now % 2 == 0) {
-                        double pulseRadius = 4.6 + Math.sin(now * 0.25) * 0.5;
-                        spawnNeonRing(level, player.position().add(0, 0.15, 0), pulseRadius,
-                                new Vector3f(0.35f, 0.03f, 1.0f));
-
-                        level.sendParticles(ParticleTypes.REVERSE_PORTAL,
-                                player.getX(), player.getY() + 1.0, player.getZ(),
-                                18, 4.0, 1.5, 4.0, 0.02);
-                    }
-
-                    long lastPulse = player.getPersistentData().getLong("jn_domain_last_pulse");
-                    if (now - lastPulse >= 10) {
-                        player.getPersistentData().putLong("jn_domain_last_pulse", now);
-                        List<LivingEntity> targets = level.getEntitiesOfClass(
-                                LivingEntity.class,
-                                player.getBoundingBox().inflate(6.0),
-                                e -> e.isAlive() && e != player
-                        );
-
-                        for (LivingEntity target : targets) {
-                            target.hurt(level.damageSources().playerAttack(player), 2.0F);
-                            target.addEffect(new MobEffectInstance(MobEffects.MOVEMENT_SLOWDOWN, 18, 2, false, false, true));
-                            target.addEffect(new MobEffectInstance(MobEffects.WEAKNESS, 18, 1, false, false, true));
-                        }
-                    }
-                }
             }
 
             // Синхронизация HUD 4 раза в секунду.
@@ -4857,7 +4741,7 @@ public class JujutsuNeonMod {
             NetworkEvent.Context context = contextSupplier.get();
             context.enqueueWork(() -> {
                 ServerPlayer player = context.getSender();
-                if (player != null) bluePrimaryAction(player);
+                if (player != null && !DomainExpansion.blocksActions(player)) bluePrimaryAction(player);
             });
             context.setPacketHandled(true);
         }
@@ -4880,6 +4764,7 @@ public class JujutsuNeonMod {
                 ServerPlayer player = context.getSender();
                 if (player == null) return;
 
+                if (msg.action == RedControlAction.START && DomainExpansion.blocksActions(player)) return;
                 switch (msg.action) {
                     case START -> startRedCharge(player);
                     case RELEASE -> releaseRedCharge(player);
@@ -5043,7 +4928,10 @@ public class JujutsuNeonMod {
             NetworkEvent.Context context = contextSupplier.get();
             context.enqueueWork(() -> {
                 ServerPlayer player = context.getSender();
-                if (player != null) executeLongRangeTeleport(player, msg.target, msg.face);
+                if (player == null || DomainExpansion.blocksActions(player)) return;
+                // Через стену территории телепортом не пройти.
+                if (DomainExpansion.separated(player.level(), player.position(), Vec3.atCenterOf(msg.target))) return;
+                executeLongRangeTeleport(player, msg.target, msg.face);
             });
             context.setPacketHandled(true);
         }
@@ -5132,14 +5020,14 @@ public class JujutsuNeonMod {
         );
 
         public static final KeyMapping DOMAIN_KEY = new KeyMapping(
-                "V: Infinity / удержание: Domain Expansion",
+                "V: Infinity",
                 InputConstants.Type.KEYSYM,
                 GLFW.GLFW_KEY_V,
                 CATEGORY
         );
 
         public static final KeyMapping UTILITY_KEY = new KeyMapping(
-                "RCT / Limitless Blink (удержание)",
+                "B: RCT",
                 InputConstants.Type.KEYSYM,
                 GLFW.GLFW_KEY_B,
                 CATEGORY
@@ -5149,6 +5037,13 @@ public class JujutsuNeonMod {
                 "Показать/скрыть панель способностей",
                 InputConstants.Type.KEYSYM,
                 GLFW.GLFW_KEY_H,
+                CATEGORY
+        );
+
+        public static final KeyMapping DOMAIN_EXPANSION_KEY = new KeyMapping(
+                "T: Расширение территории (повторно — разрушить)",
+                InputConstants.Type.KEYSYM,
+                GLFW.GLFW_KEY_T,
                 CATEGORY
         );
 
@@ -5192,6 +5087,7 @@ public class JujutsuNeonMod {
             event.register(UTILITY_KEY);
             event.register(HUD_KEY);
             event.register(TELEPORT_KEY);
+            event.register(DOMAIN_EXPANSION_KEY);
         }
     }
 
@@ -5221,8 +5117,6 @@ public class JujutsuNeonMod {
 
         private static final HoldKeyState BLUE_STATE = new HoldKeyState();
         private static final HoldKeyState RED_STATE = new HoldKeyState();
-        private static final HoldKeyState DOMAIN_STATE = new HoldKeyState();
-        private static final HoldKeyState UTILITY_STATE = new HoldKeyState();
 
         private static String activeAnim = "NONE";
         private static int activeAnimTicks = 0;
@@ -5497,6 +5391,14 @@ public class JujutsuNeonMod {
             }
 
             state.wasDown = down;
+        }
+
+        /** Только нажатие (без удержания): V — Infinity, B — RCT. */
+        private static void processTapKey(KeyMapping key, Ability ability) {
+            while (key.consumeClick()) {
+                NETWORK.sendToServer(new AbilityPacket(ability));
+                startAnim(ability.name(), 12);
+            }
         }
 
         private static void processHoldKey(
@@ -5785,7 +5687,8 @@ public class JujutsuNeonMod {
         }
 
         private static ClientMovementState resolveMovementState(Minecraft mc, boolean superRun) {
-            if (hudMaxBlueActive || hudPurpleCasting || MaximumPurpleClient.isLocalActive()) return ClientMovementState.LOCKED;
+            if (hudMaxBlueActive || hudPurpleCasting || MaximumPurpleClient.isLocalActive()
+                    || DomainExpansionClient.locksLocalPlayer()) return ClientMovementState.LOCKED;
             if (clientDashMode != DASH_NONE) return ClientMovementState.DASH;
             if (JujutsuNeonFlightClient.isCustomFlightActive()) return ClientMovementState.FLIGHT;
             // С Ctrl поверхность воды — опора: WATER_RUN, если игрок у поверхности
@@ -6014,7 +5917,7 @@ public class JujutsuNeonMod {
             if (mc.player == null) return;
 
             if (event.phase == TickEvent.Phase.START) {
-                if (MaximumPurpleClient.isLocalActive()) {
+                if (MaximumPurpleClient.isLocalActive() || DomainExpansionClient.locksLocalPlayer()) {
                     mc.player.input.jumping = false;
                     return;
                 }
@@ -6055,8 +5958,8 @@ public class JujutsuNeonMod {
                 return;
             }
 
-            // Кат-сцена Максимального Фиолетового: игрок заморожен, техники и движение недоступны.
-            if (MaximumPurpleClient.isLocalActive()) {
+            // Кат-сцена Максимального Фиолетового или территории, обездвиживание: техники и движение недоступны.
+            if (MaximumPurpleClient.isLocalActive() || DomainExpansionClient.locksLocalPlayer()) {
                 if (lastSpeedHeld) {
                     NETWORK.sendToServer(new MovementPacket(MovementAction.SPEED_OFF));
                     lastSpeedHeld = false;
@@ -6229,8 +6132,8 @@ public class JujutsuNeonMod {
             // Все базовые кнопки переназначаются через меню управления Minecraft.
             processBlueKey(ClientModEvents.BLUE_KEY, BLUE_STATE);
             processRedKey(ClientModEvents.RED_KEY, RED_STATE);
-            processHoldKey(ClientModEvents.DOMAIN_KEY, Ability.INFINITY_TOGGLE, Ability.DOMAIN, DOMAIN_STATE, "CHARGE_DOMAIN");
-            processHoldKey(ClientModEvents.UTILITY_KEY, Ability.RCT, Ability.TELEPORT, UTILITY_STATE, "CHARGE_TELEPORT");
+            processTapKey(ClientModEvents.DOMAIN_KEY, Ability.INFINITY_TOGGLE);
+            processTapKey(ClientModEvents.UTILITY_KEY, Ability.RCT);
         }
 
         @SubscribeEvent
@@ -6476,7 +6379,7 @@ public class JujutsuNeonMod {
              */
             int panelW = 118;
             int rowH = 14;
-            int rows = 8;
+            int rows = 9;
             int panelH = rows * rowH;
             int right = sw - 8;
             int x = right - panelW;
@@ -6502,6 +6405,8 @@ public class JujutsuNeonMod {
             drawCompactSkillRow(g, mc, x, sy, panelW, keyName(ClientModEvents.UTILITY_KEY), "RCT", false);
             sy += rowH;
             drawCompactSkillRow(g, mc, x, sy, panelW, keyName(ClientModEvents.TELEPORT_KEY), "Teleport", false);
+            sy += rowH;
+            drawCompactSkillRow(g, mc, x, sy, panelW, keyName(ClientModEvents.DOMAIN_EXPANSION_KEY), "Domain", DomainExpansionClient.isLocalCutscene());
 
             // Проклятая энергия — тонкая полоска прямо над биндами.
             int ceY = y - 13;
