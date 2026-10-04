@@ -243,7 +243,6 @@ def make_orb(name, dark, main, vein, seed):
     Image.fromarray(np.clip(col, 0, 255).astype(np.uint8)).save(OUT / f"max_purple_{name}_orb.png", optimize=True)
 
 
-make_cosmos()
 make_vortex()
 make_bloom()
 make_orb("red", (25, 0, 0), (225, 10, 18), (255, 90, 90), 3)

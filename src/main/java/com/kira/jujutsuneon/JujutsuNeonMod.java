@@ -205,6 +205,8 @@ public class JujutsuNeonMod {
     public static final RegistryObject<SoundEvent> SFX_RCT = sound("rct");
     public static final RegistryObject<SoundEvent> SFX_TELEPORT = sound("teleport");
     public static final RegistryObject<SoundEvent> SFX_DASH = sound("dash");
+    public static final RegistryObject<SoundEvent> SFX_MAX_PURPLE_THEME = sound("max_purple_theme");
+    public static final RegistryObject<SoundEvent> SFX_MAX_PURPLE_THEME_WORLD = sound("max_purple_theme_world");
 
     public static final RegistryObject<Item> GOJO_BLINDFOLD = ITEMS.register(
             "gojo_blindfold",

@@ -7,8 +7,6 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
-import net.minecraft.sounds.SoundEvents;
-import net.minecraft.sounds.SoundSource;
 import net.minecraft.world.Clearable;
 import net.minecraft.world.entity.ExperienceOrb;
 import net.minecraft.world.entity.LivingEntity;
@@ -44,50 +42,60 @@ import java.util.function.Supplier;
 /**
  * Максимальный Фиолетовый (удержание G 3 секунды).
  *
- * Сюжет по референсу: Синий в руке и бросок вверх, Красный к лицу и выстрел вверх,
- * прыжок на 6 блоков к шарам, слияние, взрыв вокруг игрока. После белого экрана
- * игрок остаётся в воздухе на той же точке в режиме полёта.
+ * Кат-сцена ровно 20,4 секунды (408 тиков) под свой саундтрек (24,2 с, синхронно с картинкой):
+ * Синий в руке, вихрь и бросок ввысь на 25 блоков; Красный в ладони у лица и выстрел вверх;
+ * шары гоняются друг за другом вокруг фиолетовой молнии, игрок поднимается к ним на 24 блока;
+ * темнота, слияние в один фиолетовый шар, поза Годжо и взрыв. После белого экрана игрок
+ * остаётся в воздухе на той же точке в режиме полёта.
  *
  * Сервер: удерживает владельца на траектории кат-сцены, наносит 2000 урона (1000 сердец)
  * всем живым в радиусе 100 блоков от игрока, кроме владельца, и вырезает идеально
  * круглый кратер без дропа:
  *  - выше земли — шар радиусом 100 вокруг точки старта;
- *  - ниже — чаша глубиной 56 в центре (50 + высота прыжка 6), сходящая на нет к радиусу 100.
+ *  - ниже — чаша глубиной 74 в центре (50 + высота подъёма 24), сходящая на нет к радиусу 100.
  * Подземная часть вырезается заранее, пока идёт кат-сцена, под нетронутой «коркой»
  * в 2 блока, поэтому её не видно. Корка и всё, что над землёй, удаляются во время
- * белого экрана — он длится меньше секунды.
+ * белого экрана.
  */
 @Mod.EventBusSubscriber(modid = JujutsuNeonMod.MODID, bus = Mod.EventBusSubscriber.Bus.FORGE)
 public final class MaximumPurple {
 
-    // ---- Таймлайн кат-сцены в тиках (общий для сервера и клиента) ----
-    static final int T_BLUE_SPAWN = 2;
-    static final int T_BLUE_THROW = 12;
-    static final int T_BLUE_HOVER = 26;
-    static final int T_RED_GLOW = 36;
-    static final int T_MANGA_A = 40;
-    static final int T_VORTEX = 45;
-    static final int T_RED_FACE = 58;
-    static final int T_LETTERBOX = 66;
-    static final int T_RED_THROW = 68;
-    static final int T_RED_HOVER = 80;
-    static final int T_JUMP = 84;
-    static final int T_APEX = 98;
-    static final int T_FACE = 114;
-    static final int T_MERGE = 128;
-    static final int T_MANGA_B = 144;
-    static final int T_COSMOS = 155;
-    static final int T_FLASH = 178;
-    static final int T_EXPLODE = 184;
-    static final int T_WHITE_IN = 194;
-    static final int T_WHITE_FULL = 200;
-    static final int T_MIN_END = 212;
-    static final int ANIM_TICKS = 212;
+    // ---- Таймлайн кат-сцены в тиках (1 тик = 0,05 с звука; общий для сервера и клиента) ----
+    static final int T_BLUE_SPAWN = 14;     // 0,70 с — Синий вспыхивает в руке
+    static final int T_VORTEX = 16;         // 0,80 с — присед, вихрь
+    static final int T_BLUE_THROW = 40;     // 2,00 с — бросок
+    static final int T_CALM = 56;           // 2,80 с — спокойный план со спины
+    static final int T_RED_GLOW = 58;       // 2,90 с — Красный загорается в ладони
+    static final int T_MANGA_A = 66;        // 3,30 с — манга-кадр
+    static final int T_RED_FIRE = 69;       // 3,45 с — выстрел Красного вверх
+    static final int T_WIDE = 73;           // 3,65 с — общий план, Красный поднимается
+    static final int T_SKY = 100;           // 5,00 с — небо: Синий дугой, Красный висит
+    static final int T_APPROACH = 128;      // 6,40 с — Синий подлетает к Красному
+    static final int T_CHASE = 160;         // 8,00 с — погоня вокруг ядра
+    static final int T_RING = 228;          // 11,40 с — кольцо, игрок поднимается
+    static final int T_RING_OPEN = 266;     // 13,30 с — кольцо раскрывается
+    static final int T_DARK = 283;          // 14,15 с — свет гаснет
+    static final int T_BLACK_END = 304;     // 15,20 с — ровно секунда темноты
+    static final int T_SPACE = 305;         // 15,25 с — «космос», шары сходятся
+    static final int T_INSERTS = 332;       // 16,60 с — четыре аниме-вставки
+    static final int T_MERGED = 336;        // 16,80 с — один большой фиолетовый шар
+    static final int T_SWIRL = 338;         // 16,90 с — белый закрученный взрыв
+    static final int T_BEHIND = 350;        // 17,50 с — камера за головой, огромная сфера
+    static final int T_POSE = 360;          // 18,00 с — поза Годжо
+    static final int T_EXPLODE = 362;       // 18,10 с — главный удар
+    static final int T_MANGA_C = 365;       // 18,25 с — манга-кадр с рукой, потом «X»
+    static final int T_WHITE_IN = 369;      // 18,45 с — белый экран
+    static final int T_WHITE_FULL = 371;
+    static final int T_MIN_END = 408;       // 20,40 с — белый уходит
+    static final int ANIM_TICKS = 408;
 
-    static final double JUMP_HEIGHT = 6.0;
+    /** Подъём игрока к шарам. */
+    static final int T_RISE_START = 228;
+    static final int T_RISE_END = 282;
+    static final double RISE_HEIGHT = 24.0;
     static final double RADIUS = 100.0;
-    /** 50 + высота прыжка: кратер углубляется на столько, на сколько игрок подпрыгивает. */
-    static final int DEPTH = 50 + (int) JUMP_HEIGHT;
+    /** 50 + высота подъёма: кратер углубляется на столько, на сколько игрок поднялся. */
+    static final int DEPTH = 50 + (int) RISE_HEIGHT;
     /** Чаша: шар радиуса BOWL_R с центром на BOWL_CENTER выше точки старта. На r=0 глубина DEPTH, на r=100 — 0. */
     private static final double BOWL_CENTER = (RADIUS * RADIUS - DEPTH * DEPTH) / (2.0 * DEPTH);
     private static final double BOWL_R = DEPTH + BOWL_CENTER;
@@ -102,7 +110,7 @@ public final class MaximumPurple {
     private static final long BUDGET_WHITE_NANOS = 38_000_000L;
     private static final int BLOCK_FLAGS = 2 | 16 | 32;
 
-    private static final String PROTOCOL = "2";
+    private static final String PROTOCOL = "3";
     private static final SimpleChannel CHANNEL = NetworkRegistry.newSimpleChannel(
             new ResourceLocation(JujutsuNeonMod.MODID, "max_purple"),
             () -> PROTOCOL,
@@ -122,12 +130,12 @@ public final class MaximumPurple {
     private MaximumPurple() {
     }
 
-    /** Высота игрока над точкой старта в момент t (тики кат-сцены). */
+    /** Высота игрока над точкой старта в момент t (тики кат-сцены): плавный подъём к шарам. */
     static double heightAt(double t) {
-        if (t <= T_JUMP) return 0.0;
-        if (t >= T_APEX) return JUMP_HEIGHT;
-        double x = (t - T_JUMP) / (double) (T_APEX - T_JUMP);
-        return JUMP_HEIGHT * (1.0 - Math.pow(1.0 - x, 3.0));
+        if (t <= T_RISE_START) return 0.0;
+        if (t >= T_RISE_END) return RISE_HEIGHT;
+        double x = (t - T_RISE_START) / (double) (T_RISE_END - T_RISE_START);
+        return RISE_HEIGHT * x * x * x * (x * (x * 6.0 - 15.0) + 10.0);
     }
 
     // ------------------------------------------------------------------ packets
@@ -308,7 +316,6 @@ public final class MaximumPurple {
             }
 
             if (ownerHere) holdOwner(cast, owner);
-            playCues(cast);
 
             if (cast.age == T_EXPLODE && ownerHere) {
                 dealDamage(cast, owner);
@@ -338,39 +345,11 @@ public final class MaximumPurple {
         owner.fallDistance = 0.0f;
         Vec3 expected = cast.expectedPos();
         // Клиент сам ведёт игрока по траектории; сервер поправляет только явный уход.
-        // Во время прыжка допуск больше: клиент и сервер могут разойтись на тик-два.
-        boolean jumping = cast.age >= T_JUMP - 2 && cast.age <= T_APEX + 6;
-        double tolerance = jumping ? 6.0 : 1.2;
+        // Во время подъёма допуск больше: клиент и сервер могут разойтись на несколько тиков.
+        boolean rising = cast.age >= T_RISE_START - 4 && cast.age <= T_RISE_END + 10;
+        double tolerance = rising ? 6.0 : 1.2;
         if (owner.position().distanceToSqr(expected) > tolerance * tolerance) {
             owner.connection.teleport(expected.x, expected.y, expected.z, cast.yaw, 0.0f);
-        }
-    }
-
-    private static void playCues(Cast cast) {
-        ServerLevel level = cast.level;
-        Vec3 p = cast.expectedPos().add(0.0, 1.0, 0.0);
-        double x = p.x, y = p.y, z = p.z;
-        switch (cast.age) {
-            case T_BLUE_SPAWN -> level.playSound(null, x, y, z, JujutsuNeonMod.SFX_BLUE.get(), SoundSource.PLAYERS, 3.0f, 0.9f);
-            case T_BLUE_THROW -> level.playSound(null, x, y, z, JujutsuNeonMod.SFX_BLUE.get(), SoundSource.PLAYERS, 3.0f, 1.25f);
-            case T_RED_GLOW -> level.playSound(null, x, y, z, JujutsuNeonMod.SFX_RED.get(), SoundSource.PLAYERS, 2.5f, 0.6f);
-            case T_MANGA_A -> level.playSound(null, x, y, z, SoundEvents.LIGHTNING_BOLT_IMPACT, SoundSource.PLAYERS, 3.0f, 1.3f);
-            case T_VORTEX -> level.playSound(null, x, y, z, JujutsuNeonMod.SFX_RED.get(), SoundSource.PLAYERS, 3.5f, 0.55f);
-            case T_RED_THROW -> level.playSound(null, x, y, z, JujutsuNeonMod.SFX_RED.get(), SoundSource.PLAYERS, 4.0f, 0.85f);
-            case T_JUMP -> level.playSound(null, x, y, z, SoundEvents.FIREWORK_ROCKET_LAUNCH, SoundSource.PLAYERS, 4.0f, 0.6f);
-            case T_MERGE -> level.playSound(null, x, y, z, JujutsuNeonMod.SFX_PURPLE.get(), SoundSource.PLAYERS, 5.0f, 0.75f);
-            case T_MANGA_B -> {
-                level.playSound(null, x, y, z, JujutsuNeonMod.SFX_PURPLE.get(), SoundSource.PLAYERS, 16.0f, 0.5f);
-                level.playSound(null, x, y, z, SoundEvents.LIGHTNING_BOLT_THUNDER, SoundSource.PLAYERS, 16.0f, 0.6f);
-            }
-            case T_COSMOS -> level.playSound(null, x, y, z, JujutsuNeonMod.SFX_DOMAIN.get(), SoundSource.PLAYERS, 12.0f, 0.6f);
-            case T_EXPLODE -> {
-                level.playSound(null, x, y, z, SoundEvents.GENERIC_EXPLODE, SoundSource.PLAYERS, 16.0f, 0.35f);
-                level.playSound(null, x, y, z, SoundEvents.LIGHTNING_BOLT_IMPACT, SoundSource.PLAYERS, 16.0f, 0.4f);
-            }
-            case T_WHITE_FULL -> level.playSound(null, x, y, z, SoundEvents.GENERIC_EXPLODE, SoundSource.PLAYERS, 16.0f, 0.25f);
-            default -> {
-            }
         }
     }
 
@@ -565,7 +544,7 @@ public final class MaximumPurple {
             owner.getAbilities().flying = cast.origMayfly && cast.origFlying;
             owner.onUpdateAbilities();
             if (completed) {
-                // Игрок остаётся там, куда прыгнул, — в режиме полёта.
+                // Игрок остаётся там, куда поднялся, — в режиме полёта.
                 if (owner.isAlive()) JujutsuNeonFlightPatch.startForTechnique(owner);
                 // Откат 60 секунд отсчитывается от окончания техники.
                 owner.getPersistentData().putLong("jn_cd_max_purple", cast.level.getGameTime() + COOLDOWN_TICKS);
