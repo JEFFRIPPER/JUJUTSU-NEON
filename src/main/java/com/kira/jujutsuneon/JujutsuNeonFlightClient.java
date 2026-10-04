@@ -141,6 +141,14 @@ public final class JujutsuNeonFlightClient {
         }
     }
 
+    /** Максимальный Фиолетовый: после кат-сцены игрок остаётся в воздухе в режиме полёта. */
+    public static void beginFlightForTechnique() {
+        Minecraft mc = Minecraft.getInstance();
+        if (mc.player == null || !hasBlindfold(mc)) return;
+        if (customFlight) return;
+        beginFlight(mc);
+    }
+
     /** Вызывается из ClientForgeEvents при каждом прыжке (обычном или заряженном). */
     public static void onJumpFired() {
         Minecraft mc = Minecraft.getInstance();

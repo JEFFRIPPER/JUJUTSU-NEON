@@ -128,39 +128,89 @@ def make_impact():
 
 # ---------------------------------------------------------------- cosmos
 def make_cosmos():
-    S = 1024
+    Wc, Hc = 2048, 1152
     rng = np.random.default_rng(11)
-    n1 = value_noise(S, S, 3.0, rng, 6)
-    n2 = value_noise(S, S, 1.6, rng, 5)
-    yy, xx = np.mgrid[0:S, 0:S].astype(np.float32) / S
-    # Слева фиолетово-синий, к центру/справа малиновый и розово-белый.
-    t = np.clip(xx * 0.85 + (n1 - 0.5) * 0.55, 0, 1)
-    deep = np.array([60, 20, 200], np.float32)
-    mid = np.array([205, 20, 220], np.float32)
-    hot = np.array([255, 120, 245], np.float32)
-    col = np.where(t[..., None] < 0.5,
-                   deep + (mid - deep) * (t[..., None] / 0.5),
-                   mid + (hot - mid) * ((t[..., None] - 0.5) / 0.5))
-    cloud = np.clip((n2 - 0.35) * 1.8, 0, 1)[..., None]
-    col = col * (0.55 + 0.45 * cloud) + np.array([255, 200, 255], np.float32) * (cloud ** 3) * 0.35
+    n1 = value_noise(Wc, Hc, 3.0, rng, 6)
+    n2 = value_noise(Wc, Hc, 2.0, rng, 6)
+    n3 = value_noise(Wc, Hc, 8.0, rng, 4)
+    yy, xx = np.mgrid[0:Hc, 0:Wc].astype(np.float32)
+    xx /= Wc
+    yy /= Hc
+    # слева сине-фиолетовый, к правому краю малиновый и бело-розовый (как вспышка в 9.0)
+    t = np.clip(xx * 0.95 + (n1 - 0.5) * 0.45, 0, 1)
+    deep = np.array([48, 18, 190], np.float32)
+    mid = np.array([196, 18, 226], np.float32)
+    hot = np.array([255, 150, 248], np.float32)
+    col = np.where(t[..., None] < 0.55,
+                   deep + (mid - deep) * (t[..., None] / 0.55),
+                   mid + (hot - mid) * ((t[..., None] - 0.55) / 0.45))
+    cloud = np.clip((n2 - 0.32) * 1.9, 0, 1)[..., None]
+    wisps = np.clip(1.0 - np.abs(n3 - 0.5) * 9.0, 0, 1)[..., None]
+    col = col * (0.6 + 0.4 * cloud) + np.array([255, 210, 255], np.float32) * (cloud ** 3 * 0.35 + wisps * 0.12)
     img = Image.fromarray(np.clip(col, 0, 255).astype(np.uint8))
 
-    # Звёзды и искры с ореолом.
-    glow = Image.new("RGB", (S, S), (0, 0, 0))
-    gd = ImageDraw.Draw(glow)
-    sharp = Image.new("RGB", (S, S), (0, 0, 0))
+    sharp = Image.new("RGB", (Wc, Hc), (0, 0, 0))
     sd = ImageDraw.Draw(sharp)
+    glow = Image.new("RGB", (Wc, Hc), (0, 0, 0))
+    gd = ImageDraw.Draw(glow)
     r = random.Random(5)
-    for _ in range(2600):
-        x, y = r.uniform(0, S), r.uniform(0, S)
-        size = r.choice((1, 1, 1, 1, 1, 2, 2, 2, 3, 4, 5))
-        sd.ellipse((x - size / 2, y - size / 2, x + size / 2, y + size / 2), fill=(255, 245, 255))
-        if size >= 3:
-            gd.ellipse((x - size * 2, y - size * 2, x + size * 2, y + size * 2), fill=(255, 150, 250))
-    glow = glow.filter(ImageFilter.GaussianBlur(5))
+    # много крошечных звёзд, гуще в облаках
+    dens = np.asarray(Image.fromarray((np.clip(cloud[..., 0], 0, 1) * 255).astype(np.uint8)), np.float32) / 255.0
+    placed = 0
+    while placed < 9000:
+        x, y = r.uniform(0, Wc - 1), r.uniform(0, Hc - 1)
+        if r.random() > 0.35 + 0.65 * dens[int(y), int(x)]:
+            continue
+        placed += 1
+        size = r.choice((0.6, 0.8, 1.0, 1.0, 1.3, 1.6, 2.2))
+        c = (255, r.randint(225, 255), 255)
+        sd.ellipse((x - size, y - size, x + size, y + size), fill=c)
+        if size >= 2.2 and r.random() < 0.35:
+            gd.ellipse((x - size * 4, y - size * 4, x + size * 4, y + size * 4), fill=(255, 120, 250))
+    for _ in range(70):
+        x, y = r.uniform(0, Wc), r.uniform(0, Hc)
+        L = r.uniform(5, 14)
+        sd.line((x - L, y, x + L, y), fill=(255, 255, 255), width=1)
+        sd.line((x, y - L, x, y + L), fill=(255, 255, 255), width=1)
+        gd.ellipse((x - 6, y - 6, x + 6, y + 6), fill=(255, 170, 255))
+    glow = glow.filter(ImageFilter.GaussianBlur(4))
     img = ImageChops.add(img, glow)
     img = ImageChops.add(img, sharp)
     img.save(OUT / "max_purple_cosmos.png", optimize=True)
+
+
+# ---------------------------------------------------------------- vortex
+def make_vortex():
+    S = 1024
+    rng = np.random.default_rng(21)
+    yy, xx = np.mgrid[0:S, 0:S].astype(np.float32)
+    dx = (xx - S / 2) / (S / 2)
+    dy = (yy - S / 2) / (S / 2)
+    r = np.sqrt(dx * dx + dy * dy)
+    th = np.arctan2(dy, dx)
+    n = value_noise(S, S, 6.0, rng, 5)
+    # спиральные мазки дыма вокруг кольца
+    swirl = 0.5 + 0.5 * np.sin(th * 3.0 + r * 16.0 + n * 6.0)
+    swirl2 = 0.5 + 0.5 * np.sin(th * 7.0 - r * 9.0 + n * 4.0)
+    ring = np.exp(-((r - 0.62) / 0.17) ** 2)
+    inner = np.exp(-((r - 0.42) / 0.10) ** 2) * 0.5
+    density = np.clip((ring + inner) * (0.45 + 0.55 * swirl) * (0.7 + 0.3 * swirl2) * (0.7 + 0.6 * n), 0, 1)
+    # срыв по краю: рваные клочья
+    density *= np.clip(1.0 - np.maximum(0, r - 0.86) * 8.0, 0, 1)
+    # вращательное размытие: дым «закручен»
+    den_img = Image.fromarray((density * 255).astype(np.uint8), "L")
+    acc = np.zeros((S, S), np.float32)
+    for k in range(14):
+        acc += np.asarray(den_img.rotate(k * 1.6, resample=Image.BILINEAR), np.float32)
+    density = np.maximum(acc / 14.0 / 255.0 * 1.15, density * 0.55)
+    dark = np.array([8, 12, 28], np.float32)
+    navy = np.array([26, 44, 96], np.float32)
+    pale = np.array([150, 180, 220], np.float32)
+    edge = np.clip((swirl2 - 0.75) * 4.0, 0, 1) * ring
+    col = dark + (navy - dark) * swirl[..., None] * 0.8 + (pale - dark) * edge[..., None] * 0.6
+    alpha = np.clip(density * 1.25, 0, 0.93) * 255
+    out = np.dstack([np.clip(col, 0, 255), alpha]).astype(np.uint8)
+    Image.fromarray(out, "RGBA").save(OUT / "max_purple_vortex.png", optimize=True)
 
 
 # ---------------------------------------------------------------- bloom
@@ -193,8 +243,8 @@ def make_orb(name, dark, main, vein, seed):
     Image.fromarray(np.clip(col, 0, 255).astype(np.uint8)).save(OUT / f"max_purple_{name}_orb.png", optimize=True)
 
 
-make_impact()
 make_cosmos()
+make_vortex()
 make_bloom()
 make_orb("red", (25, 0, 0), (225, 10, 18), (255, 90, 90), 3)
 make_orb("blue", (0, 8, 70), (10, 70, 230), (90, 235, 255), 4)

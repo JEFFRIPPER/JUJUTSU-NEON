@@ -140,7 +140,22 @@ public final class JujutsuNeonFlightPatch {
         if (!hasBlindfold(player)) return;
         if (player.onGround()) return;
         if (groundDistance(player, START_MIN_HEIGHT + 0.35, ClipContext.Fluid.ANY) + 1.0E-4 < START_MIN_HEIGHT) return;
+        activateFlight(player);
+    }
 
+    /** Максимальный Фиолетовый: после кат-сцены игрок остаётся в воздухе в режиме полёта. */
+    static void startForTechnique(ServerPlayer player) {
+        if (!player.isAlive() || player.isSpectator()) return;
+        if (!hasBlindfold(player)) return;
+        activateFlight(player);
+    }
+
+    /** Перед кат-сценой Максимального Фиолетового полёт снимается: высотой управляет техника. */
+    static void stopForTechnique(ServerPlayer player) {
+        stopFlight(player);
+    }
+
+    private static void activateFlight(ServerPlayer player) {
         var data = player.getPersistentData();
 
         if (!data.getBoolean(TAG_ACTIVE)) {

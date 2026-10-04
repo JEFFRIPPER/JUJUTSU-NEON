@@ -17,6 +17,7 @@ import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.chunk.LevelChunk;
 import net.minecraft.world.level.chunk.LevelChunkSection;
+import net.minecraft.world.level.levelgen.Heightmap;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 import net.minecraftforge.api.distmarker.Dist;
@@ -43,40 +44,64 @@ import java.util.function.Supplier;
 /**
  * Максимальный Фиолетовый (удержание G 3 секунды).
  *
- * Сервер: заморозка владельца на время кат-сцены, урон 2000 (1000 сердец) всем живым
- * в радиусе 100 блоков, кроме владельца, и идеально круглый кратер:
- * сверху — шар радиуса 100 вокруг игрока, снизу — чаша глубиной 50
- * (сферический сегмент шара R=125 с центром на 75 блоков выше ног).
- * Блоки удаляются без дропа во время белой засветки, затем владелец
- * оказывается на дне кратера.
+ * Сюжет по референсу: Синий в руке и бросок вверх, Красный к лицу и выстрел вверх,
+ * прыжок на 13 блоков к шарам, слияние, взрыв вокруг игрока. После белого экрана
+ * игрок остаётся в воздухе на той же точке в режиме полёта.
+ *
+ * Сервер: удерживает владельца на траектории кат-сцены, наносит 2000 урона (1000 сердец)
+ * всем живым в радиусе 100 блоков от игрока, кроме владельца, и вырезает идеально
+ * круглый кратер без дропа:
+ *  - выше земли — шар радиусом 100 вокруг точки старта;
+ *  - ниже — чаша глубиной 63 в центре (50 + высота прыжка 13), сходящая на нет к радиусу 100.
+ * Подземная часть вырезается заранее, пока идёт кат-сцена, под нетронутой «коркой»
+ * в 2 блока, поэтому её не видно. Корка и всё, что над землёй, удаляются во время
+ * белого экрана — он длится меньше секунды.
  */
 @Mod.EventBusSubscriber(modid = JujutsuNeonMod.MODID, bus = Mod.EventBusSubscriber.Bus.FORGE)
 public final class MaximumPurple {
 
     // ---- Таймлайн кат-сцены в тиках (общий для сервера и клиента) ----
-    static final int T_LETTERBOX = 34;
-    static final int T_ORBS = 70;
-    static final int T_MERGE = 102;
-    static final int T_IMPACT = 114;
-    static final int T_COSMOS = 122;
-    static final int T_WHITE_IN = 134;
-    static final int T_WHITE_FULL = 142;
-    static final int T_MIN_END = 160;
-    static final int ANIM_TICKS = 150;
+    static final int T_BLUE_SPAWN = 2;
+    static final int T_BLUE_THROW = 12;
+    static final int T_BLUE_HOVER = 26;
+    static final int T_RED_GLOW = 36;
+    static final int T_MANGA_A = 40;
+    static final int T_VORTEX = 45;
+    static final int T_RED_FACE = 58;
+    static final int T_LETTERBOX = 66;
+    static final int T_RED_THROW = 68;
+    static final int T_RED_HOVER = 80;
+    static final int T_JUMP = 84;
+    static final int T_APEX = 98;
+    static final int T_FACE = 114;
+    static final int T_MERGE = 128;
+    static final int T_MANGA_B = 144;
+    static final int T_COSMOS = 155;
+    static final int T_FLASH = 178;
+    static final int T_EXPLODE = 184;
+    static final int T_WHITE_IN = 194;
+    static final int T_WHITE_FULL = 200;
+    static final int T_MIN_END = 212;
+    static final int ANIM_TICKS = 212;
 
+    static final double JUMP_HEIGHT = 13.0;
     static final double RADIUS = 100.0;
-    static final int DEPTH = 50;
-    /** Чаша: шар радиуса BOWL_R с центром на BOWL_CENTER выше ног. На r=0 глубина 50, на r=100 — 0. */
-    private static final double BOWL_R = 125.0;
-    private static final double BOWL_CENTER = 75.0;
+    static final int DEPTH = 63;
+    /** Чаша: шар радиуса BOWL_R с центром на BOWL_CENTER выше точки старта. На r=0 глубина 63, на r=100 — 0. */
+    private static final double BOWL_CENTER = (RADIUS * RADIUS - DEPTH * DEPTH) / (2.0 * DEPTH);
+    private static final double BOWL_R = DEPTH + BOWL_CENTER;
+    /** Сколько верхних блоков колонки (и её соседей) остаётся «коркой» до белого экрана. */
+    private static final int CRUST = 2;
+    private static final int T_HIDDEN_CARVE = 20;
 
     private static final float DAMAGE = 2000.0f;
     private static final long COOLDOWN_TICKS = 1200L;
     private static final double ENERGY_COST = 100.0;
-    private static final long BUDGET_NANOS = 32_000_000L;
+    private static final long BUDGET_HIDDEN_NANOS = 22_000_000L;
+    private static final long BUDGET_WHITE_NANOS = 38_000_000L;
     private static final int BLOCK_FLAGS = 2 | 16 | 32;
 
-    private static final String PROTOCOL = "1";
+    private static final String PROTOCOL = "2";
     private static final SimpleChannel CHANNEL = NetworkRegistry.newSimpleChannel(
             new ResourceLocation(JujutsuNeonMod.MODID, "max_purple"),
             () -> PROTOCOL,
@@ -94,6 +119,14 @@ public final class MaximumPurple {
     }
 
     private MaximumPurple() {
+    }
+
+    /** Высота игрока над точкой старта в момент t (тики кат-сцены). */
+    static double heightAt(double t) {
+        if (t <= T_JUMP) return 0.0;
+        if (t >= T_APEX) return JUMP_HEIGHT;
+        double x = (t - T_JUMP) / (double) (T_APEX - T_JUMP);
+        return JUMP_HEIGHT * (1.0 - Math.pow(1.0 - x, 3.0));
     }
 
     // ------------------------------------------------------------------ packets
@@ -139,20 +172,21 @@ public final class MaximumPurple {
         }
     }
 
-    /** S2C: кратер готов (или техника прервана) — снимаем белый экран. */
-    public record EndPacket(UUID ownerId) {
+    /** S2C: кратер готов (completed) или техника прервана — снимаем белый экран. */
+    public record EndPacket(UUID ownerId, boolean completed) {
         static void encode(EndPacket msg, FriendlyByteBuf buf) {
             buf.writeUUID(msg.ownerId);
+            buf.writeBoolean(msg.completed);
         }
 
         static EndPacket decode(FriendlyByteBuf buf) {
-            return new EndPacket(buf.readUUID());
+            return new EndPacket(buf.readUUID(), buf.readBoolean());
         }
 
         static void handle(EndPacket msg, Supplier<NetworkEvent.Context> ctx) {
             NetworkEvent.Context context = ctx.get();
             context.enqueueWork(() -> DistExecutor.unsafeRunWhenOn(Dist.CLIENT,
-                    () -> () -> MaximumPurpleClient.onEnd(msg.ownerId)));
+                    () -> () -> MaximumPurpleClient.onEnd(msg.ownerId, msg.completed)));
             context.setPacketHandled(true);
         }
     }
@@ -170,13 +204,18 @@ public final class MaximumPurple {
         final Vec3 feet;
         final BlockPos feetBlock;
         final float yaw;
+        final boolean origMayfly;
+        final boolean origFlying;
         int age;
         boolean damageDone;
-        boolean ownerMissing;
 
         /** Колонки кратера, отсортированные по чанкам: пары (x, z). */
         int[] columns;
-        int columnIndex;
+        /** Для каждой колонки — верхняя граница скрытой вырезки (ниже корки). */
+        int[] hiddenTop;
+        int hiddenIndex;
+        int finalIndex;
+        boolean hiddenDone;
         boolean destructionDone;
 
         Cast(ServerPlayer owner) {
@@ -185,6 +224,12 @@ public final class MaximumPurple {
             this.feet = owner.position();
             this.feetBlock = owner.blockPosition();
             this.yaw = owner.getYRot();
+            this.origMayfly = owner.getAbilities().mayfly;
+            this.origFlying = owner.getAbilities().flying;
+        }
+
+        Vec3 expectedPos() {
+            return feet.add(0.0, heightAt(age), 0.0);
         }
     }
 
@@ -224,16 +269,22 @@ public final class MaximumPurple {
             return;
         }
 
+        // Если игрок был в нашем полёте — снимаем его, техника сама управляет высотой.
+        JujutsuNeonFlightPatch.stopForTechnique(player);
+
         JujutsuNeonMod.setEnergy(player, JujutsuNeonMod.getEnergy(player) - ENERGY_COST);
         player.getPersistentData().putLong("jn_cd_max_purple", now + COOLDOWN_TICKS);
 
         Cast cast = new Cast(player);
         CASTS.put(player.getUUID(), cast);
-        player.setDeltaMovement(Vec3.ZERO);
         player.fallDistance = 0.0f;
 
+        // Сначала Start (клиент запомнит свои способности), потом разрешаем висеть в воздухе,
+        // чтобы сервер не кикнул за «полёт» на высоте 13 блоков.
         CHANNEL.send(PacketDistributor.DIMENSION.with(() -> cast.level.dimension()),
                 new StartPacket(cast.ownerId, cast.feet.x, cast.feet.y, cast.feet.z, cast.yaw));
+        player.getAbilities().mayfly = true;
+        player.onUpdateAbilities();
     }
 
     // ------------------------------------------------------------------ tick
@@ -248,7 +299,7 @@ public final class MaximumPurple {
             ServerPlayer owner = cast.level.getServer().getPlayerList().getPlayer(cast.ownerId);
             boolean ownerHere = owner != null && owner.isAlive() && owner.level() == cast.level;
 
-            // До удара техника без владельца не существует.
+            // До взрыва техника без владельца не существует.
             if (!ownerHere && !cast.damageDone) {
                 finish(cast, owner, false);
                 it.remove();
@@ -258,14 +309,18 @@ public final class MaximumPurple {
             if (ownerHere) holdOwner(cast, owner);
             playCues(cast);
 
-            if (cast.age == MaximumPurple.T_IMPACT && ownerHere) {
+            if (cast.age == T_EXPLODE && ownerHere) {
                 dealDamage(cast, owner);
                 cast.damageDone = true;
             }
 
-            if (cast.age >= T_WHITE_FULL && !cast.destructionDone) {
-                if (cast.columns == null) cast.columns = buildColumns(cast);
-                carve(cast);
+            if (cast.age >= T_HIDDEN_CARVE && !cast.destructionDone) {
+                if (cast.columns == null) buildColumns(cast);
+                if (cast.age < T_WHITE_FULL) {
+                    if (!cast.hiddenDone) carveHidden(cast);
+                } else {
+                    carveFinal(cast);
+                }
             }
 
             if (cast.destructionDone && cast.age >= T_MIN_END) {
@@ -280,42 +335,46 @@ public final class MaximumPurple {
 
     private static void holdOwner(Cast cast, ServerPlayer owner) {
         owner.fallDistance = 0.0f;
-        owner.setDeltaMovement(Vec3.ZERO);
-        if (owner.position().distanceToSqr(cast.feet) > 0.0025) {
-            owner.connection.teleport(cast.feet.x, cast.feet.y, cast.feet.z, cast.yaw, 0.0f);
+        Vec3 expected = cast.expectedPos();
+        // Клиент сам ведёт игрока по траектории; сервер поправляет только явный уход.
+        // Во время прыжка допуск больше: клиент и сервер могут разойтись на тик-два.
+        boolean jumping = cast.age >= T_JUMP - 2 && cast.age <= T_APEX + 6;
+        double tolerance = jumping ? 6.0 : 1.2;
+        if (owner.position().distanceToSqr(expected) > tolerance * tolerance) {
+            owner.connection.teleport(expected.x, expected.y, expected.z, cast.yaw, 0.0f);
         }
     }
 
     private static void playCues(Cast cast) {
         ServerLevel level = cast.level;
-        double x = cast.feet.x, y = cast.feet.y + 1.0, z = cast.feet.z;
+        Vec3 p = cast.expectedPos().add(0.0, 1.0, 0.0);
+        double x = p.x, y = p.y, z = p.z;
         switch (cast.age) {
-            case 4 -> level.playSound(null, x, y, z, JujutsuNeonMod.SFX_RED.get(), SoundSource.PLAYERS, 3.0f, 0.55f);
-            case 46 -> level.playSound(null, x, y, z, JujutsuNeonMod.SFX_RED.get(), SoundSource.PLAYERS, 4.0f, 0.8f);
-            case T_ORBS -> {
-                level.playSound(null, x, y, z, JujutsuNeonMod.SFX_RED.get(), SoundSource.PLAYERS, 4.0f, 0.7f);
-                level.playSound(null, x, y, z, JujutsuNeonMod.SFX_BLUE.get(), SoundSource.PLAYERS, 4.0f, 0.7f);
-            }
+            case T_BLUE_SPAWN -> level.playSound(null, x, y, z, JujutsuNeonMod.SFX_BLUE.get(), SoundSource.PLAYERS, 3.0f, 0.9f);
+            case T_BLUE_THROW -> level.playSound(null, x, y, z, JujutsuNeonMod.SFX_BLUE.get(), SoundSource.PLAYERS, 3.0f, 1.25f);
+            case T_RED_GLOW -> level.playSound(null, x, y, z, JujutsuNeonMod.SFX_RED.get(), SoundSource.PLAYERS, 2.5f, 0.6f);
+            case T_MANGA_A -> level.playSound(null, x, y, z, SoundEvents.LIGHTNING_BOLT_IMPACT, SoundSource.PLAYERS, 3.0f, 1.3f);
+            case T_VORTEX -> level.playSound(null, x, y, z, JujutsuNeonMod.SFX_RED.get(), SoundSource.PLAYERS, 3.5f, 0.55f);
+            case T_RED_THROW -> level.playSound(null, x, y, z, JujutsuNeonMod.SFX_RED.get(), SoundSource.PLAYERS, 4.0f, 0.85f);
+            case T_JUMP -> level.playSound(null, x, y, z, SoundEvents.FIREWORK_ROCKET_LAUNCH, SoundSource.PLAYERS, 4.0f, 0.6f);
             case T_MERGE -> level.playSound(null, x, y, z, JujutsuNeonMod.SFX_PURPLE.get(), SoundSource.PLAYERS, 5.0f, 0.75f);
-            case T_IMPACT -> {
+            case T_MANGA_B -> {
                 level.playSound(null, x, y, z, JujutsuNeonMod.SFX_PURPLE.get(), SoundSource.PLAYERS, 16.0f, 0.5f);
                 level.playSound(null, x, y, z, SoundEvents.LIGHTNING_BOLT_THUNDER, SoundSource.PLAYERS, 16.0f, 0.6f);
             }
-            case T_COSMOS -> {
-                level.playSound(null, x, y, z, SoundEvents.GENERIC_EXPLODE, SoundSource.PLAYERS, 16.0f, 0.45f);
-                level.playSound(null, x, y, z, JujutsuNeonMod.SFX_DOMAIN.get(), SoundSource.PLAYERS, 12.0f, 0.6f);
-            }
-            case T_WHITE_FULL -> {
-                level.playSound(null, x, y, z, SoundEvents.GENERIC_EXPLODE, SoundSource.PLAYERS, 16.0f, 0.3f);
+            case T_COSMOS -> level.playSound(null, x, y, z, JujutsuNeonMod.SFX_DOMAIN.get(), SoundSource.PLAYERS, 12.0f, 0.6f);
+            case T_EXPLODE -> {
+                level.playSound(null, x, y, z, SoundEvents.GENERIC_EXPLODE, SoundSource.PLAYERS, 16.0f, 0.35f);
                 level.playSound(null, x, y, z, SoundEvents.LIGHTNING_BOLT_IMPACT, SoundSource.PLAYERS, 16.0f, 0.4f);
             }
+            case T_WHITE_FULL -> level.playSound(null, x, y, z, SoundEvents.GENERIC_EXPLODE, SoundSource.PLAYERS, 16.0f, 0.25f);
             default -> {
             }
         }
     }
 
     private static void dealDamage(Cast cast, ServerPlayer owner) {
-        Vec3 center = cast.feet.add(0.0, 1.0, 0.0);
+        Vec3 center = owner.position().add(0.0, 1.0, 0.0);
         AABB box = new AABB(center, center).inflate(RADIUS);
         List<LivingEntity> targets = cast.level.getEntitiesOfClass(LivingEntity.class, box,
                 e -> e.isAlive() && e != owner && !e.isSpectator());
@@ -337,86 +396,147 @@ public final class MaximumPurple {
 
     // ------------------------------------------------------------------ crater
 
-    private static int[] buildColumns(Cast cast) {
+    private static int columnTop(Cast cast, int r2) {
+        int top = cast.feetBlock.getY() + (int) Math.floor(Math.sqrt(Math.max(0.0, RADIUS * RADIUS - r2)));
+        return Math.min(top, cast.level.getMaxBuildHeight() - 1);
+    }
+
+    private static int columnBottom(Cast cast, int r2) {
+        int cy = cast.feetBlock.getY();
+        int bottom = cy + (int) Math.ceil(BOWL_CENTER - Math.sqrt(Math.max(0.0, BOWL_R * BOWL_R - r2)));
+        bottom = Math.max(bottom, cy - DEPTH);
+        // нижний слой мира не трогаем — под ним пустота
+        return Math.max(bottom, cast.level.getMinBuildHeight() + 1);
+    }
+
+    private static void buildColumns(Cast cast) {
+        ServerLevel level = cast.level;
         int cx = cast.feetBlock.getX();
         int cz = cast.feetBlock.getZ();
         int r = (int) RADIUS;
+
+        // Карта поверхности (высший непустой блок) с запасом в 1 колонку для соседей.
+        int size = 2 * r + 3;
+        int[] surface = new int[size * size];
+        LevelChunk chunk = null;
+        int lastCX = Integer.MIN_VALUE, lastCZ = Integer.MIN_VALUE;
+        for (int i = 0; i < size; i++) {
+            for (int j = 0; j < size; j++) {
+                int x = cx - r - 1 + i, z = cz - r - 1 + j;
+                if ((x >> 4) != lastCX || (z >> 4) != lastCZ) {
+                    lastCX = x >> 4;
+                    lastCZ = z >> 4;
+                    chunk = level.getChunkSource().getChunkNow(lastCX, lastCZ);
+                }
+                surface[i * size + j] = chunk == null
+                        ? Integer.MIN_VALUE / 2
+                        : chunk.getHeight(Heightmap.Types.WORLD_SURFACE, x & 15, z & 15);
+            }
+        }
+
         List<long[]> list = new ArrayList<>();
         for (int dx = -r; dx <= r; dx++) {
             for (int dz = -r; dz <= r; dz++) {
                 if (dx * dx + dz * dz > r * r) continue;
                 int x = cx + dx, z = cz + dz;
+                int i = dx + r + 1, j = dz + r + 1;
+                int minSurface = Integer.MAX_VALUE;
+                for (int a = -1; a <= 1; a++) {
+                    for (int b = -1; b <= 1; b++) {
+                        minSurface = Math.min(minSurface, surface[(i + a) * size + (j + b)]);
+                    }
+                }
                 long chunkKey = ((long) (x >> 4) << 32) ^ ((z >> 4) & 0xFFFFFFFFL);
-                list.add(new long[]{chunkKey, x, z});
+                list.add(new long[]{chunkKey, x, z, (long) minSurface - CRUST});
             }
         }
         list.sort((a, b) -> Long.compare(a[0], b[0]));
-        int[] out = new int[list.size() * 2];
+
+        cast.columns = new int[list.size() * 2];
+        cast.hiddenTop = new int[list.size()];
         for (int i = 0; i < list.size(); i++) {
-            out[i * 2] = (int) list.get(i)[1];
-            out[i * 2 + 1] = (int) list.get(i)[2];
+            long[] e = list.get(i);
+            cast.columns[i * 2] = (int) e[1];
+            cast.columns[i * 2 + 1] = (int) e[2];
+            cast.hiddenTop[i] = (int) Math.max(Integer.MIN_VALUE / 2, e[3]);
         }
-        return out;
     }
 
-    private static void carve(Cast cast) {
-        ServerLevel level = cast.level;
-        long deadline = System.nanoTime() + BUDGET_NANOS;
-        int cx = cast.feetBlock.getX();
-        int cy = cast.feetBlock.getY();
-        int cz = cast.feetBlock.getZ();
-        int minY = level.getMinBuildHeight() + 1; // нижний слой мира не трогаем — под ним пустота
-        int maxY = level.getMaxBuildHeight() - 1;
-        BlockState air = Blocks.AIR.defaultBlockState();
-        BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
-
-        int lastChunkX = Integer.MIN_VALUE, lastChunkZ = Integer.MIN_VALUE;
-        LevelChunk chunk = null;
+    /** Подземная часть под коркой — пока идёт кат-сцена, её не видно. */
+    private static void carveHidden(Cast cast) {
+        long deadline = System.nanoTime() + BUDGET_HIDDEN_NANOS;
         int total = cast.columns.length / 2;
+        Carver carver = new Carver(cast);
+        while (cast.hiddenIndex < total) {
+            int i = cast.hiddenIndex;
+            int x = cast.columns[i * 2], z = cast.columns[i * 2 + 1];
+            int dx = x - cast.feetBlock.getX(), dz = z - cast.feetBlock.getZ();
+            int r2 = dx * dx + dz * dz;
+            int top = Math.min(columnTop(cast, r2), cast.hiddenTop[i]);
+            carver.column(x, z, columnBottom(cast, r2), top);
+            cast.hiddenIndex++;
+            if ((cast.hiddenIndex & 3) == 0 && System.nanoTime() > deadline) return;
+        }
+        cast.hiddenDone = true;
+    }
 
-        while (cast.columnIndex < total) {
-            int x = cast.columns[cast.columnIndex * 2];
-            int z = cast.columns[cast.columnIndex * 2 + 1];
-            int chunkX = x >> 4, chunkZ = z >> 4;
-            if (chunkX != lastChunkX || chunkZ != lastChunkZ) {
-                chunk = level.getChunkSource().getChunkNow(chunkX, chunkZ);
-                lastChunkX = chunkX;
-                lastChunkZ = chunkZ;
-            }
-
-            if (chunk != null) {
-                int dx = x - cx, dz = z - cz;
-                double r2 = dx * dx + dz * dz;
-                int top = cy + (int) Math.floor(Math.sqrt(Math.max(0.0, RADIUS * RADIUS - r2)));
-                int bottom = cy + (int) Math.ceil(BOWL_CENTER - Math.sqrt(Math.max(0.0, BOWL_R * BOWL_R - r2)));
-                bottom = Math.max(bottom, cy - DEPTH);
-                top = Math.min(top, maxY);
-                bottom = Math.max(bottom, minY);
-
-                int y = top;
-                while (y >= bottom) {
-                    int sectionIndex = chunk.getSectionIndex(y);
-                    LevelChunkSection section = sectionIndex >= 0 && sectionIndex < chunk.getSectionsCount()
-                            ? chunk.getSection(sectionIndex) : null;
-                    int sectionBottom = (y >> 4) << 4;
-                    if (section == null || section.hasOnlyAir()) {
-                        y = sectionBottom - 1;
-                        continue;
-                    }
-                    pos.set(x, y, z);
-                    BlockState state = chunk.getBlockState(pos);
-                    if (!state.isAir() && !isProtected(state)) {
-                        if (state.hasBlockEntity()) Clearable.tryClear(level.getBlockEntity(pos));
-                        level.setBlock(pos, air, BLOCK_FLAGS);
-                    }
-                    y--;
-                }
-            }
-
-            cast.columnIndex++;
-            if ((cast.columnIndex & 3) == 0 && System.nanoTime() > deadline) return;
+    /** Остаток (корка и всё над землёй) — во время белого экрана. */
+    private static void carveFinal(Cast cast) {
+        long deadline = System.nanoTime() + BUDGET_WHITE_NANOS;
+        int total = cast.columns.length / 2;
+        Carver carver = new Carver(cast);
+        while (cast.finalIndex < total) {
+            int i = cast.finalIndex;
+            int x = cast.columns[i * 2], z = cast.columns[i * 2 + 1];
+            int dx = x - cast.feetBlock.getX(), dz = z - cast.feetBlock.getZ();
+            int r2 = dx * dx + dz * dz;
+            int bottom = columnBottom(cast, r2);
+            if (i < cast.hiddenIndex) bottom = Math.max(bottom, cast.hiddenTop[i] + 1);
+            carver.column(x, z, bottom, columnTop(cast, r2));
+            cast.finalIndex++;
+            if ((cast.finalIndex & 3) == 0 && System.nanoTime() > deadline) return;
         }
         cast.destructionDone = true;
+    }
+
+    private static final class Carver {
+        final ServerLevel level;
+        final BlockState air = Blocks.AIR.defaultBlockState();
+        final BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
+        LevelChunk chunk;
+        int chunkX = Integer.MIN_VALUE, chunkZ = Integer.MIN_VALUE;
+
+        Carver(Cast cast) {
+            this.level = cast.level;
+        }
+
+        void column(int x, int z, int bottom, int top) {
+            if (top < bottom) return;
+            if ((x >> 4) != chunkX || (z >> 4) != chunkZ) {
+                chunkX = x >> 4;
+                chunkZ = z >> 4;
+                chunk = level.getChunkSource().getChunkNow(chunkX, chunkZ);
+            }
+            if (chunk == null) return;
+
+            int y = top;
+            while (y >= bottom) {
+                int sectionIndex = chunk.getSectionIndex(y);
+                LevelChunkSection section = sectionIndex >= 0 && sectionIndex < chunk.getSectionsCount()
+                        ? chunk.getSection(sectionIndex) : null;
+                if (section == null || section.hasOnlyAir()) {
+                    y = ((y >> 4) << 4) - 1;
+                    continue;
+                }
+                pos.set(x, y, z);
+                BlockState state = chunk.getBlockState(pos);
+                if (!state.isAir() && !isProtected(state)) {
+                    if (state.hasBlockEntity()) Clearable.tryClear(level.getBlockEntity(pos));
+                    level.setBlock(pos, air, BLOCK_FLAGS);
+                }
+                y--;
+            }
+        }
     }
 
     private static boolean isProtected(BlockState state) {
@@ -438,20 +558,24 @@ public final class MaximumPurple {
     // ------------------------------------------------------------------ end
 
     private static void finish(Cast cast, ServerPlayer owner, boolean completed) {
-        if (owner != null && completed) {
-            int bottomY = Math.max(cast.feetBlock.getY() - DEPTH, cast.level.getMinBuildHeight() + 1);
+        if (owner != null) {
             owner.fallDistance = 0.0f;
-            owner.setDeltaMovement(Vec3.ZERO);
-            owner.connection.teleport(cast.feet.x, bottomY, cast.feet.z, cast.yaw, 0.0f);
-            // Откат 60 секунд отсчитывается от окончания техники.
-            owner.getPersistentData().putLong("jn_cd_max_purple", cast.level.getGameTime() + COOLDOWN_TICKS);
+            owner.getAbilities().mayfly = cast.origMayfly;
+            owner.getAbilities().flying = cast.origMayfly && cast.origFlying;
+            owner.onUpdateAbilities();
+            if (completed) {
+                // Игрок остаётся там, куда прыгнул, — в режиме полёта.
+                if (owner.isAlive()) JujutsuNeonFlightPatch.startForTechnique(owner);
+                // Откат 60 секунд отсчитывается от окончания техники.
+                owner.getPersistentData().putLong("jn_cd_max_purple", cast.level.getGameTime() + COOLDOWN_TICKS);
+            }
         }
-        CHANNEL.send(PacketDistributor.DIMENSION.with(() -> cast.level.dimension()), new EndPacket(cast.ownerId));
+        CHANNEL.send(PacketDistributor.DIMENSION.with(() -> cast.level.dimension()), new EndPacket(cast.ownerId, completed));
     }
 
     // ------------------------------------------------------------------ guards
 
-    /** Владелец во время кат-сцены неуязвим; урон Максимального Фиолетового проходит сквозь Бесконечность. */
+    /** Владелец во время кат-сцены неуязвим. */
     @SubscribeEvent(priority = EventPriority.HIGHEST)
     public static void onLivingAttack(LivingAttackEvent event) {
         if (event.getEntity() instanceof ServerPlayer player && CASTS.containsKey(player.getUUID())) {
