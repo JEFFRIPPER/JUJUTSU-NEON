@@ -2021,6 +2021,32 @@ public class JujutsuNeonMod {
         player.getPersistentData().remove("jn_purple_lock_z");
     }
 
+    /**
+     * Игрока поймала территория: всё, что он заряжал или держал, обрывается
+     * (без возврата энергии), полёт и рывок снимаются — висящие падают на пол.
+     */
+    static void interruptForStun(ServerPlayer player) {
+        cancelRedCharge(player, false);
+        cancelHollowPurpleCast(player, false);
+        if (isMaximumBlueActive(player)) beginMaximumBlueFade(player);
+
+        int blueMode = player.getPersistentData().getInt("jn_blue_mode");
+        if (blueMode == BLUE_MODE_BLOCKS) releaseBlueBlocks(player, false);
+        else if (blueMode == BLUE_MODE_ENTITY) releaseBlueEntity(player, false);
+
+        if (player.getPersistentData().getInt("jn_dash_mode") != DASH_NONE) finishDash(player, false);
+        player.getPersistentData().putBoolean("jn_super_speed", false);
+        player.setSprinting(false);
+
+        MaximumPurple.interrupt(player);
+        JujutsuNeonFlightPatch.stopForTechnique(player);
+        if (player.getAbilities().flying && !player.isSpectator()) {
+            player.getAbilities().flying = false;
+            player.onUpdateAbilities();
+        }
+        player.fallDistance = 0.0F;
+    }
+
     private static void freezeHollowPurpleOwner(ServerPlayer player) {
         double x = player.getPersistentData().getDouble("jn_purple_lock_x");
         double y = player.getPersistentData().getDouble("jn_purple_lock_y");
@@ -2520,6 +2546,12 @@ public class JujutsuNeonMod {
         );
 
         Vec3 next = pos.add(velocity);
+
+        // Стена территории непроницаема: Фиолетовый рассеивается о неё.
+        if (DomainExpansion.separated(level, pos, next)) {
+            dissolveHollowPurple(player, level, pos);
+            return;
+        }
 
         runtime = PURPLE_RUNTIMES.get(player.getUUID());
         if (runtime == null) {
@@ -3355,6 +3387,13 @@ public class JujutsuNeonMod {
         );
 
         Vec3 next = pos.add(velocity);
+
+        // Стена территории непроницаема: Красный гаснет о неё, ничего не задев по ту сторону.
+        if (DomainExpansion.separated(level, pos, next)) {
+            spawnStylizedShockwave(level, pos, 1.4, new Vector3f(0.85f, 0.00f, 0.03f));
+            clearRedProjectile(player);
+            return;
+        }
 
         if (mode == RED_MODE_PROJECTILE) {
             BlockHitResult blockHit = level.clip(new ClipContext(
@@ -4764,7 +4803,11 @@ public class JujutsuNeonMod {
                 ServerPlayer player = context.getSender();
                 if (player == null) return;
 
-                if (msg.action == RedControlAction.START && DomainExpansion.blocksActions(player)) return;
+                if (msg.action != RedControlAction.CANCEL && DomainExpansion.blocksActions(player)) {
+                    // Обездвиженный не стреляет: заряд просто гаснет.
+                    if (msg.action == RedControlAction.RELEASE) cancelRedCharge(player, false);
+                    return;
+                }
                 switch (msg.action) {
                     case START -> startRedCharge(player);
                     case RELEASE -> releaseRedCharge(player);
@@ -4790,6 +4833,7 @@ public class JujutsuNeonMod {
             context.enqueueWork(() -> {
                 ServerPlayer player = context.getSender();
                 if (player == null) return;
+                if (msg.action == MaxBlueControlAction.START && DomainExpansion.blocksActions(player)) return;
 
                 switch (msg.action) {
                     case START -> startMaximumBlue(player);

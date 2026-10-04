@@ -31,7 +31,12 @@ import net.minecraft.world.entity.Mob;
 import net.minecraft.world.entity.MoverType;
 import net.minecraft.world.entity.decoration.ArmorStand;
 import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.entity.projectile.AbstractArrow;
 import net.minecraft.world.entity.projectile.Projectile;
+import net.minecraft.world.entity.decoration.HangingEntity;
+import net.minecraft.world.entity.ExperienceOrb;
+import net.minecraft.world.entity.item.ItemEntity;
+import net.minecraft.world.item.BucketItem;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
@@ -45,6 +50,9 @@ import net.minecraft.world.level.material.PushReaction;
 import net.minecraft.world.level.storage.LevelResource;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
+import net.minecraft.world.phys.shapes.CollisionContext;
+import net.minecraft.world.phys.shapes.Shapes;
+import net.minecraft.world.phys.shapes.VoxelShape;
 import net.minecraft.core.BlockPos.MutableBlockPos;
 import net.minecraft.world.level.BlockGetter;
 import net.minecraftforge.api.distmarker.Dist;
@@ -53,12 +61,17 @@ import net.minecraftforge.event.entity.EntityJoinLevelEvent;
 import net.minecraftforge.event.entity.living.LivingAttackEvent;
 import net.minecraftforge.event.entity.living.LivingDeathEvent;
 import net.minecraftforge.event.entity.living.LivingEntityUseItemEvent;
+import net.minecraftforge.event.entity.living.LivingFallEvent;
 import net.minecraftforge.event.entity.player.AttackEntityEvent;
 import net.minecraftforge.event.entity.player.PlayerEvent;
 import net.minecraftforge.event.entity.player.PlayerInteractEvent;
 import net.minecraftforge.event.level.BlockEvent;
 import net.minecraftforge.event.server.ServerStartedEvent;
 import net.minecraftforge.event.server.ServerStoppingEvent;
+import net.minecraftforge.event.server.ServerStoppedEvent;
+import net.minecraftforge.event.level.LevelEvent;
+import net.minecraftforge.event.level.ExplosionEvent;
+import net.minecraftforge.event.entity.living.LivingConversionEvent;
 import net.minecraftforge.eventbus.api.EventPriority;
 import net.minecraftforge.eventbus.api.IEventBus;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
@@ -130,7 +143,8 @@ public final class DomainExpansion {
     private static final long COOLDOWN_TICKS = 2400L;
     private static final long STUN_AFTER_TICKS = 2400L;
     private static final double ENERGY_COST = 100.0;
-    private static final int BLOCK_FLAGS = 2 | 16 | 32;
+    /** 2 — клиентам, 16 — без обновления формы соседей, 32 — без дропа, 64 — без цепных реакций редстоуна. */
+    private static final int BLOCK_FLAGS = 2 | 16 | 32 | 64;
     private static final long BUDGET_REMOVE_NANOS = 26_000_000L;
     private static final long BUDGET_RESTORE_NANOS = 40_000_000L;
 
@@ -165,6 +179,18 @@ public final class DomainExpansion {
         @Override
         public float getShadeBrightness(BlockState state, BlockGetter level, BlockPos pos) {
             return 1.0f;
+        }
+
+        /** Рамки выделения нет: пол невидим и в прицел не попадает. */
+        @Override
+        public VoxelShape getShape(BlockState state, BlockGetter level, BlockPos pos, CollisionContext context) {
+            return Shapes.empty();
+        }
+
+        /** Но стоять на нём можно — столкновение полным блоком. */
+        @Override
+        public VoxelShape getCollisionShape(BlockState state, BlockGetter level, BlockPos pos, CollisionContext context) {
+            return Shapes.block();
         }
     }
 
@@ -328,10 +354,12 @@ public final class DomainExpansion {
 
         /** Колонки (x, z), отсортированные по чанкам. */
         int[] columns;
+        /** Чанки, просканированные при сохранении (только в них потом что-то трогаем). */
+        final LongOpenHashSet scannedChunks = new LongOpenHashSet();
+        int[] restoreOrder;
         int removeIndex;
         boolean removed;
         boolean prepared;
-        boolean snapshotWritten;
 
         final LongArrayList floorPositions = new LongArrayList();
         final LongOpenHashSet floorSet = new LongOpenHashSet();
@@ -379,7 +407,7 @@ public final class DomainExpansion {
     private static final class Stun {
         final UUID entityId;
         final ServerLevel level;
-        final UUID domainOwner;
+        UUID domainOwner;
         long until = Long.MAX_VALUE;
 
         Stun(UUID entityId, ServerLevel level, UUID domainOwner) {
@@ -390,8 +418,13 @@ public final class DomainExpansion {
     }
 
     private static final Map<UUID, Stun> STUNS = new HashMap<>();
+    /** Снимки, которые удалим после ближайшего сохранения мира. */
+    private static final Map<ServerLevel, List<UUID>> PENDING_DELETE = new HashMap<>();
     private static final String TAG_STUN_UNTIL = "jn_dom_stun_until";
     private static final String TAG_PREV_NOAI = "jn_dom_prev_noai";
+    /** Способности владельца до каста — на случай вылета сервера посреди катсцены. */
+    private static final String TAG_OWNER_MAYFLY = "jn_dom_owner_mayfly";
+    private static final String TAG_OWNER_FLYING = "jn_dom_owner_flying";
 
     private DomainExpansion() {
     }
@@ -438,6 +471,25 @@ public final class DomainExpansion {
             if (d.level != level || d.age < T_FORM || d.restored) continue;
             if (d.containsBlock(pos, REMOVE_RADIUS + 1.0)) return true;
             if (source != null && d.contains(source.position(), RADIUS + 0.5)) return true;
+        }
+        return false;
+    }
+
+    /**
+     * Подъём от ног на rise блоков вверх упрётся в стену территории: изнутри — выйдет за неё,
+     * снаружи — зайдёт в неё.
+     */
+    static boolean riseHitsWall(Level level, Vec3 feet, double rise) {
+        for (Domain d : DOMAINS.values()) {
+            if (d.level != level || d.restored) continue;
+            Vec3 low = feet.add(0.0, 1.0, 0.0);
+            Vec3 high = feet.add(0.0, rise, 0.0);
+            if (d.contains(low, RADIUS + 0.5)) {
+                if (!d.contains(high, RADIUS - 1.5)) return true;
+            } else {
+                double y = Mth.clamp(d.center.y, low.y, high.y);
+                if (d.contains(new Vec3(feet.x, y, feet.z), OUTER_RADIUS + 1.5)) return true;
+            }
         }
         return false;
     }
@@ -500,19 +552,21 @@ public final class DomainExpansion {
             return;
         }
 
-        JujutsuNeonFlightPatch.stopForTechnique(player);
+        // Всё, что владелец заряжал или держал, обрывается; полёт и рывок снимаются.
+        JujutsuNeonMod.interruptForStun(player);
         JujutsuNeonMod.setEnergy(player, 0.0);
-        // Пока стоит территория, повторно её не открыть; настоящий откат — от конца.
-        player.getPersistentData().putLong("jn_cd_domain_expansion", now + 1_000_000L);
 
         // Пол — на высоте блока под ногами (в воздухе — прямо под ногами).
-        int floorY = Mth.floor(player.getY() - 1.0E-4) - 1;
+        // Стоя на земле (y = 64.0) — пол на блоке 63, его верх ровно под ногами.
+        int floorY = Mth.floor(player.getY() + 1.0E-3) - 1;
         Domain d = new Domain(player, floorY);
         DOMAINS.put(d.ownerId, d);
 
         // Все живые в радиусе 40 пойманы с момента нажатия; игроки смотрят катсцену вместе с владельцем.
         captureInside(d, true);
 
+        player.getPersistentData().putBoolean(TAG_OWNER_MAYFLY, d.ownerMayfly);
+        player.getPersistentData().putBoolean(TAG_OWNER_FLYING, d.ownerFlying);
         player.getAbilities().mayfly = true;
         player.onUpdateAbilities();
         player.fallDistance = 0.0f;
@@ -562,7 +616,6 @@ public final class DomainExpansion {
         if (d.phase < PHASE_COLLAPSE) {
             if (d.age == T_WALL) prepare(d);
             if (d.prepared && !d.removed) removeStep(d, BUDGET_REMOVE_NANOS);
-            if (d.removed && !d.snapshotWritten) writeSnapshot(d);
             if (d.removed && d.age % 20 == 0) cleanupStep(d);
 
             if (ownerHere) {
@@ -580,7 +633,7 @@ public final class DomainExpansion {
             if (d.phase == PHASE_ACTIVE && d.age >= T_CAST_END + ACTIVE_TICKS) beginCollapse(d);
         }
 
-        if (d.age >= T_WALL && !d.restored) enforceWalls(d);
+        if (d.prepared && !d.restored) enforceWalls(d);
 
         if (d.phase == PHASE_COLLAPSE) {
             if (d.age >= d.collapseAge + T_SHATTER + 2) restoreStep(d, BUDGET_RESTORE_NANOS);
@@ -606,6 +659,8 @@ public final class DomainExpansion {
         owner.getAbilities().mayfly = d.ownerMayfly;
         owner.getAbilities().flying = d.ownerMayfly && d.ownerFlying;
         owner.onUpdateAbilities();
+        owner.getPersistentData().remove(TAG_OWNER_MAYFLY);
+        owner.getPersistentData().remove(TAG_OWNER_FLYING);
         d.ownerAbilitiesRestored = true;
     }
 
@@ -613,6 +668,8 @@ public final class DomainExpansion {
         if (d.phase >= PHASE_COLLAPSE) return;
         d.phase = PHASE_COLLAPSE;
         d.collapseAge = d.age;
+        // То, что попало внутрь за последние тики (например, вылитая лава), — не оставляем в мире.
+        if (d.removed) cleanupStep(d);
         CHANNEL.send(PacketDistributor.DIMENSION.with(() -> d.level.dimension()), new CollapsePacket(d.ownerId));
         ServerPlayer owner = d.level.getServer().getPlayerList().getPlayer(d.ownerId);
         if (owner != null && !d.ownerAbilitiesRestored) restoreOwnerAbilities(d, owner);
@@ -632,13 +689,56 @@ public final class DomainExpansion {
 
         hideEntities(d);
         buildColumns(d);
+        // Сначала сохраняем весь объём целиком, ничего не трогая: что бы ни случилось при удалении
+        // (поршень снесёт основание, редстоун щёлкнет), всё вернётся из этой копии.
+        scanAndSave(d);
+        // Пол и снимок — в одном тике: на диск мир между ними не попадёт, а в снимке будут
+        // и позиции пола (иначе после вылета невидимый пол остался бы в мире).
         placeFloor(d);
+        writeSnapshot(d);
 
         // Кто оказался под полом (в пещере внутри сферы) — на пол.
         for (UUID id : d.captured) liftAboveFloor(d, d.level.getEntity(id));
         ServerPlayer owner = d.level.getServer().getPlayerList().getPlayer(d.ownerId);
         if (owner != null) liftAboveFloor(d, owner);
         d.prepared = true;
+    }
+
+    private static void scanAndSave(Domain d) {
+        MutableBlockPos pos = new MutableBlockPos();
+        LevelChunk chunk = null;
+        int lastCX = Integer.MIN_VALUE, lastCZ = Integer.MIN_VALUE;
+        for (int i = 0; i < d.columns.length / 2; i++) {
+            int x = d.columns[i * 2], z = d.columns[i * 2 + 1];
+            if ((x >> 4) != lastCX || (z >> 4) != lastCZ) {
+                lastCX = x >> 4;
+                lastCZ = z >> 4;
+                chunk = d.level.getChunkSource().getChunkNow(lastCX, lastCZ);
+                if (chunk != null) d.scannedChunks.add(ChunkPosKey(lastCX, lastCZ));
+            }
+            if (chunk == null) continue;
+            int y = columnTop(d, x, z);
+            int bottom = columnBottom(d, x, z);
+            while (y >= bottom) {
+                int si = chunk.getSectionIndex(y);
+                LevelChunkSection section = si >= 0 && si < chunk.getSectionsCount() ? chunk.getSection(si) : null;
+                if (section == null || section.hasOnlyAir()) {
+                    y = ((y >> 4) << 4) - 1;
+                    continue;
+                }
+                pos.set(x, y, z);
+                if (d.containsBlock(pos, REMOVE_RADIUS)) saveBlock(d, pos, chunk.getBlockState(pos));
+                y--;
+            }
+        }
+    }
+
+    private static long ChunkPosKey(int cx, int cz) {
+        return ((long) cx << 32) ^ (cz & 0xFFFFFFFFL);
+    }
+
+    private static boolean scanned(Domain d, int x, int z) {
+        return d.scannedChunks.contains(ChunkPosKey(x >> 4, z >> 4));
     }
 
     private static void liftAboveFloor(Domain d, Entity e) {
@@ -659,7 +759,8 @@ public final class DomainExpansion {
         for (Entity e : list) {
             if (!e.isAlive() || !d.contains(e.position(), REMOVE_RADIUS + 0.5)) continue;
             if (e instanceof LivingEntity && !(e instanceof ArmorStand)) continue;
-            if (e instanceof Projectile) {
+            // Летящие снаряды убираем; лежащие стрелы и трезубцы прячем вместе со всем.
+            if (e instanceof Projectile && !(e instanceof AbstractArrow arrow && arrow.pickup == AbstractArrow.Pickup.ALLOWED)) {
                 e.discard();
                 continue;
             }
@@ -667,6 +768,8 @@ public final class DomainExpansion {
             e.ejectPassengers();
             CompoundTag tag = new CompoundTag();
             if (e.saveAsPassenger(tag)) d.hiddenEntities.add(tag);
+            // Сундук/воронка в вагонетке или лодке: содержимое уже в копии — не вываливаем его.
+            if (e instanceof Clearable c) c.clearContent();
             e.discard();
         }
     }
@@ -713,11 +816,9 @@ public final class DomainExpansion {
         for (int i = 0; i < d.columns.length / 2; i++) {
             int x = d.columns[i * 2], z = d.columns[i * 2 + 1];
             pos.set(x, d.floorY, z);
-            if (!d.containsBlock(pos, REMOVE_RADIUS)) continue;
-            LevelChunk chunk = d.level.getChunkSource().getChunkNow(x >> 4, z >> 4);
-            if (chunk == null) continue;
-            BlockState state = chunk.getBlockState(pos);
-            saveBlock(d, pos, state);
+            if (!d.containsBlock(pos, REMOVE_RADIUS) || !scanned(d, x, z)) continue;
+            BlockState state = d.level.getBlockState(pos);
+            if (state.hasBlockEntity()) Clearable.tryClear(d.level.getBlockEntity(pos));
             d.level.setBlock(pos, floor, BLOCK_FLAGS);
             long key = pos.asLong();
             d.floorPositions.add(key);
@@ -732,49 +833,27 @@ public final class DomainExpansion {
         d.savedState.add(state);
         if (state.hasBlockEntity()) {
             BlockEntity be = d.level.getBlockEntity(pos);
-            if (be != null) {
-                d.savedBlockEntities.put(key, be.saveWithFullMetadata());
-                Clearable.tryClear(be);
-            }
+            if (be != null) d.savedBlockEntities.put(key, be.saveWithFullMetadata());
         }
     }
 
     private static void removeStep(Domain d, long budget) {
         long deadline = System.nanoTime() + budget;
-        int total = d.columns.length / 2;
         BlockState air = Blocks.AIR.defaultBlockState();
         Block floorBlock = FLOOR.get();
         MutableBlockPos pos = new MutableBlockPos();
-        LevelChunk chunk = null;
-        int lastCX = Integer.MIN_VALUE, lastCZ = Integer.MIN_VALUE;
+        int total = d.savedPos.size();
+        // Порядок сохранения — колонками сверху вниз.
         while (d.removeIndex < total) {
-            int x = d.columns[d.removeIndex * 2], z = d.columns[d.removeIndex * 2 + 1];
-            if ((x >> 4) != lastCX || (z >> 4) != lastCZ) {
-                lastCX = x >> 4;
-                lastCZ = z >> 4;
-                chunk = d.level.getChunkSource().getChunkNow(lastCX, lastCZ);
+            long key = d.savedPos.getLong(d.removeIndex++);
+            if (d.floorSet.contains(key)) continue;
+            pos.set(key);
+            BlockState state = d.level.getBlockState(pos);
+            if (!state.isAir() && !state.is(floorBlock)) {
+                if (state.hasBlockEntity()) Clearable.tryClear(d.level.getBlockEntity(pos));
+                d.level.setBlock(pos, air, BLOCK_FLAGS);
             }
-            if (chunk != null) {
-                int y = columnTop(d, x, z);
-                int bottom = columnBottom(d, x, z);
-                while (y >= bottom) {
-                    int si = chunk.getSectionIndex(y);
-                    LevelChunkSection section = si >= 0 && si < chunk.getSectionsCount() ? chunk.getSection(si) : null;
-                    if (section == null || section.hasOnlyAir()) {
-                        y = ((y >> 4) << 4) - 1;
-                        continue;
-                    }
-                    pos.set(x, y, z);
-                    BlockState state = chunk.getBlockState(pos);
-                    if (!state.isAir() && !state.is(floorBlock) && d.containsBlock(pos, REMOVE_RADIUS)) {
-                        saveBlock(d, pos, state);
-                        d.level.setBlock(pos, air, BLOCK_FLAGS);
-                    }
-                    y--;
-                }
-            }
-            d.removeIndex++;
-            if ((d.removeIndex & 3) == 0 && System.nanoTime() > deadline) return;
+            if ((d.removeIndex & 7) == 0 && System.nanoTime() > deadline) return;
         }
         d.removed = true;
     }
@@ -786,6 +865,8 @@ public final class DomainExpansion {
         MutableBlockPos pos = new MutableBlockPos();
         for (int i = 0; i < d.columns.length / 2; i++) {
             int x = d.columns[i * 2], z = d.columns[i * 2 + 1];
+            // Только там, где всё сохранено: иначе удалили бы блоки, которых нет в копии.
+            if (!scanned(d, x, z)) continue;
             LevelChunk chunk = d.level.getChunkSource().getChunkNow(x >> 4, z >> 4);
             if (chunk == null) continue;
             int y = columnTop(d, x, z);
@@ -822,26 +903,40 @@ public final class DomainExpansion {
             d.floorCleared = true;
         }
         int total = d.savedPos.size();
+        if (d.restoreOrder == null) {
+            // Строго снизу вверх: песок и гравий ложатся на уже вернувшуюся опору, вода не уходит вниз.
+            Integer[] order = new Integer[total];
+            for (int i = 0; i < total; i++) order[i] = i;
+            java.util.Arrays.sort(order, (a, b) -> Integer.compare(BlockPos.getY(d.savedPos.getLong(a)), BlockPos.getY(d.savedPos.getLong(b))));
+            d.restoreOrder = new int[total];
+            for (int i = 0; i < total; i++) d.restoreOrder[i] = order[i];
+        }
         while (d.restoreIndex < total) {
-            int i = d.restoreIndex;
+            int i = d.restoreOrder[d.restoreIndex];
             long key = d.savedPos.getLong(i);
             pos.set(key);
             BlockState state = d.savedState.get(i);
             d.level.setBlock(pos, state, BLOCK_FLAGS);
             CompoundTag tag = d.savedBlockEntities.get(key);
-            if (tag != null) {
-                BlockEntity be = d.level.getBlockEntity(pos);
-                if (be != null) {
-                    be.load(tag);
-                    be.setChanged();
-                    d.level.sendBlockUpdated(pos, state, state, 3);
-                }
-            }
+            if (tag != null) restoreBlockEntity(d.level, pos.immutable(), state, tag);
             d.restoreIndex++;
-            if ((d.restoreIndex & 15) == 0 && System.nanoTime() > deadline && budget > 0) return;
+            if ((d.restoreIndex & 15) == 0 && budget > 0 && System.nanoTime() > deadline) return;
         }
         restoreHiddenEntities(d);
         d.restored = true;
+    }
+
+    private static void restoreBlockEntity(ServerLevel level, BlockPos pos, BlockState state, CompoundTag tag) {
+        BlockEntity be = level.getBlockEntity(pos);
+        if (be != null) {
+            be.load(tag);
+            be.setChanged();
+        } else {
+            // Например, блок в движении у поршня — блок-сущность создаём сами.
+            BlockEntity created = BlockEntity.loadStatic(pos, state, tag);
+            if (created != null) level.setBlockEntity(created);
+        }
+        level.sendBlockUpdated(pos, state, state, 3);
     }
 
     private static void restoreHiddenEntities(Domain d) {
@@ -855,13 +950,7 @@ public final class DomainExpansion {
     private static void finish(Domain d, ServerPlayer owner) {
         long now = d.level.getGameTime();
 
-        // Кого после возвращения блоков зажало — поднимаем на ближайшее свободное место сверху.
-        AABB box = new AABB(d.center, d.center).inflate(REMOVE_RADIUS + 2.0);
-        for (LivingEntity e : d.level.getEntitiesOfClass(LivingEntity.class, box, LivingEntity::isAlive)) {
-            if (!d.contains(e.position(), REMOVE_RADIUS + 2.0)) continue;
-            unstick(e);
-            e.fallDistance = 0.0f;
-        }
+        unstickAll(d);
 
         // Обездвиживание продолжается ещё 2 минуты после разрушения.
         for (Stun s : STUNS.values()) {
@@ -881,10 +970,21 @@ public final class DomainExpansion {
             owner.fallDistance = 0.0f;
         }
 
-        deleteSnapshot(d.level.getServer(), d.ownerId);
+        // Снимок удаляем только после того, как восстановленный мир сохранится на диск.
+        PENDING_DELETE.computeIfAbsent(d.level, k -> new ArrayList<>()).add(d.ownerId);
         CHANNEL.send(PacketDistributor.DIMENSION.with(() -> d.level.dimension()), new EndPacket(d.ownerId));
         if (owner != null && owner.level() != d.level) {
             CHANNEL.send(PacketDistributor.PLAYER.with(() -> owner), new EndPacket(d.ownerId));
+        }
+    }
+
+    /** Кого после возвращения блоков зажало — поднимаем на ближайшее свободное место сверху. */
+    private static void unstickAll(Domain d) {
+        AABB box = new AABB(d.center, d.center).inflate(REMOVE_RADIUS + 2.0);
+        for (LivingEntity e : d.level.getEntitiesOfClass(LivingEntity.class, box, LivingEntity::isAlive)) {
+            if (!d.contains(e.position(), REMOVE_RADIUS + 2.0)) continue;
+            unstick(e);
+            e.fallDistance = 0.0f;
         }
     }
 
@@ -896,7 +996,13 @@ public final class DomainExpansion {
             AABB moved = box.move(0.0, up, 0.0);
             if (level.noCollision(e, moved)) {
                 if (up == 0) return;
-                double y = Mth.floor(e.getY()) + up;
+                double y = e.getY() + up;
+                // Встаём ровно на верх блока под ногами, а не висим над ним.
+                for (int k = 0; k < 8; k++) {
+                    AABB lower = box.move(0.0, y - e.getY() - 0.125, 0.0);
+                    if (!level.noCollision(e, lower)) break;
+                    y -= 0.125;
+                }
                 if (e instanceof ServerPlayer sp) sp.connection.teleport(e.getX(), y, e.getZ(), sp.getYRot(), sp.getXRot());
                 else e.setPos(e.getX(), y, e.getZ());
                 e.setDeltaMovement(Vec3.ZERO);
@@ -910,25 +1016,30 @@ public final class DomainExpansion {
     private static void enforceWalls(Domain d) {
         AABB box = new AABB(d.center, d.center).inflate(OUTER_RADIUS + 6.0);
         for (Entity e : d.level.getEntities((Entity) null, box, e -> e.isAlive() && !e.isSpectator())) {
+            // Картины и рамки не двигаются — их не трогаем.
+            if (e instanceof HangingEntity) continue;
             Vec3 c = e.position().add(0.0, e.getBbHeight() * 0.5, 0.0);
+            Vec3 old = new Vec3(e.xo, e.yo + e.getBbHeight() * 0.5, e.zo);
             if (e instanceof Projectile) {
-                Vec3 old = new Vec3(e.xo, e.yo + e.getBbHeight() * 0.5, e.zo);
-                if (d.contains(old, RADIUS + 0.5) != d.contains(c, RADIUS + 0.5)
-                        || (c.distanceTo(d.center) > RADIUS - 0.5 && c.distanceTo(d.center) < OUTER_RADIUS + 0.5)) {
-                    e.discard();
+                if (d.contains(old, RADIUS + 0.5) != d.contains(c, RADIUS + 0.5)) {
+                    if (e instanceof AbstractArrow) {
+                        // Стрелы и трезубцы отскакивают от стены и падают на своей стороне.
+                        e.setPos(old.x, old.y - e.getBbHeight() * 0.5, old.z);
+                        e.setDeltaMovement(Vec3.ZERO);
+                    } else {
+                        e.discard();
+                    }
                 }
                 continue;
             }
             boolean insider;
             if (e instanceof LivingEntity && !(e instanceof ArmorStand)) {
                 insider = e.getUUID().equals(d.ownerId) || d.captured.contains(e.getUUID());
-                if (!insider && d.phase < PHASE_COLLAPSE && d.contains(c, RADIUS - 1.0)) {
-                    // Появился внутри (призвали, заспавнили) — он тоже в территории.
+                // Появился внутри (призвали, заспавнили) — он тоже в территории. Быстро влетевших
+                // снаружи не ловим: они были снаружи ещё тик назад.
+                if (!insider && d.phase < PHASE_COLLAPSE && d.contains(c, RADIUS - 1.0) && d.contains(old, RADIUS - 1.0)) {
                     d.captured.add(e.getUUID());
                     freeze(d, (LivingEntity) e);
-                    if (e instanceof ServerPlayer sp) {
-                        CHANNEL.send(PacketDistributor.PLAYER.with(() -> sp), new StunPacket(d.ownerId, -1, d.remainingEstimate()));
-                    }
                     insider = true;
                 }
             } else {
@@ -937,13 +1048,36 @@ public final class DomainExpansion {
             Vec3 off = c.subtract(d.center);
             double dist = off.length();
             double extent = Math.max(e.getBbWidth(), e.getBbHeight()) * 0.5;
-            Vec3 n = dist < 1.0E-4 ? new Vec3(0.0, 1.0, 0.0) : off.scale(1.0 / dist);
             if (insider) {
                 double limit = RADIUS - extent - 0.05;
-                if (dist > limit) pushTo(e, d.center.add(n.scale(limit)), n, true, dist - limit);
+                if (dist > limit) {
+                    Vec3 n = dist < 1.0E-4 ? new Vec3(0.0, 1.0, 0.0) : off.scale(1.0 / dist);
+                    pushTo(e, d.center.add(n.scale(limit)), n, true, dist - limit);
+                }
             } else {
                 double limit = OUTER_RADIUS + extent + 0.05;
-                if (dist < limit) pushTo(e, d.center.add(n.scale(limit)), n, false, limit - dist);
+                if (dist < limit) {
+                    // Снаружи выталкиваем по горизонтали (а не в землю под сферой).
+                    double dy = off.y;
+                    Vec3 target;
+                    Vec3 n;
+                    if (Math.abs(dy) < limit - 0.01) {
+                        double hx = off.x, hz = off.z;
+                        double hl = Math.sqrt(hx * hx + hz * hz);
+                        if (hl < 1.0E-4) {
+                            hx = 1.0;
+                            hz = 0.0;
+                            hl = 1.0;
+                        }
+                        double need = Math.sqrt(limit * limit - dy * dy);
+                        n = new Vec3(hx / hl, 0.0, hz / hl);
+                        target = new Vec3(d.center.x + n.x * need, c.y, d.center.z + n.z * need);
+                    } else {
+                        n = new Vec3(0.0, Math.signum(dy), 0.0);
+                        target = d.center.add(0.0, Math.signum(dy) * limit, 0.0);
+                    }
+                    pushTo(e, target, n, false, target.distanceTo(c));
+                }
             }
         }
     }
@@ -969,6 +1103,7 @@ public final class DomainExpansion {
             s = new Stun(e.getUUID(), d.level, d.ownerId);
             STUNS.put(e.getUUID(), s);
         }
+        s.domainOwner = d.ownerId;
         s.until = Long.MAX_VALUE;
         if (e instanceof Mob mob) {
             if (!mob.getPersistentData().contains(TAG_PREV_NOAI)) {
@@ -981,6 +1116,7 @@ public final class DomainExpansion {
         }
         if (e instanceof ServerPlayer sp) {
             sp.stopUsingItem();
+            JujutsuNeonMod.interruptForStun(sp);
             CHANNEL.send(PacketDistributor.PLAYER.with(() -> sp), new StunPacket(d.ownerId, -1, d.remainingEstimate()));
         }
     }
@@ -1013,6 +1149,8 @@ public final class DomainExpansion {
                 it.remove();
                 continue;
             }
+            // Падение на пол внутри территории — без урона.
+            e.fallDistance = 0.0f;
             if (e instanceof Mob mob) mobPhysics(mob);
         }
     }
@@ -1045,6 +1183,14 @@ public final class DomainExpansion {
         Vec3 from = source.getSourcePosition();
         if (from == null && source.getEntity() != null) from = source.getEntity().position();
         if (from != null && separated(target.level(), from, target.position().add(0.0, target.getBbHeight() * 0.5, 0.0))) {
+            event.setCanceled(true);
+        }
+    }
+
+    /** Обездвиженные падают на пол без урона. */
+    @SubscribeEvent(priority = EventPriority.HIGHEST)
+    public static void onFall(LivingFallEvent event) {
+        if (!event.getEntity().level().isClientSide && STUNS.containsKey(event.getEntity().getUUID())) {
             event.setCanceled(true);
         }
     }
@@ -1102,9 +1248,12 @@ public final class DomainExpansion {
 
     @SubscribeEvent
     public static void onDeath(LivingDeathEvent event) {
-        if (event.getEntity() instanceof ServerPlayer p) {
-            Domain d = DOMAINS.get(p.getUUID());
-            if (d != null) beginCollapse(d);
+        if (!(event.getEntity() instanceof ServerPlayer p)) return;
+        Domain d = DOMAINS.get(p.getUUID());
+        if (d != null) beginCollapse(d);
+        for (Domain o : DOMAINS.values()) {
+            o.captured.remove(p.getUUID());
+            o.watchers.remove(p.getUUID());
         }
     }
 
@@ -1114,6 +1263,8 @@ public final class DomainExpansion {
         Domain d = DOMAINS.get(p.getUUID());
         if (d != null) {
             if (!d.ownerAbilitiesRestored) restoreOwnerAbilities(d, p);
+            JujutsuNeonMod.setEnergy(p, 0.0);
+            p.getPersistentData().putLong("jn_cd_domain_expansion", d.level.getGameTime() + COOLDOWN_TICKS);
             beginCollapse(d);
         }
     }
@@ -1121,6 +1272,18 @@ public final class DomainExpansion {
     @SubscribeEvent
     public static void onLoggedIn(PlayerEvent.PlayerLoggedInEvent event) {
         if (!(event.getEntity() instanceof ServerPlayer p)) return;
+        // Сервер вылетел посреди катсцены каста — возвращаем способности, как были до неё.
+        if (p.getPersistentData().contains(TAG_OWNER_MAYFLY) && !DOMAINS.containsKey(p.getUUID())) {
+            boolean mayfly = p.getPersistentData().getBoolean(TAG_OWNER_MAYFLY);
+            boolean flying = p.getPersistentData().getBoolean(TAG_OWNER_FLYING);
+            p.getPersistentData().remove(TAG_OWNER_MAYFLY);
+            p.getPersistentData().remove(TAG_OWNER_FLYING);
+            if (!p.isCreative() && !p.isSpectator()) {
+                p.getAbilities().mayfly = mayfly;
+                p.getAbilities().flying = mayfly && flying;
+                p.onUpdateAbilities();
+            }
+        }
         for (Domain d : DOMAINS.values()) {
             if (d.level == p.level()) sendStart(d, PacketDistributor.PLAYER.with(() -> p));
         }
@@ -1169,7 +1332,8 @@ public final class DomainExpansion {
     public static void onServerStopping(ServerStoppingEvent event) {
         for (Domain d : DOMAINS.values()) {
             restoreStep(d, 0L);
-            deleteSnapshot(event.getServer(), d.ownerId);
+            unstickAll(d);
+            PENDING_DELETE.computeIfAbsent(d.level, k -> new ArrayList<>()).add(d.ownerId);
             ServerPlayer owner = event.getServer().getPlayerList().getPlayer(d.ownerId);
             if (owner != null) {
                 if (!d.ownerAbilitiesRestored) restoreOwnerAbilities(d, owner);
@@ -1185,6 +1349,72 @@ public final class DomainExpansion {
         STUNS.clear();
     }
 
+    /** Мир сохранён после остановки — снимки больше не нужны. */
+    @SubscribeEvent
+    public static void onServerStopped(ServerStoppedEvent event) {
+        for (Map.Entry<ServerLevel, List<UUID>> e : PENDING_DELETE.entrySet()) {
+            for (UUID id : e.getValue()) deleteSnapshot(event.getServer(), id);
+        }
+        PENDING_DELETE.clear();
+    }
+
+    /** Восстановленный мир сохранился — снимок можно удалить. */
+    @SubscribeEvent
+    public static void onLevelSave(LevelEvent.Save event) {
+        if (!(event.getLevel() instanceof ServerLevel level)) return;
+        List<UUID> ids = PENDING_DELETE.remove(level);
+        if (ids == null) return;
+        for (UUID id : ids) deleteSnapshot(level.getServer(), id);
+    }
+
+    /** Пока блоки убираются и возвращаются, ничего не выпадает (печи, поршни, модовые сундуки). */
+    @SubscribeEvent(priority = EventPriority.HIGHEST)
+    public static void onDropJoin(EntityJoinLevelEvent event) {
+        if (DOMAINS.isEmpty() || event.getLevel().isClientSide()) return;
+        if (!(event.getEntity() instanceof ItemEntity) && !(event.getEntity() instanceof ExperienceOrb)) return;
+        for (Domain d : DOMAINS.values()) {
+            if (d.level != event.getLevel() || !d.prepared || d.restored) continue;
+            boolean busy = !d.removed || d.phase == PHASE_COLLAPSE;
+            if (busy && d.contains(event.getEntity().position(), REMOVE_RADIUS + 1.5)) {
+                event.setCanceled(true);
+                return;
+            }
+        }
+    }
+
+    /** Взрыв не выходит за стену и не трогает территорию. */
+    @SubscribeEvent
+    public static void onDetonate(ExplosionEvent.Detonate event) {
+        if (DOMAINS.isEmpty()) return;
+        Level level = event.getLevel();
+        Vec3 c = event.getExplosion().getPosition();
+        event.getAffectedBlocks().removeIf(pos -> insideRegion(level, pos) || separated(level, c, Vec3.atCenterOf(pos)));
+        event.getAffectedEntities().removeIf(e -> separated(level, c, e.position().add(0.0, e.getBbHeight() * 0.5, 0.0)));
+    }
+
+    /** Ведро внутри территории не выльешь: внутри нет блоков. */
+    @SubscribeEvent(priority = EventPriority.HIGH)
+    public static void onBucket(PlayerInteractEvent.RightClickItem event) {
+        if (event.getLevel().isClientSide() || !(event.getItemStack().getItem() instanceof BucketItem)) return;
+        if (isInsideAny(event.getLevel(), event.getEntity().position())) event.setCanceled(true);
+    }
+
+    /** Головастик стал лягушкой и т.п. — обездвиживание переходит к новому мобу. */
+    @SubscribeEvent
+    public static void onConversion(LivingConversionEvent.Post event) {
+        if (!(event.getEntity() instanceof Mob from) || !(event.getOutcome() instanceof Mob to)) return;
+        if (!from.getPersistentData().contains(TAG_STUN_UNTIL)) return;
+        to.getPersistentData().putLong(TAG_STUN_UNTIL, from.getPersistentData().getLong(TAG_STUN_UNTIL));
+        to.getPersistentData().putBoolean(TAG_PREV_NOAI, from.getPersistentData().getBoolean(TAG_PREV_NOAI));
+        Stun old = STUNS.remove(from.getUUID());
+        if (old != null && to.level() instanceof ServerLevel sl) {
+            Stun s = new Stun(to.getUUID(), sl, old.domainOwner);
+            s.until = old.until;
+            STUNS.put(to.getUUID(), s);
+            to.setNoAi(true);
+        }
+    }
+
     @SubscribeEvent
     public static void onServerStarted(ServerStartedEvent event) {
         MinecraftServer server = event.getServer();
@@ -1195,11 +1425,13 @@ public final class DomainExpansion {
         for (File f : files) {
             try {
                 CompoundTag root = NbtIo.readCompressed(f);
-                recoverSnapshot(server, root);
+                ServerLevel level = recoverSnapshot(server, root);
+                if (level != null) level.save(null, true, false);
+                if (!f.delete()) f.deleteOnExit();
             } catch (Exception ex) {
                 LOGGER.error("Jujutsu Neon: не удалось восстановить территорию из {}", f, ex);
+                if (!f.renameTo(new File(f.getPath() + ".failed"))) f.deleteOnExit();
             }
-            if (!f.delete()) f.deleteOnExit();
         }
     }
 
@@ -1216,7 +1448,6 @@ public final class DomainExpansion {
 
     /** Снимок убранных блоков на диск — если сервер вылетит, мир восстановится при следующем запуске. */
     private static void writeSnapshot(Domain d) {
-        d.snapshotWritten = true;
         CompoundTag root = new CompoundTag();
         root.putString("dim", d.level.dimension().location().toString());
         LongArrayList floor = d.floorPositions;
@@ -1261,10 +1492,10 @@ public final class DomainExpansion {
         }
     }
 
-    private static void recoverSnapshot(MinecraftServer server, CompoundTag root) {
+    private static ServerLevel recoverSnapshot(MinecraftServer server, CompoundTag root) {
         ResourceKey<Level> key = ResourceKey.create(Registries.DIMENSION, new ResourceLocation(root.getString("dim")));
         ServerLevel level = server.getLevel(key);
-        if (level == null) return;
+        if (level == null) return null;
         BlockState air = Blocks.AIR.defaultBlockState();
         MutableBlockPos pos = new MutableBlockPos();
         for (long p : root.getLongArray("floor")) {
@@ -1278,19 +1509,20 @@ public final class DomainExpansion {
         }
         long[] positions = root.getLongArray("pos");
         int[] idx = root.getIntArray("idx");
-        for (int i = 0; i < positions.length && i < idx.length; i++) {
+        int n = Math.min(positions.length, idx.length);
+        Integer[] order = new Integer[n];
+        for (int i = 0; i < n; i++) order[i] = i;
+        java.util.Arrays.sort(order, (a, b) -> Integer.compare(BlockPos.getY(positions[a]), BlockPos.getY(positions[b])));
+        for (int k = 0; k < n; k++) {
+            int i = order[k];
             pos.set(positions[i]);
             level.setBlock(pos, states.get(idx[i]), BLOCK_FLAGS);
         }
         ListTag bes = root.getList("be", Tag.TAG_COMPOUND);
         for (int i = 0; i < bes.size(); i++) {
             CompoundTag t = bes.getCompound(i);
-            pos.set(t.getLong("p"));
-            BlockEntity be = level.getBlockEntity(pos);
-            if (be != null) {
-                be.load(t.getCompound("t"));
-                be.setChanged();
-            }
+            BlockPos bp = BlockPos.of(t.getLong("p"));
+            restoreBlockEntity(level, bp, level.getBlockState(bp), t.getCompound("t"));
         }
         ListTag ents = root.getList("ents", Tag.TAG_COMPOUND);
         for (int i = 0; i < ents.size(); i++) {
@@ -1298,5 +1530,6 @@ public final class DomainExpansion {
             if (e != null) level.addFreshEntity(e);
         }
         LOGGER.info("Jujutsu Neon: мир внутри прерванной территории восстановлен ({} блоков)", positions.length);
+        return level;
     }
 }

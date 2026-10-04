@@ -23,6 +23,7 @@ import net.minecraft.client.renderer.MultiBufferSource;
 import net.minecraft.client.renderer.entity.EntityRenderDispatcher;
 import net.minecraft.client.resources.sounds.SimpleSoundInstance;
 import net.minecraft.client.resources.sounds.SoundInstance;
+import net.minecraft.network.protocol.game.ServerboundMovePlayerPacket;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.sounds.SoundSource;
 import net.minecraft.util.Mth;
@@ -48,6 +49,7 @@ import net.minecraftforge.event.TickEvent;
 import net.minecraftforge.eventbus.api.Event;
 import net.minecraftforge.eventbus.api.EventPriority;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
+import net.minecraftforge.fml.LogicalSide;
 import net.minecraftforge.fml.common.Mod;
 import org.joml.Matrix4f;
 import org.joml.Quaternionf;
@@ -230,7 +232,9 @@ public final class DomainExpansionClient {
             if (mc.level.getPlayerByUUID(ownerId) instanceof AbstractClientPlayer p) {
                 MaximumPurpleAnimation.play(p, "domain_cast");
             }
-            if (watcher) startCutscene(mc, s, owner);
+            // Свою кат-сцену Максимального Фиолетового сервер к этому моменту уже оборвал;
+            // если сигнал ещё не дошёл — камеру не перехватываем.
+            if (watcher && !MaximumPurpleClient.isLocalActive()) startCutscene(mc, s, owner);
             if (age < 8) playVoice(mc, s, watcher);
         }
     }
@@ -415,7 +419,9 @@ public final class DomainExpansionClient {
             // Сервер пропал без сигнала — не держим вечно.
             if (!s.ended && s.clock > T_CAST_END + ACTIVE_TICKS + 1200) {
                 if (s == cutscene) stopCutscene(mc);
+                stopOwnerAnimation(s);
                 it.remove();
+                if (!whiteHold()) restoreHideGui(mc);
             }
         }
 
@@ -431,6 +437,7 @@ public final class DomainExpansionClient {
                 if (mc.options.hideGui) mc.options.hideGui = false;
                 mc.getToasts().clear();
                 if (cutsceneOwner) holdOwner(mc.player, cs);
+                syncPosition(mc);
             }
         }
 
@@ -443,8 +450,30 @@ public final class DomainExpansionClient {
         }
         if (endFade > 0) endFade--;
 
-        clampLocal(mc);
         updateWeather(mc);
+    }
+
+    /**
+     * Стена — сразу после движения игрока и до отправки позиции серверу: сервер видит игрока
+     * уже внутри (или снаружи), без рывков назад.
+     */
+    @SubscribeEvent
+    public static void onPlayerTick(TickEvent.PlayerTickEvent event) {
+        if (event.phase != TickEvent.Phase.END || event.side != LogicalSide.CLIENT || SCENES.isEmpty()) return;
+        Minecraft mc = Minecraft.getInstance();
+        if (event.player != mc.player) return;
+        clampLocal(mc);
+    }
+
+    /**
+     * Пока камера не у игрока, клиент сам не шлёт серверу позицию — шлём её сами,
+     * иначе сервер кикнет «за полёт» и после кат-сцены дёрнет игрока назад.
+     */
+    static void syncPosition(Minecraft mc) {
+        LocalPlayer p = mc.player;
+        if (p == null || p.isPassenger() || mc.getConnection() == null) return;
+        mc.getConnection().send(new ServerboundMovePlayerPacket.PosRot(p.getX(), p.getY(), p.getZ(),
+                p.getYRot(), p.getXRot(), p.onGround()));
     }
 
     private static void holdOwner(LocalPlayer player, Scene s) {
@@ -1179,6 +1208,9 @@ public final class DomainExpansionClient {
     public static void onRenderGui(RenderGuiEvent.Post event) {
         Minecraft mc = Minecraft.getInstance();
         if (mc.player == null) return;
+        boolean collapse = false;
+        for (Scene s : SCENES.values()) collapse |= s.collapsing && !s.ended;
+        if (cutscene == null && !collapse && endFade <= 0 && stunOwner == null) return;
         GuiGraphics g = event.getGuiGraphics();
         int w = event.getWindow().getGuiScaledWidth();
         int h = event.getWindow().getGuiScaledHeight();
@@ -1197,6 +1229,9 @@ public final class DomainExpansionClient {
                     float zoom = 1.0f + 0.04f * (float) (k / T_SHATTER);
                     int dw = (int) (w * zoom), dh = (int) (h * zoom);
                     RenderSystem.setShaderColor(1f, 1f, 1f, 1f);
+                    // fill() выключает смешивание — трещинам нужна прозрачность.
+                    RenderSystem.enableBlend();
+                    RenderSystem.defaultBlendFunc();
                     g.blit(TEX_CRACKS, (w - dw) / 2, (h - dh) / 2, dw, dh, 0f, 0f, 1920, 1080, 1920, 1080);
                     fill(g, w, h, (float) (0.25 * k / T_SHATTER), 0xFFFFFF);
                 } else {
@@ -1251,6 +1286,9 @@ public final class DomainExpansionClient {
         // 6,2–6,5 с: белый экран, проступают фиолетовые кляксы
         if (t >= 123 && t < 131) {
             fill(g, w, h, 1f, 0xFFFFFF);
+            // fill() выключает смешивание — кляксам нужны мягкие края и проявление.
+            RenderSystem.enableBlend();
+            RenderSystem.defaultBlendFunc();
             double k = win(t, 124, 131);
             Random rnd = new Random(s.seed + 5L);
             for (int i = 0; i < 7; i++) {

@@ -249,6 +249,12 @@ public final class MaximumPurple {
         return CASTS.containsKey(player.getUUID());
     }
 
+    /** Игрока поймала территория — техника обрывается без взрыва, способности возвращаются. */
+    static void interrupt(ServerPlayer player) {
+        Cast cast = CASTS.remove(player.getUUID());
+        if (cast != null) finish(cast, player, false);
+    }
+
     // ------------------------------------------------------------------ start
 
     private static void tryStart(ServerPlayer player) {
@@ -260,6 +266,12 @@ public final class MaximumPurple {
             return;
         }
         if (DomainExpansion.blocksActions(player)) return;
+        // Внутри территории подъём на 24 блока не должен упираться в её стену.
+        if (DomainExpansion.riseHitsWall(player.level(), player.position(), RISE_HEIGHT + 2.0)) {
+            player.displayClientMessage(Component.literal("Здесь не подняться: мешает стена территории")
+                    .withStyle(ChatFormatting.GRAY), true);
+            return;
+        }
         if (JujutsuNeonMod.isHollowPurpleCasting(player) || JujutsuNeonMod.isMaximumBlueActive(player)) {
             player.displayClientMessage(Component.literal("Другая техника ещё активна").withStyle(ChatFormatting.GRAY), true);
             return;

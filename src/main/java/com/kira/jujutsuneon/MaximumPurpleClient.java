@@ -678,6 +678,9 @@ public final class MaximumPurpleClient {
                 Vec3 target = scene.feet.add(0.0, heightAt(scene.clock), 0.0);
                 mc.player.setPos(target.x, target.y, target.z);
                 mc.player.setDeltaMovement(Vec3.ZERO);
+                // Камера не у игрока — сам клиент позицию не шлёт; без этого на сервере
+                // после кат-сцены «moved too quickly» и рывок вниз.
+                if (cameraEntity != null) DomainExpansionClient.syncPosition(mc);
 
                 if (scene.clock > LOCAL_TIMEOUT_TICKS) onEnd(scene.ownerId, false);
             }

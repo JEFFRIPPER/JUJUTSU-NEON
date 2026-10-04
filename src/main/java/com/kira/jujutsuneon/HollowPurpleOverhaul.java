@@ -366,6 +366,7 @@ public final class HollowPurpleOverhaul {
                     if (blockState.isAir() && blockState.getFluidState().isEmpty()) continue;
                     if (isProtectedTechnicalBlock(blockState)) continue;
                     if (isOwnerSafeCell(owner, level, pos)) continue;
+                    if (DomainExpansion.denyTechniqueEdit(level, pos, owner)) continue;
 
                     Vec3 center = Vec3.atCenterOf(pos);
                     double t = Mth.clamp(
