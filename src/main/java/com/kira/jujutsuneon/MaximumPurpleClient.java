@@ -296,10 +296,15 @@ public final class MaximumPurpleClient {
         return s.at(1.0, 0.0, JUMP_HEIGHT + ORB_LIFT);
     }
 
-    private static Vec3 spiral(Scene s, double t, double start, double e, double amp) {
-        double ang = (t - start) * 0.85;
-        double a = amp * (1.0 - e);
-        return s.right.scale(Math.cos(ang) * a).add(s.forward.scale(Math.sin(ang) * a * 0.6));
+    /**
+     * Спираль вокруг вертикальной оси полёта: полный круг (не сплюснутый), радиус
+     * плавно сходится к нулю у точки зависания, вращение замедляется и останавливается.
+     */
+    private static Vec3 spiral(Scene s, double t, double start, double duration, double turns, double radius0) {
+        double p = Mth.clamp((t - start) / duration, 0.0, 1.0);
+        double r = radius0 * Math.pow(1.0 - p, 1.3);
+        double ang = turns * Math.PI * 2.0 * (1.0 - (1.0 - p) * (1.0 - p));
+        return s.right.scale(Math.cos(ang) * r).add(s.forward.scale(Math.sin(ang) * r));
     }
 
     /** Точки пути (тик, f, r, u относительно игрока); между ними — плавная интерполяция. */
@@ -343,7 +348,8 @@ public final class MaximumPurpleClient {
         if (t < T_BLUE_THROW) return handPath(s, BLUE_HAND, t);
         if (t < T_BLUE_HOVER) {
             double e = easeOut((t - T_BLUE_THROW) / (double) (T_BLUE_HOVER - T_BLUE_THROW));
-            return handStart(s, BLUE_HAND).lerp(hover, e).add(spiral(s, t, T_BLUE_THROW, e, 1.2));
+            return handStart(s, BLUE_HAND).lerp(hover, e)
+                    .add(spiral(s, t, T_BLUE_THROW, T_BLUE_HOVER - T_BLUE_THROW, 2.5, 1.5));
         }
         return hover.lerp(mergePoint(s), mergeT(t));
     }
@@ -364,7 +370,8 @@ public final class MaximumPurpleClient {
         if (t < T_RED_THROW) return handPath(s, RED_HAND, t);
         if (t < T_RED_HOVER) {
             double e = easeOut((t - T_RED_THROW) / (double) (T_RED_HOVER - T_RED_THROW));
-            return handStart(s, RED_HAND).lerp(hover, e).add(spiral(s, t, T_RED_THROW, e, 0.7));
+            return handStart(s, RED_HAND).lerp(hover, e)
+                    .add(spiral(s, t, T_RED_THROW, T_RED_HOVER - T_RED_THROW, 2.0, 1.0));
         }
         return hover.lerp(mergePoint(s), mergeT(t));
     }
@@ -493,12 +500,12 @@ public final class MaximumPurpleClient {
             ck(0, P, -3.4, -1.0, 2.0, TGT_PLAYER, 1.5, 0.2, 1.3, 70f, 0f, true),
             ck(6, P, -2.2, -1.1, 1.75, TGT_PLAYER, 0.5, 0.3, 1.25, 64f, 0f, false),
             ck(11, P, -1.5, -0.9, 1.55, TGT_PLAYER, 0.5, 0.35, 1.3, 58f, 0f, false),
-            // Бросок: отъезд назад-вниз, камера провожает Синего вверх (1,2–1,5 с)
-            ck(15, P, -2.4, -1.3, 1.2, TGT_BLUE, 0, 0, 0, 70f, 0f, false),
-            ck(26, P, -3.8, -1.7, 0.9, TGT_BLUE, 0, 0, 0, 78f, -3f, false),
+            // Бросок: камера отъезжает назад-вниз, но смотрит на игрока; Синий уходит по спирали вверх в кадре (1,2–1,5 с)
+            ck(15, P, -3.0, -1.4, 1.3, TGT_PLAYER, 0.4, 0.0, 1.7, 74f, 0f, false),
+            ck(26, P, -4.4, -1.9, 1.0, TGT_PLAYER, 0.2, 0.0, 2.3, 80f, -3f, false),
             // Общий план: Синий висит в небе (2,0 с)
-            ck(27, G, 8.0, 3.0, 4.0, TGT_GROUND, 0.0, -0.6, 4.2, 66f, 0f, true),
-            ck(35, G, 6.4, 2.2, 3.6, TGT_GROUND, 0.0, -0.4, 3.0, 62f, 0f, false),
+            ck(27, G, 8.0, 3.0, 4.0, TGT_PLAYER, 0.0, 0.0, 2.6, 70f, 0f, true),
+            ck(35, G, 6.4, 2.2, 3.6, TGT_PLAYER, 0.0, 0.0, 2.2, 66f, 0f, false),
             // Крупно спереди: в руке загорается Красный (2,1–2,5 с)
             ck(36, P, 2.4, -0.6, 1.3, TGT_PLAYER, 0.0, 0.1, 1.25, 68f, 0f, true),
             ck(44, P, 1.85, -0.45, 1.3, TGT_PLAYER, 0.0, 0.1, 1.25, 62f, 0f, false),
@@ -509,7 +516,7 @@ public final class MaximumPurpleClient {
             ck(66, P, 1.25, -0.75, 1.6, TGT_PLAYER, 0.0, 0.15, 1.72, 52f, 0f, false),
             // Общий план: выстрел Красного вверх, камера задирается и опускается к приседу (3,9–4,6 с)
             ck(67, P, 7.6, 0.8, 1.3, TGT_PLAYER, 0.0, 0.0, 2.2, 62f, 0f, true),
-            ck(74, P, 7.0, 0.7, 1.6, TGT_GROUND, 0.0, 0.0, 5.0, 64f, 0f, false),
+            ck(74, P, 7.0, 0.7, 1.6, TGT_PLAYER, 0.0, 0.0, 2.6, 68f, 0f, false),
             ck(80, P, 4.2, 1.0, 0.9, TGT_PLAYER, 0.0, 0.0, 1.0, 66f, 0f, false),
             ck(86, P, 3.2, 0.9, 0.6, TGT_PLAYER, 0.0, 0.0, 0.8, 60f, 0f, false),
             // Взлёт: камера с земли смотрит вверх на сальто (4,7–4,9 с)
