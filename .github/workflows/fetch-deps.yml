@@ -1,0 +1,30 @@
+name: Fetch embedded libraries
+
+on:
+  workflow_dispatch:
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download bendy-lib (Forge, for Player Animator bends)
+        run: |
+          mkdir -p fetched
+          curl -fsSL -o fetched/bendy-lib-forge-4.0.0.jar \
+            https://maven.kosmx.dev/io/github/kosmx/bendy-lib/bendy-lib-forge/4.0.0/bendy-lib-forge-4.0.0.jar
+          curl -fsSL -o fetched/bendy-lib-forge-4.0.0.pom \
+            https://maven.kosmx.dev/io/github/kosmx/bendy-lib/bendy-lib-forge/4.0.0/bendy-lib-forge-4.0.0.pom || true
+          ls -la fetched
+          unzip -l fetched/bendy-lib-forge-4.0.0.jar | head -40
+      - name: Push to deps branch
+        run: |
+          git config user.name "github-actions"
+          git config user.email "github-actions@users.noreply.github.com"
+          git checkout --orphan deps/libs
+          git rm -rq --cached . || true
+          git add -f fetched
+          git commit -qm "Fetched libraries"
+          git push -f origin deps/libs
