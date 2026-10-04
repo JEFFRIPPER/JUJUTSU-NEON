@@ -40,50 +40,40 @@ def key(tick, ease="INOUTSINE", **changes):
     KEYS.append((tick, {k.replace("__", "."): v for k, v in changes.items()}, ease))
 
 
-# ---- 0–12 (0–0,6 с): разворот, правая рука поднимается
+# ---- 0–12 (0–0,6 с): разворот, правая рука выходит вперёд-вправо ладонью вверх — там появится Синий
 key(0)
-key(4, rightArm__pitch=-96, rightArm__yaw=-12, rightArm__roll=18, rightArm__bend=-34, torso__yaw=-8,
-    head__pitch=-4, leftArm__pitch=-10, leftArm__roll=-10, leftArm__bend=-14)
-key(9, rightArm__pitch=-158, rightArm__yaw=-24, rightArm__roll=22, rightArm__bend=-58, torso__yaw=-14,
-    torso__bend=-4, head__pitch=-16, leftArm__pitch=-18, leftArm__roll=-16, leftArm__bend=-22,
-    rightLeg__bend=8, leftLeg__bend=4)
-# ---- 13–14: Синий вспыхивает в поднятой руке
-key(13, rightArm__pitch=-168, rightArm__bend=-40, head__pitch=-22, torso__bend=-6)
-# ---- 16–38 (0,8–1,9 с): присед с закруткой, рука вращает Синего вокруг себя
-key(17, ease="OUTQUAD", rightArm__pitch=-118, rightArm__yaw=-46, rightArm__roll=34, rightArm__bend=-78,
-    torso__yaw=-22, torso__bend=16, head__pitch=8, leftArm__pitch=-36, leftArm__yaw=18, leftArm__roll=-26,
-    leftArm__bend=-48, rightLeg__pitch=-26, rightLeg__bend=42, leftLeg__pitch=12, leftLeg__bend=24, body__y=-0.2)
-SW = [(21, -64, 6, 10, -36, 14, 12, 0.24), (25, -126, -50, 36, -84, -20, 20, 0.18),
-      (29, -58, 10, 8, -32, 16, 14, 0.26), (33, -132, -54, 38, -88, -24, 22, 0.2)]
-for t, ap, ay, ar, ab, ty, tb, dy in SW:
-    key(t, rightArm__pitch=ap, rightArm__yaw=ay, rightArm__roll=ar, rightArm__bend=ab, torso__yaw=ty,
-        torso__bend=tb, body__y=-dy, head__pitch=4 if ap > -90 else 10,
-        leftArm__pitch=-30 if ap > -90 else -42, leftArm__bend=-40 if ap > -90 else -56)
-# ---- 37–39: замах назад, глубокий присед
-key(38, ease="OUTQUAD", rightArm__pitch=34, rightArm__yaw=8, rightArm__roll=28, rightArm__bend=-46,
-    torso__yaw=26, torso__bend=22, torso__pitch=4, head__pitch=-6, leftArm__pitch=-52, leftArm__yaw=26,
-    leftArm__bend=-60, rightLeg__pitch=-40, rightLeg__bend=70, leftLeg__pitch=-6, leftLeg__bend=46, body__y=-0.36)
-# ---- 40–46 (2,0–2,3 с): бросок вверх, корпус раскручивается, взгляд вверх
-key(41, rightArm__pitch=-176, rightArm__yaw=-6, rightArm__roll=14, rightArm__bend=-4, torso__yaw=-18,
-    torso__bend=-12, torso__pitch=-4, head__pitch=-44, leftArm__pitch=8, leftArm__yaw=0, leftArm__roll=-20,
-    leftArm__bend=-12, rightLeg__pitch=6, rightLeg__bend=4, leftLeg__pitch=8, leftLeg__bend=6, body__y=0.06)
-key(46, rightArm__pitch=-150, rightArm__bend=-14, torso__yaw=-10, torso__bend=-6, head__pitch=-52,
-    body__y=0.0)
+key(5, rightArm__pitch=-38, rightArm__yaw=-4, rightArm__roll=16, rightArm__bend=-18, torso__yaw=-6,
+    head__pitch=6, leftArm__pitch=-8, leftArm__roll=-8, leftArm__bend=-12)
+key(12, rightArm__pitch=-62, rightArm__yaw=2, rightArm__roll=30, rightArm__bend=-30, torso__yaw=-10,
+    torso__bend=6, head__pitch=20, head__yaw=-10, leftArm__pitch=-14, leftArm__roll=-12, leftArm__bend=-18,
+    rightLeg__bend=6, leftLeg__bend=4)
+# ---- 14–33 (0,7–1,65 с): Синий в ладони, персонаж смотрит на него («дышит»)
+key(18, head__pitch=26, head__yaw=-12, torso__bend=10, rightArm__bend=-34)
+key(25, head__pitch=22, head__yaw=-10, torso__bend=8, rightArm__pitch=-66, rightArm__bend=-28)
+key(31, head__pitch=26, head__yaw=-12, torso__bend=11, rightArm__pitch=-60, rightArm__bend=-34,
+    body__y=-0.04, rightLeg__bend=12, leftLeg__bend=8)
+# ---- 34–41 (1,7–2,05 с): рука проводит по воздуху четверть круга по диагонали (~45°) вверх-влево
+#      и отпускает Синего — он уходит по спирали
+key(34, ease="INQUAD", rightArm__pitch=-56, rightArm__yaw=6, rightArm__roll=34, rightArm__bend=-24,
+    torso__yaw=-14, torso__bend=10, head__pitch=18, head__yaw=-10)
+key(38, ease="LINEAR", rightArm__pitch=-104, rightArm__yaw=-10, rightArm__roll=16, rightArm__bend=-12,
+    torso__yaw=-2, torso__bend=2, head__pitch=0, head__yaw=-4, body__y=0.0, rightLeg__bend=6, leftLeg__bend=4)
+key(41, ease="OUTQUAD", rightArm__pitch=-156, rightArm__yaw=-28, rightArm__roll=2, rightArm__bend=-6,
+    torso__yaw=10, torso__bend=-6, torso__pitch=-2, head__pitch=-26, head__yaw=0)
+key(46, rightArm__pitch=-166, rightArm__yaw=-30, rightArm__bend=-10, torso__yaw=12, torso__bend=-8,
+    head__pitch=-42)
 key(53, rightArm__pitch=-40, rightArm__yaw=-4, rightArm__roll=10, rightArm__bend=-22, torso__yaw=-2,
-    torso__bend=0, torso__pitch=0, head__pitch=-30, leftArm__pitch=-10, leftArm__roll=-10, leftArm__bend=-16,
+    torso__bend=0, torso__pitch=0, head__pitch=-24, leftArm__pitch=-10, leftArm__roll=-10, leftArm__bend=-16,
     rightLeg__pitch=0, rightLeg__bend=6, leftLeg__pitch=0, leftLeg__bend=4)
-# ---- 56–65 (2,8–3,25 с): спокойно, кисть плавно подносится к лицу, в ладони загорается Красный
-key(58, rightArm__pitch=-96, rightArm__yaw=-40, rightArm__roll=8, rightArm__bend=-104, head__pitch=6,
-    torso__bend=4, torso__yaw=-6)
-key(62, rightArm__pitch=-106, rightArm__yaw=-46, rightArm__bend=-116, head__pitch=10, torso__bend=6)
-key(65, rightArm__pitch=-102, rightArm__bend=-120, head__pitch=8)
-# ---- 68: короткий замах вниз, 69–72: рука вверх — выстрел
-key(68, ease="OUTQUAD", rightArm__pitch=-70, rightArm__yaw=-20, rightArm__bend=-96, torso__bend=10,
-    head__pitch=0, rightLeg__bend=16, leftLeg__bend=12, body__y=-0.08)
-key(70, rightArm__pitch=-178, rightArm__yaw=-2, rightArm__roll=8, rightArm__bend=-2, torso__bend=-12,
-    torso__pitch=-3, head__pitch=-48, leftArm__pitch=6, leftArm__roll=-22, leftArm__bend=-10,
-    rightLeg__bend=2, leftLeg__bend=2, body__y=0.04)
-key(76, rightArm__pitch=-170, rightArm__bend=-8, head__pitch=-56, torso__bend=-8, body__y=0.0)
+# ---- 56–68 (2,8–3,4 с): рука плавно поднимается и сгибается — кулак на уровне головы рядом с лицом;
+#      в нём загорается Красный. Голова смотрит прямо.
+key(61, rightArm__pitch=-92, rightArm__yaw=-12, rightArm__roll=16, rightArm__bend=-96, head__pitch=0,
+    head__yaw=0, torso__bend=3, torso__yaw=-4)
+key(65, rightArm__pitch=-94, rightArm__bend=-100, head__pitch=2, torso__bend=4)
+key(69, ease="OUTQUAD", rightArm__pitch=-93, rightArm__bend=-99, head__pitch=1, torso__bend=3)
+# ---- 69–75: Красный вылетает из поднятой руки вверх — рука на месте, только короткая отдача
+key(71, rightArm__pitch=-102, rightArm__bend=-86, torso__bend=-5, torso__pitch=-2, head__pitch=-4, body__y=0.03)
+key(76, rightArm__pitch=-93, rightArm__bend=-98, torso__bend=2, torso__pitch=0, head__pitch=0, body__y=0.0)
 # ---- 80–226: опускает руку, смотрит в небо, где гоняются шары («дышит»)
 key(88, rightArm__pitch=-24, rightArm__yaw=0, rightArm__roll=10, rightArm__bend=-18, torso__bend=-4,
     torso__pitch=0, head__pitch=-46, leftArm__pitch=-8, leftArm__roll=-12, leftArm__bend=-14)
@@ -91,36 +81,29 @@ for i, t in enumerate(range(100, 226, 14)):
     sgn = 1 if i % 2 == 0 else -1
     key(t, head__pitch=-46 + sgn * 4, head__yaw=sgn * 6, rightArm__roll=10 + sgn * 3,
         leftArm__roll=-12 + sgn * 3, torso__bend=-4 + sgn * 2)
-# ---- 228–282 (11,4–14,1 с): левитация — подъём к шарам
-key(232, head__pitch=-30, head__yaw=0, rightArm__pitch=-12, rightArm__roll=34, rightArm__bend=-24,
-    leftArm__pitch=-12, leftArm__roll=-34, leftArm__bend=-24, torso__bend=6, rightLeg__pitch=-8,
-    rightLeg__bend=26, leftLeg__pitch=10, leftLeg__bend=40, rightLeg__roll=2, leftLeg__roll=-2)
-key(244, rightArm__roll=46, leftArm__roll=-46, rightArm__bend=-30, leftArm__bend=-30, head__pitch=-26,
-    torso__bend=2, rightLeg__bend=30, leftLeg__bend=44)
-key(256, rightArm__roll=40, leftArm__roll=-40, rightArm__bend=-22, leftArm__bend=-22, head__pitch=-34,
-    torso__bend=-2, rightLeg__bend=24, leftLeg__bend=38)
-# ---- 266–282: кольцо раскрывается — руки в стороны, тянет энергию
-key(270, ease="OUTQUAD", rightArm__pitch=-30, rightArm__roll=92, rightArm__bend=-16, leftArm__pitch=-30,
-    leftArm__roll=-92, leftArm__bend=-16, head__pitch=-22, torso__bend=-10, torso__pitch=-3)
-key(282, rightArm__roll=98, leftArm__roll=-98, rightArm__bend=-10, leftArm__bend=-10, head__pitch=-28,
-    torso__bend=-12)
-# ---- 283–349: темнота и космос (игрока не видно) — держим позу, к концу собирается
-key(330, rightArm__roll=88, leftArm__roll=-88, head__pitch=-20)
-key(346, rightArm__pitch=-40, rightArm__yaw=-20, rightArm__roll=30, rightArm__bend=-60, leftArm__pitch=-40,
-    leftArm__yaw=20, leftArm__roll=-30, leftArm__bend=-60, torso__bend=10, torso__pitch=0, head__pitch=0,
-    rightLeg__bend=30, leftLeg__bend=34)
-# ---- 350–358 (17,5–17,9 с): со спины — рука поднимается над головой, замах
-key(352, rightArm__pitch=-60, rightArm__bend=-70, leftArm__pitch=-30, leftArm__bend=-50, torso__bend=12)
-key(357, ease="OUTQUAD", rightArm__pitch=-156, rightArm__yaw=-34, rightArm__roll=26, rightArm__bend=-96,
-    leftArm__pitch=-56, leftArm__yaw=34, leftArm__roll=-20, leftArm__bend=-86, torso__yaw=14, torso__bend=-6,
-    head__pitch=-8, rightLeg__pitch=-14, rightLeg__bend=24, leftLeg__pitch=14, leftLeg__bend=14)
-# ---- 360–364 (18,0–18,2 с): поза Годжо — правая рука вперёд, левая согнута у груди, широкая стойка
-key(360, rightArm__pitch=-92, rightArm__yaw=-4, rightArm__roll=4, rightArm__bend=-4, leftArm__pitch=-64,
-    leftArm__yaw=52, leftArm__roll=-6, leftArm__bend=-108, torso__yaw=-16, torso__bend=4, torso__pitch=2,
-    head__pitch=4, head__yaw=8, rightLeg__pitch=-22, rightLeg__roll=12, rightLeg__bend=22,
-    leftLeg__pitch=18, leftLeg__roll=-12, leftLeg__bend=12)
-key(363, rightArm__pitch=-96, torso__yaw=-20, torso__bend=8, rightArm__bend=-2)
-key(380, rightArm__pitch=-94, torso__yaw=-18, torso__bend=6)
+# ---- 228–282 (11,4–14,1 с): подъём к шарам в сомкнутой позе — колени подобраны, руки скрещены у груди
+key(240, head__pitch=18, head__yaw=0, torso__bend=26, torso__pitch=0, rightArm__pitch=-62, rightArm__yaw=-46,
+    rightArm__roll=6, rightArm__bend=-104, leftArm__pitch=-62, leftArm__yaw=46, leftArm__roll=-6, leftArm__bend=-104,
+    rightLeg__pitch=-64, rightLeg__bend=98, rightLeg__roll=2, leftLeg__pitch=-70, leftLeg__bend=104, leftLeg__roll=-2)
+key(254, torso__bend=28, head__pitch=20, rightLeg__pitch=-68, leftLeg__pitch=-66)
+key(268, torso__bend=25, head__pitch=17, rightLeg__pitch=-62, leftLeg__pitch=-72)
+key(282, torso__bend=27, head__pitch=19, rightLeg__pitch=-66, leftLeg__pitch=-68)
+# ---- 283–349: темнота и космос (игрока не видно) — сжимается сильнее
+key(330, torso__bend=28, head__pitch=20)
+# ---- 350–358 (17,5–17,9 с): крупно спереди — руки скрещены перед лицом, фиолетовый за спиной
+key(348, rightArm__pitch=-118, rightArm__yaw=-58, rightArm__roll=4, rightArm__bend=-108, leftArm__pitch=-124,
+    leftArm__yaw=58, leftArm__roll=-4, leftArm__bend=-100, torso__bend=22, head__pitch=14,
+    rightLeg__pitch=-44, rightLeg__bend=74, leftLeg__pitch=-48, leftLeg__bend=78)
+key(353, rightArm__bend=-112, leftArm__bend=-104, torso__bend=24, head__pitch=16)
+key(358, ease="OUTQUAD", rightArm__pitch=-122, rightArm__bend=-114, leftArm__pitch=-128, leftArm__bend=-108,
+    torso__bend=26, head__pitch=18, rightLeg__bend=80, leftLeg__bend=84)
+# ---- 359–364 (17,95–18,2 с): выпрямляется — руки широко в стороны, грудь вперёд, голова назад, ноги врозь
+key(361, rightArm__pitch=-18, rightArm__yaw=0, rightArm__roll=78, rightArm__bend=-8, leftArm__pitch=-18,
+    leftArm__yaw=0, leftArm__roll=-78, leftArm__bend=-8, torso__bend=-20, torso__pitch=-6, torso__yaw=0,
+    head__pitch=-38, head__yaw=0, rightLeg__pitch=-6, rightLeg__roll=20, rightLeg__bend=10,
+    leftLeg__pitch=6, leftLeg__roll=-20, leftLeg__bend=12)
+key(364, rightArm__roll=84, leftArm__roll=-84, torso__bend=-23, head__pitch=-42, rightLeg__roll=22, leftLeg__roll=-22)
+key(380, rightArm__roll=82, leftArm__roll=-82, torso__bend=-21, head__pitch=-40)
 key(408)
 
 END_TICK = 408
