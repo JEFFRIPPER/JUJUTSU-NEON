@@ -7,6 +7,7 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.util.Mth;
 import net.minecraft.world.Clearable;
 import net.minecraft.world.entity.ExperienceOrb;
 import net.minecraft.world.entity.LivingEntity;
@@ -347,13 +348,15 @@ public final class MaximumPurple {
         owner.fallDistance = 0.0f;
         Vec3 expected = cast.expectedPos();
         Vec3 pos = owner.position();
-        // Клиент сам ведёт игрока по своим часам (синхронно с музыкой); сервер поправляет только
-        // явный уход. По высоте допускаем расхождение часов клиента и сервера до 12 тиков.
+        // Клиент сам ведёт игрока по своим часам (синхронно с музыкой), а сервер может отставать
+        // (он ещё и кратер режет). Поэтому по высоте сервер игрока НЕ тянет — иначе они
+        // перетягивают его каждый тик (лаг и «двоение»). Проверяем только разумные пределы.
         double dx = pos.x - expected.x, dz = pos.z - expected.z;
-        double minY = cast.feet.y + heightAt(cast.age - 12) - 1.2;
-        double maxY = cast.feet.y + heightAt(cast.age + 12) + 1.2;
+        double minY = cast.feet.y - 1.5;
+        double maxY = cast.feet.y + RISE_HEIGHT + 2.0;
         if (dx * dx + dz * dz > 1.2 * 1.2 || pos.y < minY || pos.y > maxY) {
-            owner.connection.teleport(expected.x, expected.y, expected.z, cast.yaw, 0.0f);
+            double y = Mth.clamp(pos.y, minY + 1.5, maxY - 2.0);
+            owner.connection.teleport(expected.x, y, expected.z, cast.yaw, 0.0f);
         }
     }
 
