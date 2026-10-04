@@ -22,6 +22,8 @@ import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.event.TickEvent;
 import net.minecraftforge.event.entity.EntityJoinLevelEvent;
 import net.minecraftforge.event.entity.living.LivingAttackEvent;
+import net.minecraftforge.event.entity.player.PlayerEvent;
+import net.minecraftforge.event.server.ServerStoppingEvent;
 import net.minecraftforge.eventbus.api.EventPriority;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.DistExecutor;
@@ -344,11 +346,13 @@ public final class MaximumPurple {
     private static void holdOwner(Cast cast, ServerPlayer owner) {
         owner.fallDistance = 0.0f;
         Vec3 expected = cast.expectedPos();
-        // Клиент сам ведёт игрока по траектории; сервер поправляет только явный уход.
-        // Во время подъёма допуск больше: клиент и сервер могут разойтись на несколько тиков.
-        boolean rising = cast.age >= T_RISE_START - 4 && cast.age <= T_RISE_END + 10;
-        double tolerance = rising ? 6.0 : 1.2;
-        if (owner.position().distanceToSqr(expected) > tolerance * tolerance) {
+        Vec3 pos = owner.position();
+        // Клиент сам ведёт игрока по своим часам (синхронно с музыкой); сервер поправляет только
+        // явный уход. По высоте допускаем расхождение часов клиента и сервера до 12 тиков.
+        double dx = pos.x - expected.x, dz = pos.z - expected.z;
+        double minY = cast.feet.y + heightAt(cast.age - 12) - 1.2;
+        double maxY = cast.feet.y + heightAt(cast.age + 12) + 1.2;
+        if (dx * dx + dz * dz > 1.2 * 1.2 || pos.y < minY || pos.y > maxY) {
             owner.connection.teleport(expected.x, expected.y, expected.z, cast.yaw, 0.0f);
         }
     }
@@ -551,9 +555,42 @@ public final class MaximumPurple {
             }
         }
         CHANNEL.send(PacketDistributor.DIMENSION.with(() -> cast.level.dimension()), new EndPacket(cast.ownerId, completed));
+        // Владелец ушёл в другое измерение — сообщаем ему лично.
+        if (owner != null && owner.level() != cast.level) {
+            CHANNEL.send(PacketDistributor.PLAYER.with(() -> owner), new EndPacket(cast.ownerId, completed));
+        }
     }
 
     // ------------------------------------------------------------------ guards
+
+    /** Вышел посреди техники — возвращаем способности до сохранения игрока (иначе останется вечный полёт). */
+    @SubscribeEvent
+    public static void onLoggedOut(PlayerEvent.PlayerLoggedOutEvent event) {
+        if (!(event.getEntity() instanceof ServerPlayer player)) return;
+        Cast cast = CASTS.get(player.getUUID());
+        if (cast == null) return;
+        player.getAbilities().mayfly = cast.origMayfly;
+        player.getAbilities().flying = cast.origMayfly && cast.origFlying;
+        player.onUpdateAbilities();
+        if (!cast.damageDone) {
+            CASTS.remove(player.getUUID());
+            CHANNEL.send(PacketDistributor.DIMENSION.with(() -> cast.level.dimension()), new EndPacket(cast.ownerId, false));
+        }
+    }
+
+    /** Сервер останавливается — ничего не тащим в следующий мир. */
+    @SubscribeEvent
+    public static void onServerStopping(ServerStoppingEvent event) {
+        for (Cast cast : CASTS.values()) {
+            ServerPlayer owner = event.getServer().getPlayerList().getPlayer(cast.ownerId);
+            if (owner != null) {
+                owner.getAbilities().mayfly = cast.origMayfly;
+                owner.getAbilities().flying = cast.origMayfly && cast.origFlying;
+                owner.onUpdateAbilities();
+            }
+        }
+        CASTS.clear();
+    }
 
     /** Владелец во время кат-сцены неуязвим. */
     @SubscribeEvent(priority = EventPriority.HIGHEST)

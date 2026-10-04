@@ -143,6 +143,8 @@ public final class MaximumPurpleClient {
     private static int fadeOut;
     /** Саундтрек у владельца; пока он играет, остальные звуки выключены. */
     private static SoundInstance themeInstance;
+    /** Скрытый интерфейс (F1) на время кат-сцены включаем обратно — иначе не видно кадров и белого экрана. */
+    private static Boolean savedHideGui;
 
     private MaximumPurpleClient() {
     }
@@ -158,6 +160,8 @@ public final class MaximumPurpleClient {
         double clock;
         long lastNanos;
         int spawned = -1;
+        /** Музыка у наблюдателя (из точки техники). */
+        SoundInstance worldTheme;
         boolean ended;
         double endedAt;
 
@@ -275,15 +279,18 @@ public final class MaximumPurpleClient {
             fadeOut = 0;
             savedMayfly = mc.player.getAbilities().mayfly;
             savedFlying = mc.player.getAbilities().flying;
+            savedHideGui = mc.options.hideGui;
+            mc.options.hideGui = false;
             startLocalCamera(mc);
             JujutsuNeonMod.ClientForgeEvents.startAnim("MAX_PURPLE", ANIM_TICKS);
             startTheme(mc);
         } else {
             // Остальные слышат ту же музыку из точки техники.
             Vec3 p = scene.at(0.0, 0.0, 10.0);
-            mc.getSoundManager().play(new SimpleSoundInstance(THEME_WORLD, SoundSource.PLAYERS, 6.0f, 1.0f,
+            scene.worldTheme = new SimpleSoundInstance(THEME_WORLD, SoundSource.PLAYERS, 6.0f, 1.0f,
                     SoundInstance.createUnseededRandom(), false, 0, SoundInstance.Attenuation.LINEAR,
-                    p.x, p.y, p.z, false));
+                    p.x, p.y, p.z, false);
+            mc.getSoundManager().play(scene.worldTheme);
         }
     }
 
@@ -293,21 +300,36 @@ public final class MaximumPurpleClient {
         scene.ended = true;
         scene.endedAt = scene.clock;
         stopAnimation(scene);
+        Minecraft mc = Minecraft.getInstance();
+        // Прервали — музыка обрывается. Дошли до конца — она сама затихает до 24,2 с.
+        if (!completed) stopWorldTheme(mc, scene);
         if (scene == local) {
-            Minecraft mc = Minecraft.getInstance();
             stopLocalCamera(mc);
             fadeOut = FADE_OUT_TICKS;
             local = null;
-            // Прервали — музыка обрывается. Дошли до конца — она сама затихает до 24,2 с.
             if (!completed) stopTheme(mc);
-            if (mc.player != null) {
-                mc.player.getAbilities().mayfly = savedMayfly;
-                mc.player.getAbilities().flying = savedMayfly && savedFlying;
-                mc.player.setDeltaMovement(Vec3.ZERO);
-                mc.player.fallDistance = 0.0f;
-                // Игрок остаётся там, куда поднялся, — в режиме полёта.
-                if (completed) JujutsuNeonFlightClient.beginFlightForTechnique();
-            }
+            restoreLocal(mc);
+            // Игрок остаётся там, куда поднялся, — в режиме полёта.
+            if (completed && mc.player != null) JujutsuNeonFlightClient.beginFlightForTechnique();
+        }
+    }
+
+    private static void restoreLocal(Minecraft mc) {
+        if (savedHideGui != null) {
+            mc.options.hideGui = savedHideGui;
+            savedHideGui = null;
+        }
+        if (mc.player == null) return;
+        mc.player.getAbilities().mayfly = savedMayfly;
+        mc.player.getAbilities().flying = savedMayfly && savedFlying;
+        mc.player.setDeltaMovement(Vec3.ZERO);
+        mc.player.fallDistance = 0.0f;
+    }
+
+    private static void stopWorldTheme(Minecraft mc, Scene scene) {
+        if (scene.worldTheme != null) {
+            mc.getSoundManager().stop(scene.worldTheme);
+            scene.worldTheme = null;
         }
     }
 
@@ -391,7 +413,14 @@ public final class MaximumPurpleClient {
         Minecraft mc = Minecraft.getInstance();
         stopLocalCamera(mc);
         stopTheme(mc);
-        for (Scene scene : SCENES.values()) stopAnimation(scene);
+        if (savedHideGui != null) {
+            mc.options.hideGui = savedHideGui;
+            savedHideGui = null;
+        }
+        for (Scene scene : SCENES.values()) {
+            stopAnimation(scene);
+            stopWorldTheme(mc, scene);
+        }
         SCENES.clear();
         SPARKS.clear();
         DECALS.clear();
@@ -521,7 +550,7 @@ public final class MaximumPurpleClient {
         if (t < T_SKY) {
             double p = win(t, 41, 66);
             Vec3 base = lerp(top, b1, easeOut(p));
-            Vec3 pos = base.add(spiralAround(s, b1.subtract(top), p, 3.0, 1.7));
+            Vec3 pos = base.add(spiralAround(s, b1.subtract(top), p, 3.0, 1.7 * smooth(win(t, 41, 45))));
             return pos.add(0.0, 0.08 * Math.sin(t * 0.2) * smooth(win(t, 66, 72)), 0.0);
         }
 
@@ -567,7 +596,7 @@ public final class MaximumPurpleClient {
             double p = win(t, 70, 104);
             Vec3 pos = lerp(top, park, easeOut(p));
             // лёгкое «виляние» на взлёте — след красиво изгибается
-            pos = pos.add(s.right.scale(0.6 * Math.sin(p * 9.0) * (1.0 - p))).add(s.forward.scale(0.4 * Math.sin(p * 7.0 + 1.0) * (1.0 - p)));
+            pos = pos.add(s.right.scale(0.6 * Math.sin(p * 9.0) * (1.0 - p))).add(s.forward.scale(0.4 * Math.sin(p * 7.0) * (1.0 - p)));
             return pos.add(0.0, 0.08 * Math.sin(t * 0.2 + 1.7) * smooth(win(t, 104, 112)), 0.0);
         }
         if (t < T_SPACE - 2) return orbitPos(s, t, false);
@@ -613,8 +642,12 @@ public final class MaximumPurpleClient {
         while (it.hasNext()) {
             Scene scene = it.next().getValue();
             if (scene.level != mc.level) {
+                stopAnimation(scene);
+                stopWorldTheme(mc, scene);
                 if (scene == local) {
                     stopLocalCamera(mc);
+                    stopTheme(mc);
+                    restoreLocal(mc);
                     local = null;
                 }
                 it.remove();
@@ -636,6 +669,7 @@ public final class MaximumPurpleClient {
                 if (!mc.options.getCameraType().isFirstPerson()) mc.options.setCameraType(CameraType.FIRST_PERSON);
                 if (mc.getCameraEntity() != cameraEntity && cameraEntity != null) mc.setCameraEntity(cameraEntity);
                 mc.getToasts().clear();
+                if (mc.options.hideGui) mc.options.hideGui = false;
 
                 // Игрок идёт по траектории кат-сцены: стоит, потом плавно поднимается на 24 блока.
                 Vec3 target = scene.feet.add(0.0, heightAt(scene.clock), 0.0);
@@ -916,7 +950,7 @@ public final class MaximumPurpleClient {
             double t = scene.t();
             if (t >= T_SPACE - 1 && t < T_BEHIND) renderSpaceBackdrop(event, t);
             // В темноте и «космосе» игрока не видно.
-            if (t < T_DARK || t >= T_BEHIND) renderLocalPlayer(mc, event);
+            if (t < T_DARK || t >= T_BEHIND) renderLocalPlayer(mc, event, scene.feet.add(0.0, heightAt(t), 0.0));
             return;
         }
 
@@ -933,8 +967,9 @@ public final class MaximumPurpleClient {
         RenderSystem.depthMask(false);
 
         renderDecals(pose, camera, pt);
+        UUID self = mc.player != null ? mc.player.getUUID() : null;
         for (Scene scene : SCENES.values()) {
-            renderScene(pose, cam, camera, scene, scene.t(), scene == local);
+            renderScene(pose, cam, camera, scene, scene.t(), scene.ownerId.equals(self));
         }
         renderSparks(pose, cam, camera, pt);
 
@@ -946,16 +981,17 @@ public final class MaximumPurpleClient {
     }
 
     /** Minecraft не рисует локального игрока, когда камера не он сам. */
-    private static void renderLocalPlayer(Minecraft mc, RenderLevelStageEvent event) {
+    private static void renderLocalPlayer(Minecraft mc, RenderLevelStageEvent event, Vec3 at) {
         LocalPlayer player = mc.player;
         float pt = event.getPartialTick();
         Vec3 camera = event.getCamera().getPosition();
         EntityRenderDispatcher dispatcher = mc.getEntityRenderDispatcher();
         MultiBufferSource.BufferSource buffers = mc.renderBuffers().bufferSource();
 
-        double x = Mth.lerp(pt, player.xOld, player.getX()) - camera.x;
-        double y = Mth.lerp(pt, player.yOld, player.getY()) - camera.y;
-        double z = Mth.lerp(pt, player.zOld, player.getZ()) - camera.z;
+        // Позиция — по часам кат-сцены (как у камеры и шаров), без отставания на тик.
+        double x = at.x - camera.x;
+        double y = at.y - camera.y;
+        double z = at.z - camera.z;
         float yaw = Mth.lerp(pt, player.yRotO, player.getYRot());
         int light = dispatcher.getPackedLightCoords(player, pt);
 
@@ -1204,7 +1240,7 @@ public final class MaximumPurpleClient {
             else if (t >= T_APPROACH && t < T_RING) orbTrail(pose, camera, s, t, true, 9.0, br * 0.8f, 0.9f);
             else if (t >= T_RING && t < T_RING_OPEN + 12) orbTrail(pose, camera, s, t, true,
                     13.0 * (1.0 - smooth(win(t, T_RING_OPEN, T_RING_OPEN + 12))), br * 0.7f, 0.9f);
-            renderOrb(pose, cam, camera, blue, br, true, t);
+            renderOrb(pose, cam, camera, blue, br, true, t, t < T_BLUE_THROW + 1);
         }
 
         // ---- Красный: в ладони у лица, выстрел, подъём со следом, погоня
@@ -1215,7 +1251,7 @@ public final class MaximumPurpleClient {
             else if (t >= T_CHASE && t < T_RING) orbTrail(pose, camera, s, t, false, 9.0, rr * 0.8f, 0.9f);
             else if (t >= T_RING && t < T_RING_OPEN + 12) orbTrail(pose, camera, s, t, false,
                     13.0 * (1.0 - smooth(win(t, T_RING_OPEN, T_RING_OPEN + 12))), rr * 0.7f, 0.9f);
-            renderOrb(pose, cam, camera, red, rr, false, t);
+            renderOrb(pose, cam, camera, red, rr, false, t, t < T_RED_FIRE + 1);
         }
 
         // ---- 3,45–3,6 с: выстрел — красные ленты разрядов вокруг игрока
@@ -1338,10 +1374,11 @@ public final class MaximumPurpleClient {
         }
     }
 
-    private static void renderOrb(PoseStack pose, Camera cam, Vec3 camera, Vec3 pos, float radius, boolean blue, double t) {
+    private static void renderOrb(PoseStack pose, Camera cam, Vec3 camera, Vec3 pos, float radius, boolean blue, double t,
+                                  boolean inHand) {
         if (radius <= 0.01f) return;
         float hr = blue ? 0.25f : 1.0f, hg = blue ? 0.55f : 0.12f, hb = blue ? 1.0f : 0.2f;
-        if (radius < 0.17f) {
+        if (inHand) {
             // Маленький шарик энергии в руке
             RenderSystem.setShader(GameRenderer::getPositionColorShader);
             HollowPurpleReferenceClient.mpLimitless(pose, camera, pos, cam.getPosition().subtract(pos).normalize(), radius, 1.0f, t, blue);
@@ -1620,6 +1657,8 @@ public final class MaximumPurpleClient {
         if (blueFlash > 0.0f) {
             fillColor(g, w, h, 0.45f * blueFlash, 0x5AA0FF);
             int size = (int) (h * (1.2f + 2.4f * (float) win(t, T_BLUE_SPAWN - 0.5, T_BLUE_SPAWN + 4)));
+            RenderSystem.enableBlend();
+            RenderSystem.defaultBlendFunc();
             RenderSystem.setShaderColor(0.6f, 0.85f, 1.0f, blueFlash);
             g.blit(TEX_BLOOM, w / 2 - size / 2, h / 2 - size / 2, size, size, 0.0f, 0.0f, 512, 512, 512, 512);
             RenderSystem.setShaderColor(1.0f, 1.0f, 1.0f, 1.0f);
@@ -1633,7 +1672,7 @@ public final class MaximumPurpleClient {
         if (t >= T_MANGA_A && t < T_MANGA_A + 2) {
             boolean first = t < T_MANGA_A + 1;
             drawFrame(g, w, h, first ? MANGA_A1 : MANGA_A2, t - T_MANGA_A);
-            drawSilhouetteAt(g, w, h, 1.0f, 1.0f, 1.0f, first ? 1.0f : 1.08f, 0.0f, 0.0f, 180.0f);
+            drawSilhouetteAt(g, w, h, WHITE_TINT, WHITE_TINT, WHITE_TINT, first ? 1.0f : 1.08f, 0.0f, 0.0f, 180.0f);
             drawFrame(g, w, h, TEX_HATCH, 0.0);
         }
 
@@ -1674,7 +1713,7 @@ public final class MaximumPurpleClient {
                 float dx = (i % 2 == 0 ? 1.0f : -1.0f) * 2.5f, dy = (i < 2 ? 1.0f : -1.0f) * 2.5f;
                 drawSilhouetteAt(g, w, h, 0.0f, 0.0f, 0.0f, 1.55f, dx, dy, 110.0f);
             }
-            drawSilhouetteAt(g, w, h, 1.0f, 1.0f, 1.0f, 1.55f, 0.0f, 0.0f, 110.0f);
+            drawSilhouetteAt(g, w, h, WHITE_TINT, WHITE_TINT, WHITE_TINT, 1.55f, 0.0f, 0.0f, 110.0f);
             drawFrame(g, w, h, TEX_HATCH, 0.0);
         } else if (t >= T_MANGA_C + 2 && t < T_WHITE_IN) {
             drawFrame(g, w, h, MANGA_C2, t - T_MANGA_C - 2);
@@ -1685,6 +1724,9 @@ public final class MaximumPurpleClient {
             fillColor(g, w, h, (float) smooth(win(t, T_WHITE_IN, T_WHITE_IN + 1.5)), 0xFFFFFF);
         }
     }
+
+    /** Множитель цвета модели «в пересвет»: любой непрозрачный пиксель скина становится белым. */
+    private static final float WHITE_TINT = 60.0f;
 
     private static void drawFrame(GuiGraphics g, int w, int h, ResourceLocation frame, double k) {
         // Лёгкий наезд и дрожь, как у вставок в референсе

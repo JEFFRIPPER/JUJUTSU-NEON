@@ -372,7 +372,7 @@ sound_names = [
 sound_json = {n: {"sounds": [f"jujutsu_neon:{n}"]} for n in sound_names}
 # Саундтрек кат-сцены Максимального Фиолетового (готовые OGG в sounds/cutscene/, стримятся).
 sound_json["max_purple_theme"] = {"sounds": [{"name": "jujutsu_neon:cutscene/max_purple_theme", "stream": True}]}
-sound_json["max_purple_theme_world"] = {"sounds": [{"name": "jujutsu_neon:cutscene/max_purple_theme_world", "stream": True, "attenuation_distance": 96}]}
+sound_json["max_purple_theme_world"] = {"sounds": [{"name": "jujutsu_neon:cutscene/max_purple_theme_world", "stream": True}]}
 ROOT.joinpath("sounds.json").write_text(json.dumps(sound_json, indent=2))
 
 sr = 48000
