@@ -449,7 +449,7 @@ public final class MaximumPurpleClient {
             shot(T_BLUE_THROW, T_BLUE_HOVER, false, TGT_BLUE, v(-3.1, -0.8, 2.0), v(-3.6, -1.0, 1.4),
                     v(0, 0, 0), v(0, 0, 0), 70f, 74f, 0f, 0f),
             // Общий план: Синий висит в небе (2,0 с)
-            shot(T_BLUE_HOVER, 34, true, TGT_GROUND, v(11.0, 3.5, 2.0), v(10.0, 3.5, 2.6),
+            shot(T_BLUE_HOVER, 34, true, TGT_GROUND, v(11.0, 3.5, 4.0), v(10.0, 3.5, 4.4),
                     v(0.0, -0.5, 6.5), v(0.0, -0.5, 6.8), 62f, 62f, 0f, 0f),
             // Крупно спереди, в руке загорается Красный (2,1–2,5 с)
             shot(34, T_VORTEX, false, TGT_PLAYER, v(2.2, -0.4, 1.2), v(1.9, -0.35, 1.25),
@@ -467,7 +467,7 @@ public final class MaximumPurpleClient {
             shot(T_RED_HOVER, 86, false, TGT_PLAYER, v(3.6, 0.9, 0.7), v(3.4, 0.9, 0.7),
                     v(0.0, 0.0, 0.9), v(0.0, 0.0, 0.9), 66f, 66f, 0f, 0f),
             // Взлёт снизу, с земли (4,7–4,9 с)
-            shot(86, 92, true, TGT_CHEST, v(2.6, -1.4, 0.5), v(2.6, -1.4, 0.5),
+            shot(86, 92, true, TGT_CHEST, v(2.6, -1.4, 0.9), v(2.6, -1.4, 0.9),
                     v(0, 0, 0), v(0, 0, 0), 76f, 78f, 8f, 0f),
             // Сверху-сзади, внизу дорога (5,0–5,1 с)
             shot(92, T_APEX, false, TGT_PLAYER, v(-1.4, 0.7, 3.4), v(-1.2, 0.6, 3.0),
@@ -488,8 +488,8 @@ public final class MaximumPurpleClient {
             shot(T_COSMOS, T_EXPLODE, false, TGT_PLAYER, v(1.5, 0.5, 0.45), v(2.3, 0.6, 0.35),
                     v(0.0, 0.0, 1.55), v(0.0, 0.0, 1.6), 75f, 84f, -14f, -18f),
             // Взрыв издалека (9,9–10,2 с)
-            shot(T_EXPLODE, 400, true, TGT_GROUND, v(46.0, 9.0, 7.0), v(50.0, 10.0, 8.0),
-                    v(0.0, 0.0, 12.0), v(0.0, 0.0, 13.0), 70f, 70f, 0f, 0f),
+            shot(T_EXPLODE, 400, true, TGT_GROUND, v(44.0, 9.0, 18.0), v(48.0, 10.0, 19.0),
+                    v(0.0, 0.0, 10.0), v(0.0, 0.0, 11.0), 70f, 70f, 0f, 0f),
     };
 
     private static Shot shotAt(double t) {
