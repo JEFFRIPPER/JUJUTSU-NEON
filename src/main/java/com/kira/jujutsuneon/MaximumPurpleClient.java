@@ -879,8 +879,18 @@ public final class MaximumPurpleClient {
         camera.setXRot(pitch);
         camera.xRotO = pitch;
 
-        // Тело игрока смотрит туда, куда смотрел при старте; голову ведёт анимация.
+        // Настоящая позиция игрока — каждый кадр ровно по часам кат-сцены. Иначе она обновляется
+        // 20 раз в секунду и на быстром подъёме отстаёт от модели почти на блок: всё, что рисует
+        // игрока по его позиции, даёт вторую копию («двоение»).
         LocalPlayer player = mc.player;
+        Vec3 at = scene.feet.add(0.0, heightAt(t), 0.0);
+        player.setPos(at.x, at.y, at.z);
+        player.xo = player.xOld = at.x;
+        player.yo = player.yOld = at.y;
+        player.zo = player.zOld = at.z;
+        player.setDeltaMovement(Vec3.ZERO);
+
+        // Тело игрока смотрит туда, куда смотрел при старте; голову ведёт анимация.
         player.setYRot(scene.yaw);
         player.yRotO = scene.yaw;
         player.yBodyRot = scene.yaw;
@@ -950,7 +960,7 @@ public final class MaximumPurpleClient {
             double t = scene.t();
             if (t >= T_SPACE - 1 && t < T_BEHIND) renderSpaceBackdrop(event, t);
             // В темноте и «космосе» игрока не видно.
-            if (t < T_DARK || t >= T_BEHIND) renderLocalPlayer(mc, event, scene.feet.add(0.0, heightAt(t), 0.0));
+            if (t < T_DARK || t >= T_BEHIND) renderLocalPlayer(mc, event);
             return;
         }
 
@@ -981,17 +991,17 @@ public final class MaximumPurpleClient {
     }
 
     /** Minecraft не рисует локального игрока, когда камера не он сам. */
-    private static void renderLocalPlayer(Minecraft mc, RenderLevelStageEvent event, Vec3 at) {
+    private static void renderLocalPlayer(Minecraft mc, RenderLevelStageEvent event) {
         LocalPlayer player = mc.player;
         float pt = event.getPartialTick();
         Vec3 camera = event.getCamera().getPosition();
         EntityRenderDispatcher dispatcher = mc.getEntityRenderDispatcher();
         MultiBufferSource.BufferSource buffers = mc.renderBuffers().bufferSource();
 
-        // Позиция — по часам кат-сцены (как у камеры и шаров), без отставания на тик.
-        double x = at.x - camera.x;
-        double y = at.y - camera.y;
-        double z = at.z - camera.z;
+        // Позиция игрока уже выставлена по часам кат-сцены в этом кадре (onRenderTick).
+        double x = Mth.lerp(pt, player.xOld, player.getX()) - camera.x;
+        double y = Mth.lerp(pt, player.yOld, player.getY()) - camera.y;
+        double z = Mth.lerp(pt, player.zOld, player.getZ()) - camera.z;
         float yaw = Mth.lerp(pt, player.yRotO, player.getYRot());
         int light = dispatcher.getPackedLightCoords(player, pt);
 
