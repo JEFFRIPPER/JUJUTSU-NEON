@@ -37,7 +37,28 @@ jobs:
           python3 generate_resources.py
 
       - name: Build Forge mod
-        run: gradle build --stacktrace --no-daemon
+        run: |
+          set -o pipefail
+          gradle build --stacktrace --no-daemon 2>&1 | tee build.log
+
+      - name: Report compile errors
+        if: failure()
+        run: |
+          # Ошибки компиляции — аннотациями (их видно через API, даже когда логи недоступны).
+          python3 - <<'PY'
+          import re
+          lines = open('build.log', encoding='utf-8', errors='replace').read().splitlines()
+          out = []
+          for i, l in enumerate(lines):
+              if re.search(r'\.java:\d+: error:', l) or 'What went wrong' in l:
+                  msg = ' | '.join(x.strip() for x in lines[i:i + 3])
+                  out.append(msg.replace('%', '%25').replace('\r', '').replace('\n', ' '))
+          for m in out[:10]:
+              print('::error::' + m[:900])
+          if not out:
+              for l in lines[-15:]:
+                  print('::error::' + l[:900])
+          PY
 
       - name: Show output
         run: |
