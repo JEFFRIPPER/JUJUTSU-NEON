@@ -1382,7 +1382,8 @@ public final class DomainExpansionClient {
         Minecraft mc = Minecraft.getInstance();
         if (mc.level == null) return;
         List<LivingEntity> list = new ArrayList<>();
-        if (mc.level.getPlayerByUUID(s.ownerId) instanceof LivingEntity owner) list.add(owner);
+        net.minecraft.world.entity.player.Player owner = mc.level.getPlayerByUUID(s.ownerId);
+        if (owner != null) list.add(owner);
         AABB box = new AABB(s.center, s.center).inflate(RADIUS);
         for (LivingEntity e : mc.level.getEntitiesOfClass(LivingEntity.class, box,
                 e -> e.isAlive() && !(e instanceof ArmorStand) && !e.getUUID().equals(s.ownerId))) {
