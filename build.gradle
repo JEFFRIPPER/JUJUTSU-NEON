@@ -73,6 +73,7 @@ jar {
     // Вшитые библиотеки: игроку по-прежнему нужен один .jar.
     from('libs') {
         include 'player-animation-lib-forge-1.0.2-rc1+1.20.jar'
+        include 'bendy-lib-forge-4.0.0.jar'
         into 'META-INF/jarjar'
     }
     from('src/jarjar') {

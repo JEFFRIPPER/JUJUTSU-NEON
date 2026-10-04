@@ -158,7 +158,7 @@ public final class JujutsuNeonSkillAnimationClient {
                 case "BLUE" -> new SkillFrame(Skill.BLUE, progress);
                 case "MAX_BLUE" -> new SkillFrame(Skill.MAX_BLUE, progress);
                 case "PURPLE_CAST", "HOLLOW_PURPLE" -> new SkillFrame(Skill.PURPLE, progress);
-                case "MAX_PURPLE" -> new SkillFrame(Skill.MAX_PURPLE, progress);
+                // MAX_PURPLE анимирует Player Animator (MaximumPurpleAnimation) — модель не подменяем.
                 case "FRONT_DASH" -> new SkillFrame(Skill.FRONT_DASH, progress);
                 case "BACK_DASH" -> new SkillFrame(Skill.BACK_DASH, progress);
                 case "SIDE_DASH_LEFT" -> new SkillFrame(Skill.SIDE_DASH_LEFT, progress);

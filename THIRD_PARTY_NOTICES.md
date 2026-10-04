@@ -5,6 +5,16 @@
 Автор: KosmX — https://github.com/KosmX/minecraftPlayerAnimator
 Вшит внутрь мода через Forge Jar-in-Jar: `META-INF/jarjar/player-animation-lib-forge-1.0.2-rc1+1.20.jar`.
 
+## bendy-lib 4.0.0 для Forge
+
+Автор: KosmX — https://github.com/KosmX/bendy-lib
+Вшит внутрь мода через Forge Jar-in-Jar: `META-INF/jarjar/bendy-lib-forge-4.0.0.jar`.
+Нужен Player Animator, чтобы сгибать локти, колени и корпус.
+
+---
+
+Обе библиотеки распространяются под лицензией MIT:
+
 MIT License
 
 Copyright (c) 2022 KosmX

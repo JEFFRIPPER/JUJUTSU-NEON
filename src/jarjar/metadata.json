@@ -11,6 +11,18 @@
       },
       "path": "META-INF/jarjar/player-animation-lib-forge-1.0.2-rc1+1.20.jar",
       "isObfuscated": false
+    },
+    {
+      "identifier": {
+        "group": "io.github.kosmx.bendy-lib",
+        "artifact": "bendy-lib-forge"
+      },
+      "version": {
+        "range": "[4.0.0,)",
+        "artifactVersion": "4.0.0"
+      },
+      "path": "META-INF/jarjar/bendy-lib-forge-4.0.0.jar",
+      "isObfuscated": false
     }
   ]
 }

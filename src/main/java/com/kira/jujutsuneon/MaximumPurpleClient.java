@@ -7,13 +7,13 @@ import com.mojang.blaze3d.vertex.DefaultVertexFormat;
 import com.mojang.blaze3d.vertex.PoseStack;
 import com.mojang.blaze3d.vertex.Tesselator;
 import com.mojang.blaze3d.vertex.VertexFormat;
-import com.mojang.math.Axis;
 import net.minecraft.client.Camera;
 import net.minecraft.client.CameraType;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.screens.inventory.InventoryScreen;
 import net.minecraft.client.multiplayer.ClientLevel;
+import net.minecraft.client.player.AbstractClientPlayer;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.client.renderer.GameRenderer;
 import net.minecraft.client.renderer.MultiBufferSource;
@@ -32,7 +32,6 @@ import net.minecraftforge.client.event.RenderGuiOverlayEvent;
 import net.minecraftforge.client.event.RenderHandEvent;
 import net.minecraftforge.client.event.RenderLevelStageEvent;
 import net.minecraftforge.client.event.RenderNameTagEvent;
-import net.minecraftforge.client.event.RenderPlayerEvent;
 import net.minecraftforge.client.event.ViewportEvent;
 import net.minecraftforge.event.TickEvent;
 import net.minecraftforge.eventbus.api.Event;
@@ -64,7 +63,7 @@ import static com.kira.jujutsuneon.MaximumPurple.*;
  *   45–58   тёмный вихрь вокруг, красная энергия
  *   58–68   Красный к лицу; 66 — полосы «кино»
  *   68–80   выстрел Красного вверх, он встаёт на уровень Синего
- *   80–98   присед и прыжок на 13 блоков с сальто
+ *   80–98   присед и прыжок на 6 блоков с сальто
  *   98–128  в небе между шарами, лицо крупным планом
  *   128–144 шары сходятся
  *   144–155 манга-кадры Б (сине-белый, три фиолетовых, силуэт в молниях)
@@ -115,7 +114,6 @@ public final class MaximumPurpleClient {
     private static float camEye;
     /** Белый экран после конца: сколько тиков осталось до полного исчезновения. */
     private static int fadeOut;
-    private static boolean flipPushed;
 
     private MaximumPurpleClient() {
     }
@@ -189,6 +187,10 @@ public final class MaximumPurpleClient {
 
         Scene scene = new Scene(ownerId, mc.level, feet, yaw);
         SCENES.put(ownerId, scene);
+        // Живая анимация тела (Player Animator + сгибы bendy-lib) — у владельца, видят все.
+        if (mc.level.getPlayerByUUID(ownerId) instanceof AbstractClientPlayer owner) {
+            MaximumPurpleAnimation.play(owner);
+        }
 
         if (ownerId.equals(mc.player.getUUID())) {
             stopLocalCamera(mc);
@@ -206,6 +208,7 @@ public final class MaximumPurpleClient {
         if (scene == null) return;
         scene.ended = true;
         scene.endedAge = scene.age;
+        stopAnimation(scene);
         if (scene == local) {
             Minecraft mc = Minecraft.getInstance();
             stopLocalCamera(mc);
@@ -255,9 +258,17 @@ public final class MaximumPurpleClient {
         changedGravity = false;
     }
 
+    private static void stopAnimation(Scene scene) {
+        Minecraft mc = Minecraft.getInstance();
+        if (mc.level != null && mc.level.getPlayerByUUID(scene.ownerId) instanceof AbstractClientPlayer owner) {
+            MaximumPurpleAnimation.stop(owner);
+        }
+    }
+
     private static void resetAll() {
         Minecraft mc = Minecraft.getInstance();
         stopLocalCamera(mc);
+        for (Scene scene : SCENES.values()) stopAnimation(scene);
         SCENES.clear();
         SPARKS.clear();
         local = null;
@@ -291,14 +302,48 @@ public final class MaximumPurpleClient {
         return s.right.scale(Math.cos(ang) * a).add(s.forward.scale(Math.sin(ang) * a * 0.6));
     }
 
+    /** Точки пути (тик, f, r, u относительно игрока); между ними — плавная интерполяция. */
+    private static final double[][] BLUE_HAND = {
+            {T_BLUE_SPAWN, 0.52, 0.33, 1.22},
+            {8, 0.56, 0.34, 1.28},
+            {T_BLUE_THROW - 0.5, 0.30, 0.36, 1.55},
+    };
+    private static final double[][] RED_HAND = {
+            {T_RED_GLOW, 0.30, 0.12, 1.12},
+            {42, 0.30, 0.10, 1.16},
+            {48, 0.42, 0.20, 1.55},
+            {55, 0.40, 0.18, 1.58},
+            {61, 0.32, 0.10, 1.80},
+            {65, 0.25, 0.20, 1.95},
+            {T_RED_THROW, 0.05, 0.31, 2.10},
+    };
+
+    private static Vec3 handPath(Scene s, double[][] path, double t) {
+        if (t <= path[0][0]) return s.atP(path[0][1], path[0][2], path[0][3], t);
+        for (int i = 0; i + 1 < path.length; i++) {
+            double[] a = path[i], b = path[i + 1];
+            if (t <= b[0]) {
+                double k = smooth((t - a[0]) / (b[0] - a[0]));
+                return s.atP(Mth.lerp(k, a[1], b[1]), Mth.lerp(k, a[2], b[2]), Mth.lerp(k, a[3], b[3]), t);
+            }
+        }
+        double[] e = path[path.length - 1];
+        return s.atP(e[1], e[2], e[3], t);
+    }
+
+    private static Vec3 handStart(Scene s, double[][] path) {
+        double[] e = path[path.length - 1];
+        return s.at(e[1], e[2], e[3]);
+    }
+
     /** Позиция Синего или null, если его ещё нет. */
     private static Vec3 bluePos(Scene s, double t) {
         if (t < T_BLUE_SPAWN || t >= T_MANGA_B) return null;
         Vec3 hover = s.at(0.15, -ORB_SIDE, JUMP_HEIGHT + ORB_LIFT).add(0.0, Math.sin(t * 0.2) * 0.05, 0.0);
-        if (t < T_BLUE_THROW) return s.atP(0.5, 0.35, 1.25, t);
+        if (t < T_BLUE_THROW) return handPath(s, BLUE_HAND, t);
         if (t < T_BLUE_HOVER) {
             double e = easeOut((t - T_BLUE_THROW) / (double) (T_BLUE_HOVER - T_BLUE_THROW));
-            return s.at(0.5, 0.35, 1.25).lerp(hover, e).add(spiral(s, t, T_BLUE_THROW, e, 1.4));
+            return handStart(s, BLUE_HAND).lerp(hover, e).add(spiral(s, t, T_BLUE_THROW, e, 1.2));
         }
         return hover.lerp(mergePoint(s), mergeT(t));
     }
@@ -316,24 +361,23 @@ public final class MaximumPurpleClient {
     private static Vec3 redPos(Scene s, double t) {
         if (t < T_RED_GLOW || t >= T_MANGA_B) return null;
         Vec3 hover = s.at(0.15, ORB_SIDE, JUMP_HEIGHT + ORB_LIFT).add(0.0, Math.sin(t * 0.2 + 1.7) * 0.05, 0.0);
-        if (t < T_VORTEX) return s.atP(0.38, 0.25, 1.15, t);
-        if (t < T_RED_FACE) return s.atP(0.42, 0.28, 1.38, t);
-        if (t < T_LETTERBOX) return s.atP(0.32, 0.18, 1.85, t);
-        if (t < T_RED_THROW) return s.atP(0.05, 0.36, 2.45, t);
+        if (t < T_RED_THROW) return handPath(s, RED_HAND, t);
         if (t < T_RED_HOVER) {
             double e = easeOut((t - T_RED_THROW) / (double) (T_RED_HOVER - T_RED_THROW));
-            return s.at(0.05, 0.36, 2.45).lerp(hover, e).add(spiral(s, t, T_RED_THROW, e, 0.8));
+            return handStart(s, RED_HAND).lerp(hover, e).add(spiral(s, t, T_RED_THROW, e, 0.7));
         }
         return hover.lerp(mergePoint(s), mergeT(t));
     }
 
     private static float redRadius(double t) {
         if (t < T_VORTEX) return (float) (0.03 + 0.03 * smooth((t - T_RED_GLOW) / 4.0));
-        if (t < T_RED_FACE) return 0.09f + 0.015f * (float) Math.sin(t * 1.7);
-        if (t < T_RED_THROW) return 0.075f;
+        if (t < T_RED_THROW) {
+            double grow = smooth((t - T_VORTEX) / 6.0);
+            return (float) (0.06 + 0.03 * grow + 0.012 * Math.sin(t * 1.7));
+        }
         if (t < T_RED_HOVER) {
             double e = easeOut((t - T_RED_THROW) / (double) (T_RED_HOVER - T_RED_THROW));
-            return (float) (0.075 + (ORB_RADIUS - 0.075) * e);
+            return (float) (0.09 + (ORB_RADIUS - 0.09) * e);
         }
         return (float) (ORB_RADIUS * (1.0 - 0.45 * Math.sqrt(mergeT(t))));
     }
@@ -382,7 +426,7 @@ public final class MaximumPurpleClient {
                 if (mc.getCameraEntity() != cameraEntity && cameraEntity != null) mc.setCameraEntity(cameraEntity);
                 mc.getToasts().clear();
 
-                // Игрок идёт по траектории кат-сцены: стоит, потом прыжок на 13 блоков и висит.
+                // Игрок идёт по траектории кат-сцены: стоит, потом прыжок на 6 блоков и висит.
                 Vec3 target = scene.feet.add(0.0, heightAt(scene.age), 0.0);
                 mc.player.setPos(target.x, target.y, target.z);
                 mc.player.setDeltaMovement(Vec3.ZERO);
@@ -393,7 +437,10 @@ public final class MaximumPurpleClient {
             boolean expired = scene.ended
                     ? scene.age - scene.endedAge > 60
                     : scene != local && scene.age > OBSERVER_LIFETIME;
-            if (expired) it.remove();
+            if (expired) {
+                stopAnimation(scene);
+                it.remove();
+            }
         }
     }
 
@@ -423,99 +470,121 @@ public final class MaximumPurpleClient {
     private static final int TGT_BLUE = 2;
     private static final int TGT_CHEST = 3;
 
-    private record Shot(int start, int end, boolean camGround, int target,
-                        double cf0, double cr0, double cu0, double cf1, double cr1, double cu1,
-                        double tf0, double tr0, double tu0, double tf1, double tr1, double tu1,
-                        float fov0, float fov1, float roll, float pitch) {
+    /**
+     * Ключ камеры. Между ключами камера летит плавно (сплайн Катмулла–Рома по позиции,
+     * точке взгляда, FOV и крену). cut = жёсткая склейка: с этого ключа начинается новый план
+     * (склейки только там, где они есть в референсе, и под манга-кадрами/вспышкой).
+     */
+    private record CamKey(int t, boolean ground, double cf, double cr, double cu,
+                          int target, double tf, double tr, double tu, float fov, float roll, boolean cut) {
     }
 
-    private static Shot shot(int start, int end, boolean camGround, int target,
-                             double[] c0, double[] c1, double[] t0, double[] t1,
-                             float fov0, float fov1, float roll, float pitch) {
-        return new Shot(start, end, camGround, target, c0[0], c0[1], c0[2], c1[0], c1[1], c1[2],
-                t0[0], t0[1], t0[2], t1[0], t1[1], t1[2], fov0, fov1, roll, pitch);
+    private static CamKey ck(int t, boolean ground, double cf, double cr, double cu,
+                             int target, double tf, double tr, double tu, float fov, float roll, boolean cut) {
+        return new CamKey(t, ground, cf, cr, cu, target, tf, tr, tu, fov, roll, cut);
     }
 
-    private static double[] v(double f, double r, double u) {
-        return new double[]{f, r, u};
-    }
+    private static final boolean G = true;
+    private static final boolean P = false;
 
-    /** Монтаж по покадровому разбору референса: жёсткие склейки, внутри плана — медленный наезд. */
-    private static final Shot[] SHOTS = {
-            // Синий в руке, камера из-за спины (0,5–1,1 с)
-            shot(0, T_BLUE_THROW, false, TGT_PLAYER, v(-3.4, -0.9, 2.1), v(-3.1, -0.8, 2.0),
-                    v(1.5, 0.2, 1.2), v(1.2, 0.3, 1.25), 70f, 70f, 0f, 0f),
-            // Бросок: камера провожает Синего вверх (1,2–1,5 с)
-            shot(T_BLUE_THROW, T_BLUE_HOVER, false, TGT_BLUE, v(-3.1, -0.8, 2.0), v(-3.6, -1.0, 1.4),
-                    v(0, 0, 0), v(0, 0, 0), 70f, 74f, 0f, 0f),
+    /** Камера по референсу: наезды на руку и лицо, отъезды на общий план, облёт вокруг. */
+    private static final CamKey[] CAM = {
+            // Синий в руке: из-за спины плавно наезжаем на руку (0,5–1,1 с)
+            ck(0, P, -3.4, -1.0, 2.0, TGT_PLAYER, 1.5, 0.2, 1.3, 70f, 0f, true),
+            ck(6, P, -2.2, -1.1, 1.75, TGT_PLAYER, 0.5, 0.3, 1.25, 64f, 0f, false),
+            ck(11, P, -1.5, -0.9, 1.55, TGT_PLAYER, 0.5, 0.35, 1.3, 58f, 0f, false),
+            // Бросок: отъезд назад-вниз, камера провожает Синего вверх (1,2–1,5 с)
+            ck(15, P, -2.4, -1.3, 1.2, TGT_BLUE, 0, 0, 0, 70f, 0f, false),
+            ck(26, P, -3.8, -1.7, 0.9, TGT_BLUE, 0, 0, 0, 78f, -3f, false),
             // Общий план: Синий висит в небе (2,0 с)
-            shot(T_BLUE_HOVER, 34, true, TGT_GROUND, v(11.0, 3.5, 4.0), v(10.0, 3.5, 4.4),
-                    v(0.0, -0.5, 6.5), v(0.0, -0.5, 6.8), 62f, 62f, 0f, 0f),
-            // Крупно спереди, в руке загорается Красный (2,1–2,5 с)
-            shot(34, T_VORTEX, false, TGT_PLAYER, v(2.2, -0.4, 1.2), v(1.9, -0.35, 1.25),
-                    v(0.0, 0.1, 1.2), v(0.0, 0.1, 1.2), 70f, 70f, 0f, 0f),
-            // Вихрь вокруг, красная энергия (2,8–3,2 с)
-            shot(T_VORTEX, T_RED_FACE, false, TGT_PLAYER, v(2.1, -0.5, 1.5), v(1.8, -0.4, 1.45),
-                    v(0.0, 0.1, 1.3), v(0.0, 0.1, 1.3), 72f, 70f, -5f, 0f),
-            // Красный к лицу (3,3–3,8 с)
-            shot(T_RED_FACE, T_LETTERBOX, false, TGT_PLAYER, v(1.5, -1.0, 1.35), v(1.35, -0.9, 1.4),
-                    v(0.0, 0.15, 1.65), v(0.0, 0.15, 1.7), 68f, 66f, 0f, -10f),
-            // Общий план спереди: выстрел Красного вверх (3,9–4,3 с)
-            shot(T_LETTERBOX, T_RED_HOVER, false, TGT_GROUND, v(8.0, 0.6, 1.6), v(7.4, 0.6, 1.8),
-                    v(0.0, 0.0, 2.2), v(0.0, 0.0, 6.0), 62f, 62f, 0f, -15f),
-            // Присед перед прыжком (4,4–4,6 с)
-            shot(T_RED_HOVER, 86, false, TGT_PLAYER, v(3.6, 0.9, 0.7), v(3.4, 0.9, 0.7),
-                    v(0.0, 0.0, 0.9), v(0.0, 0.0, 0.9), 66f, 66f, 0f, 0f),
-            // Взлёт снизу, с земли (4,7–4,9 с)
-            shot(86, 92, true, TGT_CHEST, v(2.6, -1.4, 0.9), v(2.6, -1.4, 0.9),
-                    v(0, 0, 0), v(0, 0, 0), 76f, 78f, 8f, 0f),
-            // Сверху-сзади, внизу дорога (5,0–5,1 с)
-            shot(92, T_APEX, false, TGT_PLAYER, v(-1.4, 0.7, 3.4), v(-1.2, 0.6, 3.0),
-                    v(1.6, 0.2, -3.0), v(1.6, 0.2, -2.0), 72f, 72f, 0f, 0f),
-            // Сзади: шары по бокам на одном уровне (5,2–5,3 с)
-            shot(T_APEX, 106, false, TGT_PLAYER, v(-2.4, 0.2, 1.9), v(-2.1, 0.2, 1.8),
-                    v(1.2, 0.0, 1.6), v(1.2, 0.0, 1.6), 76f, 76f, 0f, 0f),
-            // Средний план спереди в небе (5,4–6,0 с)
-            shot(106, T_FACE, false, TGT_PLAYER, v(4.2, 0.0, 1.5), v(3.7, 0.0, 1.5),
-                    v(0.0, 0.0, 1.35), v(0.0, 0.0, 1.4), 70f, 70f, 0f, 0f),
-            // Лицо крупным планом, шары по краям (6,1–6,8 с)
-            shot(T_FACE, T_MERGE, false, TGT_PLAYER, v(1.35, 0.0, 1.5), v(1.2, 0.0, 1.55),
-                    v(0.0, 0.0, 1.62), v(0.0, 0.0, 1.62), 70f, 66f, 0f, 12f),
-            // Из-за плеча: шары сходятся (6,9–7,6 с), под манга-кадрами камера стоит
-            shot(T_MERGE, T_COSMOS, false, TGT_PLAYER, v(-1.3, -1.4, 1.75), v(-1.1, -1.3, 1.75),
-                    v(1.6, 0.3, 1.45), v(1.6, 0.3, 1.45), 70f, 66f, 0f, 0f),
-            // Космос: снизу спереди, «голландский» угол (8,2–9,3 с)
-            shot(T_COSMOS, T_EXPLODE, false, TGT_PLAYER, v(1.5, 0.5, 0.45), v(2.3, 0.6, 0.35),
-                    v(0.0, 0.0, 1.55), v(0.0, 0.0, 1.6), 75f, 84f, -14f, -18f),
+            ck(27, G, 8.0, 3.0, 4.0, TGT_GROUND, 0.0, -0.6, 4.2, 66f, 0f, true),
+            ck(35, G, 6.4, 2.2, 3.6, TGT_GROUND, 0.0, -0.4, 3.0, 62f, 0f, false),
+            // Крупно спереди: в руке загорается Красный (2,1–2,5 с)
+            ck(36, P, 2.4, -0.6, 1.3, TGT_PLAYER, 0.0, 0.1, 1.25, 68f, 0f, true),
+            ck(44, P, 1.85, -0.45, 1.3, TGT_PLAYER, 0.0, 0.1, 1.25, 62f, 0f, false),
+            // Вихрь: отъезд, потом медленный наезд к лицу и Красному (2,8–3,8 с)
+            ck(45, P, 2.5, -0.5, 1.5, TGT_PLAYER, 0.0, 0.1, 1.25, 76f, -4f, true),
+            ck(52, P, 1.95, -0.4, 1.45, TGT_PLAYER, 0.0, 0.1, 1.3, 70f, -6f, false),
+            ck(58, P, 1.6, -0.9, 1.45, TGT_PLAYER, 0.0, 0.12, 1.62, 62f, -2f, false),
+            ck(66, P, 1.25, -0.75, 1.6, TGT_PLAYER, 0.0, 0.15, 1.72, 52f, 0f, false),
+            // Общий план: выстрел Красного вверх, камера задирается и опускается к приседу (3,9–4,6 с)
+            ck(67, P, 7.6, 0.8, 1.3, TGT_PLAYER, 0.0, 0.0, 2.2, 62f, 0f, true),
+            ck(74, P, 7.0, 0.7, 1.6, TGT_GROUND, 0.0, 0.0, 5.0, 64f, 0f, false),
+            ck(80, P, 4.2, 1.0, 0.9, TGT_PLAYER, 0.0, 0.0, 1.0, 66f, 0f, false),
+            ck(86, P, 3.2, 0.9, 0.6, TGT_PLAYER, 0.0, 0.0, 0.8, 60f, 0f, false),
+            // Взлёт: камера с земли смотрит вверх на сальто (4,7–4,9 с)
+            ck(87, G, 2.8, -1.6, 0.9, TGT_CHEST, 0, 0, 0, 78f, 8f, true),
+            ck(97, G, 2.2, -1.2, 1.0, TGT_CHEST, 0, 0, 0, 84f, 5f, false),
+            // В небе: сзади-сверху, облёт сбоку, средний план спереди, наезд на лицо (5,2–6,8 с)
+            ck(98, P, -2.0, 0.4, 2.6, TGT_PLAYER, 1.2, 0.0, 1.2, 74f, 0f, true),
+            ck(104, P, -2.5, 0.1, 1.9, TGT_PLAYER, 1.2, 0.0, 1.6, 76f, 0f, false),
+            ck(110, P, 1.0, -3.6, 1.7, TGT_PLAYER, 0.0, 0.0, 1.4, 72f, 0f, false),
+            ck(116, P, 3.8, 0.2, 1.5, TGT_PLAYER, 0.0, 0.0, 1.4, 68f, 0f, false),
+            ck(122, P, 1.65, 0.0, 1.55, TGT_PLAYER, 0.0, 0.0, 1.62, 64f, 0f, false),
+            ck(130, P, 1.15, 0.0, 1.58, TGT_PLAYER, 0.0, 0.0, 1.62, 54f, 0f, false),
+            // Из-за плеча: шары сходятся, медленный наезд (6,9–7,6 с)
+            ck(131, P, -1.4, -1.5, 1.8, TGT_PLAYER, 1.6, 0.3, 1.45, 70f, 0f, true),
+            ck(154, P, -0.85, -1.05, 1.7, TGT_PLAYER, 1.3, 0.15, 1.45, 56f, 0f, false),
+            // Космос: снизу спереди, «голландский» угол, отъезд (8,2–9,3 с)
+            ck(155, P, 1.4, 0.5, 0.45, TGT_PLAYER, 0.0, 0.0, 1.55, 74f, -14f, true),
+            ck(166, P, 1.9, 0.9, 0.4, TGT_PLAYER, 0.0, 0.0, 1.6, 80f, -16f, false),
+            ck(183, P, 2.5, 0.6, 0.35, TGT_PLAYER, 0.0, 0.0, 1.6, 88f, -12f, false),
             // Взрыв издалека (9,9–10,2 с)
-            shot(T_EXPLODE, 400, true, TGT_GROUND, v(44.0, 9.0, 18.0), v(48.0, 10.0, 19.0),
-                    v(0.0, 0.0, 10.0), v(0.0, 0.0, 11.0), 70f, 70f, 0f, 0f),
+            ck(184, G, 40.0, 9.0, 15.0, TGT_GROUND, 0.0, 0.0, JUMP_HEIGHT + 1.0, 70f, 0f, true),
+            ck(240, G, 46.0, 10.0, 17.0, TGT_GROUND, 0.0, 0.0, JUMP_HEIGHT + 2.0, 72f, 0f, false),
     };
 
-    private static Shot shotAt(double t) {
-        for (Shot shot : SHOTS) {
-            if (t < shot.end) return shot;
-        }
-        return SHOTS[SHOTS.length - 1];
+    private static Vec3 keyPos(Scene s, CamKey k, double t) {
+        return k.ground ? s.at(k.cf, k.cr, k.cu) : s.atP(k.cf, k.cr, k.cu, t);
     }
 
-    private static double shotProgress(Shot shot, double t) {
-        int end = Math.min(shot.end, shot.start + 60);
-        return Mth.clamp((t - shot.start) / (double) (end - shot.start), 0.0, 1.0);
-    }
-
-    private static Vec3 shotTarget(Scene scene, Shot shot, double t, double s) {
-        double f = Mth.lerp(s, shot.tf0, shot.tf1), r = Mth.lerp(s, shot.tr0, shot.tr1), u = Mth.lerp(s, shot.tu0, shot.tu1);
-        return switch (shot.target) {
-            case TGT_GROUND -> scene.at(f, r, u);
+    private static Vec3 keyTarget(Scene s, CamKey k, double t) {
+        return switch (k.target) {
+            case TGT_GROUND -> s.at(k.tf, k.tr, k.tu);
             case TGT_BLUE -> {
-                Vec3 b = bluePos(scene, t);
-                yield b != null ? b : scene.atP(0.0, 0.0, 1.5, t);
+                Vec3 b = bluePos(s, t);
+                yield b != null ? b : s.atP(0.0, 0.0, 1.5, t);
             }
-            case TGT_CHEST -> scene.atP(0.0, 0.0, 1.1, t);
-            default -> scene.atP(f, r, u, t);
+            case TGT_CHEST -> s.atP(0.0, 0.0, 1.1, t);
+            default -> s.atP(k.tf, k.tr, k.tu, t);
         };
     }
+
+    private static Vec3 catmull(Vec3 p0, Vec3 p1, Vec3 p2, Vec3 p3, double u) {
+        return new Vec3(catmull(p0.x, p1.x, p2.x, p3.x, u), catmull(p0.y, p1.y, p2.y, p3.y, u), catmull(p0.z, p1.z, p2.z, p3.z, u));
+    }
+
+    private static double catmull(double p0, double p1, double p2, double p3, double u) {
+        double u2 = u * u, u3 = u2 * u;
+        return 0.5 * (2.0 * p1 + (-p0 + p2) * u + (2.0 * p0 - 5.0 * p1 + 4.0 * p2 - p3) * u2 + (-p0 + 3.0 * p1 - 3.0 * p2 + p3) * u3);
+    }
+
+    /** Текущее состояние камеры. */
+    private record CamState(Vec3 pos, Vec3 target, float fov, float roll) {
+    }
+
+    private static CamState cameraAt(Scene s, double t) {
+        int i = 0;
+        while (i + 1 < CAM.length && CAM[i + 1].t <= t) i++;
+        CamKey k1 = CAM[i];
+        boolean hasNext = i + 1 < CAM.length && !CAM[i + 1].cut;
+        if (!hasNext) {
+            return new CamState(keyPos(s, k1, t), keyTarget(s, k1, t), k1.fov, k1.roll);
+        }
+        CamKey k2 = CAM[i + 1];
+        CamKey k0 = k1.cut || i == 0 ? k1 : CAM[i - 1];
+        CamKey k3 = i + 2 < CAM.length && !CAM[i + 2].cut ? CAM[i + 2] : k2;
+        double u = Mth.clamp((t - k1.t) / (double) (k2.t - k1.t), 0.0, 1.0);
+
+        Vec3 pos = catmull(keyPos(s, k0, t), keyPos(s, k1, t), keyPos(s, k2, t), keyPos(s, k3, t), u);
+        Vec3 target = catmull(keyTarget(s, k0, t), keyTarget(s, k1, t), keyTarget(s, k2, t), keyTarget(s, k3, t), u);
+        float fov = (float) catmull(k0.fov, k1.fov, k2.fov, k3.fov, u);
+        float roll = (float) catmull(k0.roll, k1.roll, k2.roll, k3.roll, u);
+        return new CamState(pos, target, fov, roll);
+    }
+
+    private static float currentFov = 70f;
+    private static float currentRoll = 0f;
 
     @SubscribeEvent(priority = EventPriority.HIGHEST)
     public static void onRenderTick(TickEvent.RenderTickEvent event) {
@@ -527,13 +596,12 @@ public final class MaximumPurpleClient {
 
         float pt = event.renderTickTime;
         double t = scene.age + pt;
-        Shot shot = shotAt(t);
-        double s = shotProgress(shot, t);
+        CamState cs = cameraAt(scene, t);
+        currentFov = cs.fov;
+        currentRoll = cs.roll;
 
-        double cf = Mth.lerp(s, shot.cf0, shot.cf1), cr = Mth.lerp(s, shot.cr0, shot.cr1), cu = Mth.lerp(s, shot.cu0, shot.cu1);
-        Vec3 pos = shot.camGround ? scene.at(cf, cr, cu) : scene.atP(cf, cr, cu, t);
-        Vec3 target = shotTarget(scene, shot, t, s);
-        Vec3 d = target.subtract(pos);
+        Vec3 pos = cs.pos;
+        Vec3 d = cs.target.subtract(pos);
         float yaw = (float) Math.toDegrees(Math.atan2(-d.x, d.z));
         float pitch = (float) Math.toDegrees(-Math.atan2(d.y, Math.sqrt(d.x * d.x + d.z * d.z)));
 
@@ -550,7 +618,7 @@ public final class MaximumPurpleClient {
         camera.setXRot(pitch);
         camera.xRotO = pitch;
 
-        // Тело игрока смотрит туда, куда смотрел при старте.
+        // Тело игрока смотрит туда, куда смотрел при старте; голову ведёт анимация.
         LocalPlayer player = mc.player;
         player.setYRot(scene.yaw);
         player.yRotO = scene.yaw;
@@ -558,8 +626,8 @@ public final class MaximumPurpleClient {
         player.yBodyRotO = scene.yaw;
         player.yHeadRot = scene.yaw;
         player.yHeadRotO = scene.yaw;
-        player.setXRot(shot.pitch);
-        player.xRotO = shot.pitch;
+        player.setXRot(0.0f);
+        player.xRotO = 0.0f;
     }
 
     @SubscribeEvent(priority = EventPriority.LOW)
@@ -567,7 +635,6 @@ public final class MaximumPurpleClient {
         Scene scene = local;
         if (scene == null || cameraEntity == null) return;
         double t = scene.age + event.getPartialTick();
-        Shot shot = shotAt(t);
 
         float shake = 0.0f;
         if (t >= T_EXPLODE && t < T_EXPLODE + 20) {
@@ -579,18 +646,18 @@ public final class MaximumPurpleClient {
         } else if (t >= T_COSMOS && t < T_FLASH) {
             shake = 0.3f;
         }
-        event.setYaw(event.getYaw() + (float) Math.sin(t * 5.1) * shake);
-        event.setPitch(event.getPitch() + (float) Math.cos(t * 6.3) * shake * 0.7f);
-        event.setRoll(shot.roll + (float) Math.sin(t * 7.7) * shake * 0.5f);
+        // «Ручная» камера: лёгкое живое покачивание всегда
+        float hand = 0.18f;
+        event.setYaw(event.getYaw() + (float) Math.sin(t * 5.1) * shake + (float) Math.sin(t * 0.37) * hand);
+        event.setPitch(event.getPitch() + (float) Math.cos(t * 6.3) * shake * 0.7f + (float) Math.sin(t * 0.29 + 1.3) * hand);
+        event.setRoll(currentRoll + (float) Math.sin(t * 7.7) * shake * 0.5f + (float) Math.sin(t * 0.23) * hand * 0.6f);
     }
 
     @SubscribeEvent(priority = EventPriority.LOW)
     public static void onFov(ViewportEvent.ComputeFov event) {
         Scene scene = local;
         if (scene == null || cameraEntity == null || !event.usedConfiguredFov()) return;
-        double t = scene.age + event.getPartialTick();
-        Shot shot = shotAt(t);
-        event.setFOV(Mth.lerp(shotProgress(shot, t), shot.fov0, shot.fov1));
+        event.setFOV(currentFov);
     }
 
     // ------------------------------------------------------------------ hide UI / hands / name
@@ -609,32 +676,6 @@ public final class MaximumPurpleClient {
     public static void onNameTag(RenderNameTagEvent event) {
         Minecraft mc = Minecraft.getInstance();
         if (cameraEntity != null && event.getEntity() == mc.player) event.setResult(Event.Result.DENY);
-    }
-
-    /** Сальто во время прыжка (4,7–4,9 с референса). */
-    @SubscribeEvent
-    public static void onRenderPlayerPre(RenderPlayerEvent.Pre event) {
-        flipPushed = false;
-        Scene scene = local;
-        Minecraft mc = Minecraft.getInstance();
-        if (scene == null || event.getEntity() != mc.player) return;
-        double t = scene.age + event.getPartialTick();
-        if (t < T_JUMP + 2 || t > T_APEX - 2) return;
-        float angle = (float) (360.0 * smooth((t - (T_JUMP + 2)) / (double) (T_APEX - T_JUMP - 4)));
-        PoseStack pose = event.getPoseStack();
-        pose.pushPose();
-        pose.translate(0.0, 0.9, 0.0);
-        pose.mulPose(Axis.XP.rotationDegrees(-angle));
-        pose.translate(0.0, -0.9, 0.0);
-        flipPushed = true;
-    }
-
-    @SubscribeEvent
-    public static void onRenderPlayerPost(RenderPlayerEvent.Post event) {
-        if (flipPushed) {
-            event.getPoseStack().popPose();
-            flipPushed = false;
-        }
     }
 
     // ------------------------------------------------------------------ world rendering
@@ -810,7 +851,7 @@ public final class MaximumPurpleClient {
         if (t >= T_RED_THROW - 2 && t < T_RED_THROW + 12) {
             float life = 1.0f - (float) smooth((t - (T_RED_THROW + 4)) / 8.0);
             float grow = (float) smooth((t - (T_RED_THROW - 2)) / 4.0);
-            Vec3 top = scene.atP(0.05, 0.36, 2.45, t);
+            Vec3 top = scene.atP(0.05, 0.31, 2.15, t);
             RenderSystem.setShader(GameRenderer::getPositionColorShader);
             HollowPurpleReferenceClient.mpAdditiveBlend();
             for (int i = 0; i < 22; i++) {
@@ -977,7 +1018,7 @@ public final class MaximumPurpleClient {
         }
 
         if (t >= T_RED_THROW && t < T_RED_THROW + 4) {
-            Vec3 top = s.atP(0.05, 0.36, 2.45, t);
+            Vec3 top = s.atP(0.05, 0.31, 2.15, t);
             for (int i = 0; i < 14; i++) {
                 Vec3 v = rndVec(0.25).add(0.0, 0.35, 0.0);
                 spark(top, v, 0.16f, 1.0f, 0.1f + RNG.nextFloat() * 0.3f, 0.25f, 16, 0.86);
