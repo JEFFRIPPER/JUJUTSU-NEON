@@ -95,7 +95,7 @@ public final class JujutsuNeonFlightPatch {
             NetworkEvent.Context context = contextSupplier.get();
             context.enqueueWork(() -> {
                 ServerPlayer player = context.getSender();
-                if (player != null && !DomainExpansion.blocksActions(player)) handleAction(player, msg.action);
+                if (player != null && !DomainExpansion.blocksActions(player) && !DomainExpansion.isStunned(player)) handleAction(player, msg.action);
             });
             context.setPacketHandled(true);
         }

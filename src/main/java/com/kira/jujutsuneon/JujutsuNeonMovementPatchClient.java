@@ -95,7 +95,8 @@ public final class JujutsuNeonMovementPatchClient {
         try {
             return HUD_MAX_BLUE_ACTIVE.getBoolean(null) || HUD_PURPLE_CASTING.getBoolean(null)
                     || MaximumPurpleClient.isLocalActive()
-                    || DomainExpansionClient.locksLocalPlayer() || LapseBlueClient.locksLocalPlayer() || RedTechniqueClient.locksLocalPlayer();
+                    || DomainExpansionClient.locksLocalPlayer() || DomainExpansionClient.isStunnedLocal()
+                    || LapseBlueClient.locksLocalPlayer() || RedTechniqueClient.locksLocalPlayer();
         } catch (IllegalAccessException exception) {
             return true;
         }

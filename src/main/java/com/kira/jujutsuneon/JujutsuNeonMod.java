@@ -126,7 +126,7 @@ import java.util.function.Supplier;
  * Z — Blue; удержание 1 сек запускает Maximum Blue, отпускание начинает рассеивание
  * X — Red: отпусти до 2с для обычного выстрела; удержание 2с превращает его в Maximum Red; авто-выстрел на 5с
  * G — Hollow Purple: 5-секундный каст, затем автоматический дальнобойный выстрел
- * V — Infinity ON/OFF; V+ — Domain Expansion
+ * V — Infinity ON/OFF; удержание V 2 с — Простая территория (Simple Domain)
  * B — RCT/лечение; B+ — Limitless Blink
  *
  * H — показать/скрыть боковую панель техник.
@@ -244,6 +244,10 @@ public class JujutsuNeonMod {
     public static final RegistryObject<SoundEvent> SFX_INFINITY_OFF = sound("infinity_off");
     public static final RegistryObject<SoundEvent> SFX_INFINITY_BLOCK = sound("infinity_block");
     public static final RegistryObject<SoundEvent> SFX_RCT_HEAL = sound("rct_heal");
+    public static final RegistryObject<SoundEvent> SFX_SIMPLE_DOMAIN_CAST = sound("simple_domain_cast");
+    public static final RegistryObject<SoundEvent> SFX_SIMPLE_DOMAIN_HIT = sound("simple_domain_hit");
+    public static final RegistryObject<SoundEvent> SFX_SIMPLE_DOMAIN_BREAK = sound("simple_domain_break");
+    public static final RegistryObject<SoundEvent> SFX_SIMPLE_DOMAIN_END = sound("simple_domain_end");
 
     public static final RegistryObject<Item> GOJO_BLINDFOLD = ITEMS.register(
             "gojo_blindfold",
@@ -271,6 +275,7 @@ public class JujutsuNeonMod {
         DomainExpansion.register(modBus);
         RedTechnique.init();
         CursedFx.init();
+        SimpleDomain.init();
         MovementFx.init();
         modBus.addListener(this::addToCreativeTab);
 
@@ -454,6 +459,8 @@ public class JujutsuNeonMod {
         if (MaximumPurple.isActive(player)) return;
         // Обездвижен территорией или сам кастует территорию.
         if (DomainExpansion.blocksActions(player)) return;
+        // Обездвижен, но стоит в простой территории: доступны только Синий, Макс. Синий и Красный.
+        if (DomainExpansion.isStunned(player) && ability != Ability.BLUE && ability != Ability.MAX_BLUE && ability != Ability.RED) return;
 
         if (isHollowPurpleCasting(player) && ability != Ability.HOLLOW_PURPLE) {
             player.displayClientMessage(
@@ -3376,7 +3383,7 @@ public class JujutsuNeonMod {
 
     private static void handleMovement(ServerPlayer player, MovementAction action) {
         if (player == null || !player.isAlive() || player.isSpectator()) return;
-        if (action != MovementAction.SPEED_OFF && DomainExpansion.blocksActions(player)) return;
+        if (action != MovementAction.SPEED_OFF && (DomainExpansion.blocksActions(player) || DomainExpansion.isStunned(player))) return;
 
         if (isHollowPurpleCasting(player)) {
             if (action == MovementAction.SPEED_OFF) {
@@ -4585,7 +4592,7 @@ public class JujutsuNeonMod {
             NetworkEvent.Context context = contextSupplier.get();
             context.enqueueWork(() -> {
                 ServerPlayer player = context.getSender();
-                if (player == null || DomainExpansion.blocksActions(player)) return;
+                if (player == null || DomainExpansion.blocksActions(player) || DomainExpansion.isStunned(player)) return;
                 // Через стену территории телепортом не пройти.
                 if (DomainExpansion.separated(player.level(), player.position(), Vec3.atCenterOf(msg.target))) return;
                 executeLongRangeTeleport(player, msg.target, msg.face);
@@ -5398,7 +5405,7 @@ public class JujutsuNeonMod {
 
             Vec3 dir = clientHorizontalDirection(mc);
             boolean moving = dir.lengthSqr() >= 1.0E-6;
-            boolean superRun = ClientModEvents.SUPER_SPEED_KEY.isDown();
+            boolean superRun = ClientModEvents.SUPER_SPEED_KEY.isDown() && !DomainExpansionClient.isStunnedLocal();
             double speed = superRun ? CUSTOM_RUN_BLOCKS_PER_TICK : CUSTOM_WALK_BLOCKS_PER_TICK;
             ClientMovementState state = resolveMovementState(mc, superRun);
 
@@ -5460,7 +5467,7 @@ public class JujutsuNeonMod {
                 return;
             }
 
-            boolean superRun = ClientModEvents.SUPER_SPEED_KEY.isDown();
+            boolean superRun = ClientModEvents.SUPER_SPEED_KEY.isDown() && !DomainExpansionClient.isStunnedLocal();
             ClientMovementState state = hudBlindfold && mc.level != null && mc.screen == null
                     ? resolveMovementState(mc, superRun)
                     : ClientMovementState.LOCKED;
@@ -5673,15 +5680,21 @@ public class JujutsuNeonMod {
                 chargingAnim = "NONE";
                 chargingProgress = 0.0f;
                 resetPurpleHold();
+                // Удержание V работает и под обездвиживанием: так пойманный раскрывает простую территорию.
+                processSimpleDomainKey(mc, true);
                 return;
             }
+
+            // Обездвижен территорией, но стоит в своей простой территории: можно ходить и обычно прыгать,
+            // из техник — только Синий, Макс. Синий, Красный и Макс. Красный.
+            boolean sdRestricted = DomainExpansionClient.isStunnedLocal();
 
             while (ClientModEvents.HUD_KEY.consumeClick()) {
                 hudVisible = !hudVisible;
             }
 
             while (ClientModEvents.TELEPORT_KEY.consumeClick()) {
-                if (hudBlindfold && mc.level != null) {
+                if (hudBlindfold && mc.level != null && !sdRestricted) {
                     double maxDistance = Math.max(16.0, mc.options.renderDistance().get() * 16.0);
                     Vec3 start = mc.player.getEyePosition();
                     Vec3 end = start.add(mc.player.getLookAngle().normalize().scale(maxDistance));
@@ -5704,7 +5717,8 @@ public class JujutsuNeonMod {
             while (ClientModEvents.PURPLE_KEY.consumeClick()) {
                 // G обрабатывается по удержанию: см. processPurpleKey().
             }
-            processPurpleKey();
+            if (sdRestricted) resetPurpleHold();
+            else processPurpleKey();
 
 
             processDoubleJumpToggle(mc);
@@ -5725,7 +5739,17 @@ public class JujutsuNeonMod {
                 }
             }
 
-            if (hudBlindfold && !mc.player.getAbilities().flying && !mc.player.isInWaterOrBubble()) {
+            if (sdRestricted) {
+                // В простой территории под обездвиживанием — только обычный прыжок с земли.
+                if (takeoffCrouch) {
+                    takeoffCrouch = false;
+                    MovementFxClient.localCrouch(false);
+                }
+                if (hudBlindfold && jumpHeldNow && !jumpChargeWasDown && mc.player.onGround()) fireChargedJump(mc, 0);
+                jumpChargeWasDown = jumpHeldNow;
+                jumpChargeTicks = 0;
+                jumpPressStartedInAir = false;
+            } else if (hudBlindfold && !mc.player.getAbilities().flying && !mc.player.isInWaterOrBubble()) {
                 boolean pressedNow = jumpHeldNow && !jumpChargeWasDown;
                 boolean releasedNow = !jumpHeldNow && jumpChargeWasDown;
 
@@ -5807,7 +5831,7 @@ public class JujutsuNeonMod {
 
             // Dash Q is consumed exclusively by JujutsuNeonMovementPatchClient.
 
-            boolean speedHeld = ClientModEvents.SUPER_SPEED_KEY.isDown();
+            boolean speedHeld = ClientModEvents.SUPER_SPEED_KEY.isDown() && !sdRestricted;
             if (speedHeld != lastSpeedHeld) {
                 NETWORK.sendToServer(new MovementPacket(speedHeld ? MovementAction.SPEED_ON : MovementAction.SPEED_OFF));
                 lastSpeedHeld = speedHeld;
@@ -5840,8 +5864,49 @@ public class JujutsuNeonMod {
             // Все базовые кнопки переназначаются через меню управления Minecraft.
             processBlueKey(ClientModEvents.BLUE_KEY, BLUE_STATE);
             processRedKey(ClientModEvents.RED_KEY, RED_STATE);
-            processTapKey(ClientModEvents.DOMAIN_KEY, Ability.INFINITY_TOGGLE);
-            processTapKey(ClientModEvents.UTILITY_KEY, Ability.RCT);
+            processSimpleDomainKey(mc, sdRestricted);
+            if (!sdRestricted) processTapKey(ClientModEvents.UTILITY_KEY, Ability.RCT);
+        }
+
+        // V: короткое нажатие — Бесконечность, удержание 2 с — Простая территория.
+        private static boolean simpleKeyWasDown;
+        private static int simpleKeyTicks;
+        private static boolean simpleKeyTriggered;
+
+        private static void processSimpleDomainKey(Minecraft mc, boolean restricted) {
+            KeyMapping key = ClientModEvents.DOMAIN_KEY;
+            while (key.consumeClick()) { }
+            boolean down = key.isDown();
+            if (down) {
+                if (!simpleKeyWasDown) {
+                    simpleKeyTicks = 0;
+                    simpleKeyTriggered = false;
+                }
+                simpleKeyTicks++;
+                if (!simpleKeyTriggered && simpleKeyTicks > 5) {
+                    chargingAnim = "CHARGE_SIMPLE_DOMAIN";
+                    chargingProgress = Mth.clamp(simpleKeyTicks / (float) SimpleDomain.HOLD_TICKS, 0.0f, 1.0f);
+                }
+                if (!simpleKeyTriggered && simpleKeyTicks >= SimpleDomain.HOLD_TICKS) {
+                    simpleKeyTriggered = true;
+                    chargingAnim = "NONE";
+                    chargingProgress = 0.0f;
+                    SimpleDomain.request();
+                }
+            } else if (simpleKeyWasDown) {
+                if ("CHARGE_SIMPLE_DOMAIN".equals(chargingAnim)) {
+                    chargingAnim = "NONE";
+                    chargingProgress = 0.0f;
+                }
+                // Отпустил раньше 2 секунд — Бесконечность (если сейчас можно).
+                if (!simpleKeyTriggered && !restricted) {
+                    NETWORK.sendToServer(new AbilityPacket(Ability.INFINITY_TOGGLE));
+                    startAnim(Ability.INFINITY_TOGGLE.name(), 12);
+                }
+                simpleKeyTicks = 0;
+                simpleKeyTriggered = false;
+            }
+            simpleKeyWasDown = down;
         }
 
         @SubscribeEvent
@@ -6175,6 +6240,9 @@ public class JujutsuNeonMod {
                 if ("CHARGE_MAX_PURPLE".equals(chargingAnim)) {
                     String label = chargingProgress >= 1.0f ? "MAX PURPLE" : "MAX PURPLE " + (int) (chargingProgress * 100.0f) + "%";
                     g.drawString(mc.font, label, right - mc.font.width(label), chargeY - 10, 0xFFC58BFF, false);
+                } else if ("CHARGE_SIMPLE_DOMAIN".equals(chargingAnim)) {
+                    String label = "SIMPLE DOMAIN " + (int) (chargingProgress * 100.0f) + "%";
+                    g.drawString(mc.font, label, right - mc.font.width(label), chargeY - 10, 0xFF7FF5E8, false);
                 }
             }
 

@@ -265,7 +265,7 @@ public final class MaximumPurple {
             JujutsuNeonMod.requireBlindfoldMessage(player);
             return;
         }
-        if (DomainExpansion.blocksActions(player)) return;
+        if (DomainExpansion.blocksActions(player) || DomainExpansion.isStunned(player)) return;
         // Внутри территории подъём на 24 блока не должен упираться в её стену.
         if (DomainExpansion.riseHitsWall(player.level(), player.position(), RISE_HEIGHT + 2.0)) {
             player.displayClientMessage(Component.literal("Здесь не подняться: мешает стена территории")

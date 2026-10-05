@@ -203,7 +203,12 @@ public final class DomainExpansionClient {
 
     /** Локальный игрок ничего не может делать: смотрит катсцену или обездвижен. */
     public static boolean locksLocalPlayer() {
-        return cutscene != null || stunOwner != null;
+        return cutscene != null || (stunOwner != null && !SimpleDomainClient.freesLocalPlayer());
+    }
+
+    /** Локальный игрок обездвижен территорией (даже если сейчас ходит в своей простой территории). */
+    public static boolean isStunnedLocal() {
+        return stunOwner != null;
     }
 
     /** Идёт катсцена каста у локального игрока. */

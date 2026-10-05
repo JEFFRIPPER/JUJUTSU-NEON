@@ -484,7 +484,7 @@ public final class DomainExpansion {
 
     /** Игроку сейчас нельзя ничего делать (обездвижен или кастует территорию). */
     static boolean blocksActions(Player player) {
-        return isStunned(player) || isCasting(player) || LapseBlue.isBusy(player);
+        return (isStunned(player) && !SimpleDomain.frees(player)) || isCasting(player) || LapseBlue.isBusy(player);
     }
 
     /** Владелец территории, которая сейчас стоит. */

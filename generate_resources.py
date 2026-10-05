@@ -386,7 +386,8 @@ for _n in ("red_cast", "max_red_cast", "red_boom"):
 # Движение: дэши, взлёт, полёт, сверхбег (свой синтез, tools/gen_move_sounds.py).
 for _n in ("move_dash_front", "move_dash_side", "move_crouch", "move_takeoff", "move_boost", "move_step", "move_land", "move_slam"):
     sound_json[_n] = {"sounds": [{"name": "jujutsu_neon:move/" + _n}]}
-for _n in ("infinity_on", "infinity_off", "infinity_block", "rct_heal"):
+for _n in ("infinity_on", "infinity_off", "infinity_block", "rct_heal",
+           "simple_domain_cast", "simple_domain_hit", "simple_domain_break", "simple_domain_end"):
     sound_json[_n] = {"sounds": [{"name": "jujutsu_neon:cursed/" + _n}]}
 ROOT.joinpath("sounds.json").write_text(json.dumps(sound_json, indent=2))
 

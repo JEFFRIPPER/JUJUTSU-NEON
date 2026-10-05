@@ -78,7 +78,7 @@ public final class JujutsuNeonMovementPatch {
             NetworkEvent.Context context = supplier.get();
             context.enqueueWork(() -> {
                 ServerPlayer player = context.getSender();
-                if (player != null && !DomainExpansion.blocksActions(player)) handlePatchedDash(player, msg.kind);
+                if (player != null && !DomainExpansion.blocksActions(player) && !DomainExpansion.isStunned(player)) handlePatchedDash(player, msg.kind);
             });
             context.setPacketHandled(true);
         }
