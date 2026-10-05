@@ -444,7 +444,7 @@ public final class DomainExpansion {
 
     /** Игроку сейчас нельзя ничего делать (обездвижен или кастует территорию). */
     static boolean blocksActions(Player player) {
-        return isStunned(player) || isCasting(player);
+        return isStunned(player) || isCasting(player) || LapseBlue.isBusy(player);
     }
 
     /** Владелец территории, которая сейчас стоит. */
@@ -521,7 +521,7 @@ public final class DomainExpansion {
             JujutsuNeonMod.requireBlindfoldMessage(player);
             return;
         }
-        if (isStunned(player) || MaximumPurple.isActive(player)
+        if (isStunned(player) || LapseBlue.isBusy(player) || MaximumPurple.isActive(player)
                 || JujutsuNeonMod.isHollowPurpleCasting(player) || JujutsuNeonMod.isMaximumBlueActive(player)) {
             player.displayClientMessage(Component.literal("Сейчас нельзя раскрыть территорию").withStyle(ChatFormatting.GRAY), true);
             return;
@@ -1151,7 +1151,8 @@ public final class DomainExpansion {
             }
             // Падение на пол внутри территории — без урона.
             e.fallDistance = 0.0f;
-            if (e instanceof Mob mob) mobPhysics(mob);
+            // Пока цель ведёт сценарий Синего, её не трогаем.
+            if (e instanceof Mob mob && !LapseBlue.isControlled(mob)) mobPhysics(mob);
         }
     }
 

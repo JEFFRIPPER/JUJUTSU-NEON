@@ -1,5 +1,7 @@
 package com.kira.jujutsuneon;
 
+import dev.kosmx.playerAnim.api.firstPerson.FirstPersonConfiguration;
+import dev.kosmx.playerAnim.api.firstPerson.FirstPersonMode;
 import dev.kosmx.playerAnim.api.layered.IAnimation;
 import dev.kosmx.playerAnim.api.layered.KeyframeAnimationPlayer;
 import dev.kosmx.playerAnim.api.layered.ModifierLayer;
@@ -49,6 +51,33 @@ final class MaximumPurpleAnimation {
                     new KeyframeAnimationPlayer(animation), true);
         } catch (RuntimeException | LinkageError ignored) {
             // Библиотека не загрузилась — кат-сцена идёт без анимации тела.
+        }
+    }
+
+    /**
+     * Анимация, у которой первые armUntilTick тиков правая рука видна и от первого лица
+     * (модель третьего лица) — например, рука, выпрямляющаяся к цели в Синем.
+     */
+    static void playWithFirstPersonArm(AbstractClientPlayer player, String name, int armUntilTick) {
+        if (player == null) return;
+        try {
+            KeyframeAnimation animation = PlayerAnimationRegistry.getAnimation(new ResourceLocation(JujutsuNeonMod.MODID, name));
+            if (animation == null) return;
+            ModifierLayer<IAnimation> layer = layer(player);
+            if (layer == null) return;
+            KeyframeAnimationPlayer anim = new KeyframeAnimationPlayer(animation) {
+                @Override
+                public FirstPersonMode getFirstPersonMode(float tickDelta) {
+                    return getTick() < armUntilTick ? FirstPersonMode.THIRD_PERSON_MODEL : FirstPersonMode.NONE;
+                }
+
+                @Override
+                public FirstPersonConfiguration getFirstPersonConfiguration(float tickDelta) {
+                    return new FirstPersonConfiguration(true, false, true, false);
+                }
+            };
+            layer.replaceAnimationWithFade(AbstractFadeModifier.standardFadeIn(2, Ease.INOUTSINE), anim, true);
+        } catch (RuntimeException | LinkageError ignored) {
         }
     }
 

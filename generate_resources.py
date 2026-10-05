@@ -376,6 +376,10 @@ sound_json["max_purple_theme_world"] = {"sounds": [{"name": "jujutsu_neon:cutsce
 # Расширение территории: голос из референса (без музыки) и звук бьющегося стекла при разрушении.
 for _n in ("domain_voice", "domain_voice_world", "domain_shatter", "domain_shatter_world"):
     sound_json[_n] = {"sounds": [{"name": "jujutsu_neon:cutscene/" + _n, "stream": _n.startswith("domain_voice")}]}
+# Обычный Синий: свой синтез (tools/gen_lapse_blue_sounds.py), моно — звучит из точки в мире.
+for _n in ("lapse_cast", "lapse_burst", "lapse_pull", "lapse_kick", "lapse_blink", "lapse_slowmo",
+           "lapse_contact", "lapse_slam", "lapse_land"):
+    sound_json[_n] = {"sounds": [{"name": "jujutsu_neon:lapse/" + _n}]}
 ROOT.joinpath("sounds.json").write_text(json.dumps(sound_json, indent=2))
 
 sr = 48000

@@ -7,7 +7,7 @@ This file is a hard contract. A movement change is invalid if any invariant belo
 - Gojo blindfold ON: Jujutsu Neon owns movement physics.
 - Exactly one movement state may own motion in a tick.
 - Legal client states are: `LOCKED`, `DASH`, `FLIGHT`, `WATER_RUN`, `WATER`, `GROUND`, `AIR`.
-- `LOCKED` is forced by Max Blue, Hollow Purple cast, the Maximum Purple cutscene, the Domain Expansion cast cutscene and the domain stun (the whole domain plus 2 minutes after it). During cutscenes the camera is a separate entity, so vanilla sends no movement packets: the client moves the player along the cutscene path and sends `PosRot` to the server every tick itself; the server only checks limits. Flight is ended and dash/jump input is ignored. A stunned player has zero movement input but keeps vanilla gravity and knockback.
+- `LOCKED` is forced by Max Blue, Hollow Purple cast, the Maximum Purple cutscene, the normal Blue combo (caster and target), the Domain Expansion cast cutscene and the domain stun (the whole domain plus 2 minutes after it). During cutscenes the camera is a separate entity, so vanilla sends no movement packets: the client moves the player along the cutscene path and sends `PosRot` to the server every tick itself; the server only checks limits. Flight is ended and dash/jump input is ignored. A stunned player has zero movement input but keeps vanilla gravity and knockback.
 - The domain wall is clamped on the client at local PlayerTick END (before the position is sent) and enforced on the server; nobody crosses it in either direction.
 - A state transition must release ownership before the next state writes velocity/position.
 - No second event handler may independently start the same dash or rewrite the same movement vector.

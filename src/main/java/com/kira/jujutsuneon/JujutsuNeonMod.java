@@ -211,6 +211,16 @@ public class JujutsuNeonMod {
     public static final RegistryObject<SoundEvent> SFX_DOMAIN_VOICE_WORLD = sound("domain_voice_world");
     public static final RegistryObject<SoundEvent> SFX_DOMAIN_SHATTER = sound("domain_shatter");
     public static final RegistryObject<SoundEvent> SFX_DOMAIN_SHATTER_WORLD = sound("domain_shatter_world");
+    // Обычный Синий (свой синтез, tools/gen_lapse_blue_sounds.py)
+    public static final RegistryObject<SoundEvent> SFX_LAPSE_CAST = sound("lapse_cast");
+    public static final RegistryObject<SoundEvent> SFX_LAPSE_BURST = sound("lapse_burst");
+    public static final RegistryObject<SoundEvent> SFX_LAPSE_PULL = sound("lapse_pull");
+    public static final RegistryObject<SoundEvent> SFX_LAPSE_KICK = sound("lapse_kick");
+    public static final RegistryObject<SoundEvent> SFX_LAPSE_BLINK = sound("lapse_blink");
+    public static final RegistryObject<SoundEvent> SFX_LAPSE_SLOWMO = sound("lapse_slowmo");
+    public static final RegistryObject<SoundEvent> SFX_LAPSE_CONTACT = sound("lapse_contact");
+    public static final RegistryObject<SoundEvent> SFX_LAPSE_SLAM = sound("lapse_slam");
+    public static final RegistryObject<SoundEvent> SFX_LAPSE_LAND = sound("lapse_land");
 
     public static final RegistryObject<Item> GOJO_BLINDFOLD = ITEMS.register(
             "gojo_blindfold",
@@ -860,6 +870,7 @@ public class JujutsuNeonMod {
         }
 
         int[] ids = new int[5];
+        List<Vec3> origins = new ArrayList<>(5);
         for (int i = 0; i < 5; i++) {
             BlockPos pos = blocks.get(i);
             BlockState state = level.getBlockState(pos);
@@ -869,13 +880,15 @@ public class JujutsuNeonMod {
             falling.setDeltaMovement(Vec3.ZERO);
             falling.fallDistance = 0.0F;
             ids[i] = falling.getId();
+            origins.add(falling.position());
         }
 
         player.getPersistentData().putInt("jn_blue_mode", BLUE_MODE_BLOCKS);
         player.getPersistentData().putIntArray("jn_blue_block_ids", ids);
-        player.getPersistentData().putLong("jn_blue_until", level.getGameTime() + 200);
+        player.getPersistentData().putLong("jn_blue_until", level.getGameTime() + 200 + LapseBlue.G_PULL_END);
 
-        playSfx(level, player, SFX_BLUE, 0.68f, 1.18f);
+        // Рука к блокам с синим, блоки притягиваются; клиенты ведут их сами — плавно.
+        LapseBlue.startGrab(player, ids, origins);
         player.displayClientMessage(
                 Component.literal("BLUE // 5 БЛОКОВ ЗАХВАЧЕНО // ЛКМ: БРОСИТЬ")
                         .withStyle(ChatFormatting.AQUA),
@@ -900,8 +913,7 @@ public class JujutsuNeonMod {
         handSign(player);
 
         LivingEntity target = findBlueLivingTarget(level, player);
-        if (target != null) {
-            startBlueEntityHold(player, target);
+        if (target != null && LapseBlue.tryStart(player, target)) {
             return true;
         }
 
@@ -939,6 +951,7 @@ public class JujutsuNeonMod {
     }
 
     private static void clearBlueState(ServerPlayer player) {
+        LapseBlue.endGrab(player);
         player.getPersistentData().putInt("jn_blue_mode", BLUE_MODE_NONE);
         player.getPersistentData().remove("jn_blue_target_uuid");
         player.getPersistentData().remove("jn_blue_block_ids");
@@ -987,6 +1000,7 @@ public class JujutsuNeonMod {
             }
         }
 
+        LapseBlue.endGrab(player);
         player.getPersistentData().putInt("jn_blue_mode", BLUE_MODE_PROJECTILE);
         player.getPersistentData().putLong("jn_blue_projectile_until", level.getGameTime() + 70);
         playSfx(level, player, SFX_BLUE, 0.82f, 1.32f);
@@ -1029,6 +1043,7 @@ public class JujutsuNeonMod {
         int mode = player.getPersistentData().getInt("jn_blue_mode");
 
         if (mode == BLUE_MODE_BLOCKS) {
+            if (LapseBlue.grabAge(player) >= 0 && LapseBlue.grabAge(player) < LapseBlue.G_PULL_END) return;
             releaseBlueBlocks(player, true);
         } else if (mode == BLUE_MODE_ENTITY) {
             releaseBlueEntity(player, true);
@@ -1055,44 +1070,16 @@ public class JujutsuNeonMod {
             }
 
             int[] ids = player.getPersistentData().getIntArray("jn_blue_block_ids");
-            Vec3 forward = player.getLookAngle().normalize();
-            Vec3 right = forward.cross(new Vec3(0.0, 1.0, 0.0));
-            if (right.lengthSqr() < 1.0E-4) right = new Vec3(1.0, 0.0, 0.0);
-            right = right.normalize();
-            Vec3 up = right.cross(forward).normalize();
-            Vec3 center = player.getEyePosition().add(forward.scale(2.75)).add(0.0, -0.30, 0.0);
-
-            double[][] offsets = {
-                    {0.00, 0.00},
-                    {0.34, 0.05},
-                    {-0.34, 0.05},
-                    {0.08, 0.34},
-                    {-0.08, -0.34}
-            };
-
-            for (int i = 0; i < ids.length && i < offsets.length; i++) {
+            for (int i = 0; i < ids.length && i < LapseBlue.GRAB_OFFSETS.length; i++) {
                 Entity e = level.getEntity(ids[i]);
                 if (!(e instanceof FallingBlockEntity falling)) continue;
 
-                Vec3 pos = center
-                        .add(right.scale(offsets[i][0]))
-                        .add(up.scale(offsets[i][1]));
-
+                Vec3 pos = LapseBlue.grabTarget(player, i);
                 falling.setPos(pos.x, pos.y, pos.z);
                 falling.setDeltaMovement(Vec3.ZERO);
                 falling.setNoGravity(true);
                 falling.noPhysics = true;
                 falling.fallDistance = 0.0F;
-            }
-
-            if (now % 2 == 0) {
-                sendDust(level,
-                        center.add(rnd(-0.45, 0.45), rnd(-0.35, 0.35), rnd(-0.45, 0.45)),
-                        new Vector3f(0.18f, 0.72f, 1.0f),
-                        0.62f);
-            }
-            if (now % 4 == 0) {
-                spawnVfx(level, VFX_BLUE, center, 1);
             }
             return;
         }
@@ -2039,6 +2026,7 @@ public class JujutsuNeonMod {
         player.setSprinting(false);
 
         MaximumPurple.interrupt(player);
+        LapseBlue.interrupt(player);
         JujutsuNeonFlightPatch.stopForTechnique(player);
         if (player.getAbilities().flying && !player.isSpectator()) {
             player.getAbilities().flying = false;
@@ -5427,7 +5415,6 @@ public class JujutsuNeonMod {
                     NETWORK.sendToServer(new MaxBlueControlPacket(MaxBlueControlAction.RELEASE));
                 } else {
                     NETWORK.sendToServer(new AbilityPacket(Ability.BLUE));
-                    startAnim("BLUE", 12);
                 }
 
                 state.ticks = 0;
@@ -5732,7 +5719,7 @@ public class JujutsuNeonMod {
 
         private static ClientMovementState resolveMovementState(Minecraft mc, boolean superRun) {
             if (hudMaxBlueActive || hudPurpleCasting || MaximumPurpleClient.isLocalActive()
-                    || DomainExpansionClient.locksLocalPlayer()) return ClientMovementState.LOCKED;
+                    || DomainExpansionClient.locksLocalPlayer() || LapseBlueClient.locksLocalPlayer()) return ClientMovementState.LOCKED;
             if (clientDashMode != DASH_NONE) return ClientMovementState.DASH;
             if (JujutsuNeonFlightClient.isCustomFlightActive()) return ClientMovementState.FLIGHT;
             // С Ctrl поверхность воды — опора: WATER_RUN, если игрок у поверхности
@@ -5961,7 +5948,7 @@ public class JujutsuNeonMod {
             if (mc.player == null) return;
 
             if (event.phase == TickEvent.Phase.START) {
-                if (MaximumPurpleClient.isLocalActive() || DomainExpansionClient.locksLocalPlayer()) {
+                if (MaximumPurpleClient.isLocalActive() || DomainExpansionClient.locksLocalPlayer() || LapseBlueClient.locksLocalPlayer()) {
                     mc.player.input.jumping = false;
                     return;
                 }
@@ -6003,7 +5990,7 @@ public class JujutsuNeonMod {
             }
 
             // Кат-сцена Максимального Фиолетового или территории, обездвиживание: техники и движение недоступны.
-            if (MaximumPurpleClient.isLocalActive() || DomainExpansionClient.locksLocalPlayer()) {
+            if (MaximumPurpleClient.isLocalActive() || DomainExpansionClient.locksLocalPlayer() || LapseBlueClient.locksLocalPlayer()) {
                 if (lastSpeedHeld) {
                     NETWORK.sendToServer(new MovementPacket(MovementAction.SPEED_OFF));
                     lastSpeedHeld = false;
