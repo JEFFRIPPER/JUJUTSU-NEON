@@ -9,6 +9,8 @@
   lapse_cracks.png   — трещины на земле после удара
   lapse_smoke.png    — серая дымка (след падения, пыль)
   lapse_glint.png    — вытянутый белый блик (искры)
+  lapse_energy.png   — бесшовная закрученная энергия для объёмного шара Синего и купола взрыва
+  lapse_wisp.png     — тёмно-синие клубы вокруг шара
 """
 import math
 from pathlib import Path
@@ -224,6 +226,53 @@ def glint():
     save(rgba(np.dstack([np.ones_like(a), np.ones_like(a), np.ones_like(a)]), a), "lapse_glint.png")
 
 
+def tile_noise(w, h, freq, octaves=4, seed=0):
+    """Бесшовный (по обеим осям) шум: сумма синусов с целыми частотами."""
+    rng = np.random.default_rng(seed)
+    yy, xx = np.mgrid[0:h, 0:w].astype(np.float32)
+    u, v = xx / w, yy / h
+    total = np.zeros((h, w), np.float32)
+    amp, norm = 1.0, 0.0
+    for o in range(octaves):
+        f = freq * (2 ** o)
+        for _ in range(5):
+            kx, ky = rng.integers(-f, f + 1, 2)
+            if kx == 0 and ky == 0:
+                kx = 1
+            total += amp * np.sin(2 * np.pi * (kx * u + ky * v) + rng.random() * 2 * np.pi)
+            norm += amp
+        amp *= 0.55
+    return 0.5 + 0.5 * total / norm
+
+
+def energy():
+    """Закрученные струи энергии: яркие тонкие прожилки по диагонали, бесшовно по u и v."""
+    w, h = 512, 256
+    yy, xx = np.mgrid[0:h, 0:w].astype(np.float32)
+    u, v = xx / w, yy / h
+    warp = tile_noise(w, h, 2, 4, 11)
+    warp2 = tile_noise(w, h, 3, 3, 12)
+    s1 = np.sin(2 * np.pi * (3 * u + 1 * v) + 7.0 * warp)
+    s2 = np.sin(2 * np.pi * (5 * u - 2 * v) + 6.0 * warp2 + 1.3)
+    lines = np.exp(-(1 - s1) * 9.0) + 0.7 * np.exp(-(1 - s2) * 14.0)
+    glow = np.exp(-(1 - s1) * 2.2) * 0.45 + np.exp(-(1 - s2) * 3.0) * 0.3
+    body = tile_noise(w, h, 2, 4, 13) * 0.35
+    a = np.clip(lines * 0.9 + glow + body, 0, 1)
+    white = np.clip(lines * 0.85, 0, 1)
+    rgb = np.dstack([0.25 + 0.75 * white, 0.62 + 0.38 * white, np.ones_like(white)])
+    save(rgba(rgb, a), "lapse_energy.png")
+
+
+def wisp():
+    s = 256
+    r, th = polar(s)
+    n = noise(s, 3)
+    swirl = 0.5 + 0.5 * np.sin(th * 3 + r * 7 + n * 5)
+    a = np.clip(1.6 * np.clip(1.0 - r / (0.75 + 0.25 * n), 0, 1) ** 1.3 * (0.35 + 0.65 * swirl) * (0.6 + 0.4 * n), 0, 1)
+    rgb = np.dstack([0.10 + 0.25 * n, 0.32 + 0.3 * n, np.full_like(n, 0.95)])
+    save(rgba(rgb, a), "lapse_wisp.png")
+
+
 arc()
 burst()
 crescent()
@@ -232,3 +281,5 @@ ring()
 cracks()
 smoke()
 glint()
+energy()
+wisp()

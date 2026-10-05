@@ -76,12 +76,16 @@ public final class LapseBlueClient {
     private static final ResourceLocation TEX_CRACKS = tex("lapse_cracks");
     private static final ResourceLocation TEX_SMOKE = tex("lapse_smoke");
     private static final ResourceLocation TEX_GLINT = tex("lapse_glint");
+    private static final ResourceLocation TEX_ENERGY = tex("lapse_energy");
+    private static final ResourceLocation TEX_WISP = tex("lapse_wisp");
     private static final ResourceLocation TEX_ORB = tex("max_purple_blue_orb");
     private static final ResourceLocation TEX_BLOOM = tex("max_purple_bloom");
 
     /** Сколько ещё рисуются эффекты после конца приёма (пыль, трещины). */
     private static final int FX_TAIL = 60;
     private static final int FIRST_PERSON_ARM_TICKS = 24;
+    /** Длина анимации захвата; дальше — петля «дыхания» с блоками в руке. */
+    private static final int GRAB_ANIM_TICKS = 26;
 
     private static final Map<UUID, ComboScene> COMBOS = new HashMap<>();
     private static final Map<UUID, GrabScene> GRABS = new HashMap<>();
@@ -210,8 +214,14 @@ public final class LapseBlueClient {
         }
     }
 
-    static void onGrabEnd(UUID caster) {
-        GRABS.remove(caster);
+    static void onGrabEnd(UUID caster, boolean thrown) {
+        GrabScene g = GRABS.remove(caster);
+        Minecraft mc = Minecraft.getInstance();
+        if (g == null || mc.level == null) return;
+        if (mc.level.getEntity(g.casterEntityId) instanceof AbstractClientPlayer p) {
+            if (thrown) MaximumPurpleAnimation.play(p, "lapse_blue_throw");
+            else if (g.ticks >= GRAB_ANIM_TICKS) MaximumPurpleAnimation.stop(p);
+        }
     }
 
     private static void endControl(Minecraft mc, ComboScene scene) {
@@ -281,9 +291,13 @@ public final class LapseBlueClient {
         while (gi.hasNext()) {
             GrabScene g = gi.next().getValue();
             g.ticks++;
-            if (g.ticks > 260 || !(mc.level.getEntity(g.casterEntityId) instanceof Player)) {
+            if (g.ticks > 260 || !(mc.level.getEntity(g.casterEntityId) instanceof Player owner)) {
                 gi.remove();
                 continue;
+            }
+            // Блоки притянуты — персонаж «дышит», рука держит блоки (ноги и голова свободны).
+            if (g.ticks == GRAB_ANIM_TICKS && owner instanceof AbstractClientPlayer p) {
+                MaximumPurpleAnimation.play(p, "lapse_blue_hold");
             }
             applyGrab(mc, g, g.ticks, 1.0f);
         }
@@ -771,37 +785,39 @@ public final class LapseBlueClient {
             billboard(pose, cam, camera, tc, sz, (float) (t * 0.02), TEX_ARC, 1f, 1f, 1f, arc * flick, true);
             billboard(pose, cam, camera, tc, sz * 0.86f, (float) (Math.PI + t * -0.03), TEX_ARC, 0.7f, 0.9f, 1f, arc * 0.6f, true);
         }
+        // Синий шар в ладони — объёмная модель: ядро, две закрученные оболочки, ободок, молнии, клубы.
         Vec3 palm = s.start.add(up.scale(1.22)).add(s.forward.scale(0.62)).add(s.right.scale(0.30));
-        float orb = env(t, 2, 13, 3, 3);
+        float orb = env(t, 2, 12, 2, 3);
         if (orb > 0.01f) {
-            float r = (float) (0.18 + 0.32 * smooth((t - 2) / 6.0));
-            billboard(pose, cam, camera, palm, r * 3.4f, 0f, TEX_BLOOM, 0.45f, 0.75f, 1f, orb * 0.8f, true);
-            billboard(pose, cam, camera, palm, r * 1.6f, (float) (t * 0.1), TEX_ORB, 1f, 1f, 1f, orb, true);
+            float r = (float) (0.10 + 0.24 * smooth((t - 2) / 5.0));
+            blueOrb(pose, cam, camera, palm, r, t, orb, c.seed);
         }
+        // Синий срывается с ладони к цели.
+        Vec3 t0c = s.t0.add(0.0, h * 0.5, 0.0);
+        float beam = env(t, 5, 9, 0.5, 2);
+        if (beam > 0.01f) energyBeam(pose, camera, palm, t0c, t, beam, c.seed);
 
-        // 2. Синий взрыв на цели, вспышка, лучи.
-        float burst = env(t, T_BURST, T_BURST + 9, 1, 6);
+        // 2. Синий взрыв на месте цели — объёмный купол из закрученной энергии, вспышка, лучи.
+        float burst = env(t, T_BURST, T_BURST + 9, 0.5, 6);
         if (burst > 0.01f) {
             double k = win(t, T_BURST, T_BURST + 8);
-            float sz = (float) ((1.2 + 4.2 * (1.0 - Math.pow(1.0 - k, 3.0))) * (0.7 + size * 0.3));
-            billboard(pose, cam, camera, tc, sz, (float) (t * 0.05), TEX_BURST, 1f, 1f, 1f, burst, true);
-            billboard(pose, cam, camera, tc, sz * 0.5f, 0f, TEX_BLOOM, 0.85f, 0.95f, 1f, burst * (float) (1.0 - k), true);
+            blueBurst(pose, cam, camera, t0c, k, burst, t, (float) (0.7 + size * 0.3), c.seed);
             Random rnd = new Random(c.seed * 977L + 2);
             for (int i = 0; i < 8; i++) {
                 Vec3 dir = randDir(rnd);
                 double len = 0.6 + rnd.nextDouble();
-                Vec3 a = tc.add(dir.scale(0.4 + 2.8 * k));
+                Vec3 a = t0c.add(dir.scale(0.4 + 2.8 * k));
                 streak(pose, camera, a, a.add(dir.scale(len * (1.0 - k * 0.5))), 0.07f, TEX_GLINT, 0.6f, 0.9f, 1f, burst, true);
             }
         }
 
-        // 3. Чёрно-белый полумесяц ударной волны.
+        // 3. Чёрно-белый полумесяц ударной волны (там же).
         float cres = env(t, T_CRESCENT, T_CRESCENT + 6, 0.5, 4);
         if (cres > 0.01f) {
             double k = win(t, T_CRESCENT, T_CRESCENT + 6);
             float sz = (float) ((2.8 + 1.6 * k) * (0.7 + size * 0.3));
-            billboard(pose, cam, camera, tc, sz, (float) (0.5 + k * 0.6), TEX_CRESCENT, 1f, 1f, 1f, cres, false);
-            billboard(pose, cam, camera, tc, sz * 0.82f, (float) (3.6 - k * 0.8), TEX_CRESCENT, 1f, 1f, 1f, cres * 0.85f, false);
+            billboard(pose, cam, camera, t0c, sz, (float) (0.5 + k * 0.6), TEX_CRESCENT, 1f, 1f, 1f, cres, false);
+            billboard(pose, cam, camera, t0c, sz * 0.82f, (float) (3.6 - k * 0.8), TEX_CRESCENT, 1f, 1f, 1f, cres * 0.85f, false);
         }
 
         // 4. Призмы-искры (розовый → фиолетовый → бирюзовый → белый) и вихрь.
@@ -960,19 +976,15 @@ public final class LapseBlueClient {
             billboard(pose, cam, camera, center, 3.4f, (float) (t * 0.02), TEX_ARC, 1f, 1f, 1f, arc * flick, true);
             billboard(pose, cam, camera, center, 2.9f, (float) (Math.PI - t * 0.03), TEX_ARC, 0.7f, 0.9f, 1f, arc * 0.6f, true);
         }
-        float orb = env(t, 2, 13, 3, 3);
+        float orb = env(t, 2, 12, 2, 3);
         if (orb > 0.01f) {
-            float r = (float) (0.16 + 0.28 * smooth((t - 2) / 6.0));
-            billboard(pose, cam, camera, palm, r * 3.4f, 0f, TEX_BLOOM, 0.45f, 0.75f, 1f, orb * 0.8f, true);
-            billboard(pose, cam, camera, palm, r * 1.6f, (float) (t * 0.1), TEX_ORB, 1f, 1f, 1f, orb, true);
+            float r = (float) (0.09 + 0.22 * smooth((t - 2) / 5.0));
+            blueOrb(pose, cam, camera, palm, r, t, orb, g.seed);
         }
-        float burst = env(t, T_BURST, T_BURST + 9, 1, 6);
-        if (burst > 0.01f) {
-            double k = win(t, T_BURST, T_BURST + 8);
-            float sz = (float) (1.2 + 3.4 * (1.0 - Math.pow(1.0 - k, 3.0)));
-            billboard(pose, cam, camera, center, sz, (float) (t * 0.05), TEX_BURST, 1f, 1f, 1f, burst, true);
-            billboard(pose, cam, camera, center, sz * 0.5f, 0f, TEX_BLOOM, 0.85f, 0.95f, 1f, burst * (float) (1.0 - k), true);
-        }
+        float beam = env(t, 5, 9, 0.5, 2);
+        if (beam > 0.01f) energyBeam(pose, camera, palm, center, t, beam, g.seed);
+        float burst = env(t, T_BURST, T_BURST + 9, 0.5, 6);
+        if (burst > 0.01f) blueBurst(pose, cam, camera, center, win(t, T_BURST, T_BURST + 8), burst, t, 0.9f, g.seed);
         // Притягивание: голубые штрихи от блоков к руке, потом синий гаснет совсем.
         float pull = env(t, G_PULL_START, G_FX_END, 1, 5);
         if (pull > 0.01f) {
@@ -1002,6 +1014,165 @@ public final class LapseBlueClient {
     private static Vec3 randDir(Random rnd) {
         double a = rnd.nextDouble() * Math.PI * 2.0, z = rnd.nextDouble() * 2.0 - 1.0, r = Math.sqrt(1.0 - z * z);
         return new Vec3(Math.cos(a) * r, z, Math.sin(a) * r);
+    }
+
+    // ================================================================== модель Синего
+
+    /** Объёмный синий шар: ядро, две закрученные навстречу оболочки, светлый ободок, молнии, клубы и ореол. */
+    private static void blueOrb(PoseStack pose, Camera cam, Vec3 camera, Vec3 c, float r, double t, float alpha, long seed) {
+        billboard(pose, cam, camera, c, r * 6.0f, 0f, TEX_BLOOM, 0.30f, 0.62f, 1f, alpha * 0.7f, true);
+        for (int i = 0; i < 3; i++) {
+            float roll = (float) (t * 0.07 * (i % 2 == 0 ? 1 : -1) + i * 2.1);
+            billboard(pose, cam, camera, c, r * (3.4f + i * 0.5f), roll, TEX_WISP, 0.55f, 0.75f, 1f, alpha * 0.55f, false);
+        }
+        sphere(pose, camera, c, r * 1.22f, TEX_ENERGY, t * 0.021, t * 0.009, 0.22f, 0.50f, 1f, alpha * 0.55f, 1.8f, 16, 24);
+        sphere(pose, camera, c, r * 0.95f, TEX_ENERGY, -t * 0.034, -t * 0.013 + 0.5, 0.55f, 0.85f, 1f, alpha * 0.8f, 1.0f, 14, 22);
+        colorSphere(pose, camera, c, r * 0.55f, 0.92f, 0.98f, 1f, alpha, 12, 18);
+        crackles(pose, camera, c, r * 1.15f, t, alpha, seed, 5);
+    }
+
+    /** Синий взрыв: расширяющийся купол из закрученной энергии с ярким краем, ядро гаснет. */
+    private static void blueBurst(PoseStack pose, Camera cam, Vec3 camera, Vec3 c, double k, float alpha, double t,
+                                  float scale, long seed) {
+        float big = (float) ((0.6 + 4.0 * (1.0 - Math.pow(1.0 - k, 3.0))) * scale);
+        billboard(pose, cam, camera, c, big * 2.2f, (float) (t * 0.05), TEX_BURST, 1f, 1f, 1f, alpha * 0.8f, true);
+        sphere(pose, camera, c, big, TEX_ENERGY, t * 0.05, t * 0.02, 0.30f, 0.75f, 1f, alpha * 0.55f, 2.4f, 18, 28);
+        sphere(pose, camera, c, big * 0.82f, TEX_ENERGY, -t * 0.07, -t * 0.03 + 0.3, 0.55f, 0.9f, 1f, alpha * 0.4f, 1.2f, 16, 24);
+        float core = (float) (1.0 - k);
+        if (core > 0.02f) {
+            colorSphere(pose, camera, c, big * 0.32f, 0.95f, 1f, 1f, alpha * core, 12, 18);
+            billboard(pose, cam, camera, c, big * 1.1f, 0f, TEX_BLOOM, 0.85f, 0.95f, 1f, alpha * core, true);
+        }
+        // Спирали энергии вокруг центра.
+        for (int arm = 0; arm < 3; arm++) {
+            Vec3 prev = null;
+            for (int i = 0; i <= 18; i++) {
+                double u = i / 18.0;
+                double a = arm * 2.094 + u * 5.0 + t * 0.35;
+                double rr = big * (0.25 + 0.75 * u);
+                Vec3 p = c.add(Math.cos(a) * rr, (u - 0.5) * big * 0.9, Math.sin(a) * rr);
+                if (prev != null) streak(pose, camera, prev, p, 0.05f * scale, TEX_GLINT, 0.6f, 0.9f, 1f, alpha * (float) (1.0 - u * 0.6), true);
+                prev = p;
+            }
+        }
+        crackles(pose, camera, c, big * 0.95f, t, alpha, seed + 3, 7);
+    }
+
+    /** Луч-молния от ладони к цели в момент броска синего. */
+    private static void energyBeam(PoseStack pose, Vec3 camera, Vec3 from, Vec3 to, double t, float alpha, long seed) {
+        Random rnd = new Random(seed * 131L + (long) (t * 0.5));
+        Vec3 d = to.subtract(from);
+        double len = d.length();
+        if (len < 0.05) return;
+        Vec3 dir = d.scale(1.0 / len);
+        Vec3 side = dir.cross(new Vec3(0, 1, 0));
+        side = side.lengthSqr() < 1.0E-4 ? new Vec3(1, 0, 0) : side.normalize();
+        Vec3 upv = side.cross(dir).normalize();
+        int n = Math.max(6, (int) (len * 3));
+        Vec3 prev = from;
+        for (int i = 1; i <= n; i++) {
+            double u = i / (double) n;
+            double j = i == n ? 0.0 : 0.18 * Math.sin(Math.PI * u);
+            Vec3 p = from.add(d.scale(u)).add(side.scale((rnd.nextDouble() - 0.5) * 2 * j)).add(upv.scale((rnd.nextDouble() - 0.5) * 2 * j));
+            streak(pose, camera, prev, p, 0.09f, TEX_GLINT, 0.55f, 0.85f, 1f, alpha * 0.8f, true);
+            streak(pose, camera, prev, p, 0.03f, TEX_GLINT, 1f, 1f, 1f, alpha, true);
+            prev = p;
+        }
+    }
+
+    /** Мелкие молнии, бегущие по поверхности шара (меняются каждые 2 тика). */
+    private static void crackles(PoseStack pose, Vec3 camera, Vec3 c, float r, double t, float alpha, long seed, int count) {
+        Random rnd = new Random(seed * 7919L + (long) (t * 0.5));
+        for (int k = 0; k < count; k++) {
+            Vec3 a = randDir(rnd);
+            Vec3 b = randDir(rnd);
+            Vec3 prev = null;
+            for (int i = 0; i <= 6; i++) {
+                double u = i / 6.0;
+                Vec3 dir = a.scale(1.0 - u).add(b.scale(u));
+                if (dir.lengthSqr() < 1.0E-6) continue;
+                double jitter = 1.0 + (rnd.nextDouble() - 0.5) * 0.25;
+                Vec3 p = c.add(dir.normalize().scale(r * jitter));
+                if (prev != null) streak(pose, camera, prev, p, 0.025f, TEX_GLINT, 0.8f, 0.95f, 1f, alpha * 0.9f, true);
+                prev = p;
+            }
+        }
+    }
+
+    /** Сфера с бесшовной текстурой; край ярче (ободок), прозрачная середина — видно ядро. */
+    private static void sphere(PoseStack pose, Vec3 camera, Vec3 c, float radius, ResourceLocation texture,
+                               double uScroll, double vScroll, float r, float g, float b, float alpha, float rim,
+                               int lat, int lon) {
+        if (alpha <= 0.003f || radius <= 0.001f) return;
+        RenderSystem.setShader(GameRenderer::getPositionTexColorShader);
+        RenderSystem.setShaderTexture(0, texture);
+        HollowPurpleReferenceClient.mpAdditiveBlend();
+        Vec3 view = camera.subtract(c);
+        double vl = view.length();
+        Vec3 v = vl < 1.0E-4 ? new Vec3(0, 0, 1) : view.scale(1.0 / vl);
+        boolean inside = vl < radius;
+        Matrix4f m = pose.last().pose();
+        double ox = c.x - camera.x, oy = c.y - camera.y, oz = c.z - camera.z;
+        BufferBuilder buf = Tesselator.getInstance().getBuilder();
+        buf.begin(VertexFormat.Mode.TRIANGLES, DefaultVertexFormat.POSITION_TEX_COLOR);
+        for (int i = 0; i < lat; i++) {
+            double p0 = -Math.PI / 2 + Math.PI * i / lat, p1 = -Math.PI / 2 + Math.PI * (i + 1) / lat;
+            for (int j = 0; j < lon; j++) {
+                double a0 = Math.PI * 2 * j / lon, a1 = Math.PI * 2 * (j + 1) / lon;
+                sphereVertex(buf, m, ox, oy, oz, radius, p0, a0, i, j, lat, lon, uScroll, vScroll, v, inside, r, g, b, alpha, rim);
+                sphereVertex(buf, m, ox, oy, oz, radius, p0, a1, i, j + 1, lat, lon, uScroll, vScroll, v, inside, r, g, b, alpha, rim);
+                sphereVertex(buf, m, ox, oy, oz, radius, p1, a1, i + 1, j + 1, lat, lon, uScroll, vScroll, v, inside, r, g, b, alpha, rim);
+                sphereVertex(buf, m, ox, oy, oz, radius, p0, a0, i, j, lat, lon, uScroll, vScroll, v, inside, r, g, b, alpha, rim);
+                sphereVertex(buf, m, ox, oy, oz, radius, p1, a1, i + 1, j + 1, lat, lon, uScroll, vScroll, v, inside, r, g, b, alpha, rim);
+                sphereVertex(buf, m, ox, oy, oz, radius, p1, a0, i + 1, j, lat, lon, uScroll, vScroll, v, inside, r, g, b, alpha, rim);
+            }
+        }
+        BufferUploader.drawWithShader(buf.end());
+    }
+
+    private static void sphereVertex(BufferBuilder buf, Matrix4f m, double ox, double oy, double oz, float radius,
+                                     double phi, double theta, int i, int j, int lat, int lon, double uScroll, double vScroll,
+                                     Vec3 v, boolean inside, float r, float g, float b, float alpha, float rim) {
+        double cp = Math.cos(phi);
+        double nx = Math.cos(theta) * cp, ny = Math.sin(phi), nz = Math.sin(theta) * cp;
+        double facing = Math.abs(nx * v.x + ny * v.y + nz * v.z);
+        double edge = inside ? 0.6 : Math.pow(1.0 - facing, 2.0);
+        float a = (float) Mth.clamp(alpha * (0.35 + rim * edge), 0.0, 1.0);
+        float u = (float) (j / (double) lon * 2.0 + uScroll);
+        float tv = (float) (i / (double) lat + vScroll);
+        buf.vertex(m, (float) (ox + nx * radius), (float) (oy + ny * radius), (float) (oz + nz * radius))
+                .uv(u, tv).color(r, g, b, a).endVertex();
+    }
+
+    /** Сплошная светящаяся сфера (ядро): ярче в центре, мягкий край. */
+    private static void colorSphere(PoseStack pose, Vec3 camera, Vec3 c, float radius, float r, float g, float b,
+                                    float alpha, int lat, int lon) {
+        if (alpha <= 0.003f || radius <= 0.001f) return;
+        RenderSystem.setShader(GameRenderer::getPositionColorShader);
+        HollowPurpleReferenceClient.mpAdditiveBlend();
+        Vec3 view = camera.subtract(c);
+        double vl = view.length();
+        Vec3 v = vl < 1.0E-4 ? new Vec3(0, 0, 1) : view.scale(1.0 / vl);
+        Matrix4f m = pose.last().pose();
+        double ox = c.x - camera.x, oy = c.y - camera.y, oz = c.z - camera.z;
+        BufferBuilder buf = Tesselator.getInstance().getBuilder();
+        buf.begin(VertexFormat.Mode.TRIANGLES, DefaultVertexFormat.POSITION_COLOR);
+        for (int i = 0; i < lat; i++) {
+            double p0 = -Math.PI / 2 + Math.PI * i / lat, p1 = -Math.PI / 2 + Math.PI * (i + 1) / lat;
+            for (int j = 0; j < lon; j++) {
+                double a0 = Math.PI * 2 * j / lon, a1 = Math.PI * 2 * (j + 1) / lon;
+                double[][] pts = {{p0, a0}, {p0, a1}, {p1, a1}, {p0, a0}, {p1, a1}, {p1, a0}};
+                for (double[] q : pts) {
+                    double cp = Math.cos(q[0]);
+                    double nx = Math.cos(q[1]) * cp, ny = Math.sin(q[0]), nz = Math.sin(q[1]) * cp;
+                    double facing = Math.max(0.0, nx * v.x + ny * v.y + nz * v.z);
+                    float a = (float) (alpha * Math.pow(facing, 0.7));
+                    buf.vertex(m, (float) (ox + nx * radius), (float) (oy + ny * radius), (float) (oz + nz * radius))
+                            .color(r, g, b, a).endVertex();
+                }
+            }
+        }
+        BufferUploader.drawWithShader(buf.end());
     }
 
     // ================================================================== примитивы
@@ -1118,9 +1289,15 @@ public final class LapseBlueClient {
         for (ComboScene c : COMBOS.values()) {
             if (!c.localCaster) continue;
             double t = c.ticks + pt;
-            // Синий взрыв прямо перед глазами — лёгкий голубой отсвет.
-            float cyan = env(t, T_BURST, T_BURST + 4, 0.5, 3) * 0.28f;
-            if (cyan > 0.01f) fill(event, w, h, cyan, 0x55CCFF);
+            // Чем ближе взрыв к глазам, тем сильнее волна света (издалека — почти нет).
+            Vec3 t0c = c.s.t0.add(0.0, c.s.targetHeight * 0.5, 0.0);
+            double dist = mc.gameRenderer.getMainCamera().getPosition().distanceTo(t0c);
+            float near = (float) (1.0 - Mth.clamp((dist - 4.0) / 10.0, 0.0, 0.85));
+            // Синий взрыв прямо перед глазами — голубая волна и белая вспышка.
+            float cyan = env(t, T_BURST, T_BURST + 4, 0.6, 2.5) * 0.42f * near;
+            if (cyan > 0.01f) fill(event, w, h, cyan, 0x18D8FF);
+            float flash = env(t, T_BURST + 2.5, T_BURST + 5.5, 0.4, 2.5) * 0.30f * near;
+            if (flash > 0.01f) fill(event, w, h, flash, 0xEFFBFF);
             // Удар о землю в замедлении — белая вспышка.
             float white = env(t, T_IMPACT, T_IMPACT + 3, 0.2, 2.5) * 0.45f;
             if (white > 0.01f && c == camScene) fill(event, w, h, white, 0xFFFFFF);

@@ -431,18 +431,19 @@ public final class LapseBlue {
     }
 
     /** S2C: блоки отпущены или брошены — клиент перестаёт вести их сам. */
-    public record GrabEndPacket(UUID caster) {
+    public record GrabEndPacket(UUID caster, boolean thrown) {
         static void encode(GrabEndPacket m, FriendlyByteBuf b) {
             b.writeUUID(m.caster);
+            b.writeBoolean(m.thrown);
         }
 
         static GrabEndPacket decode(FriendlyByteBuf b) {
-            return new GrabEndPacket(b.readUUID());
+            return new GrabEndPacket(b.readUUID(), b.readBoolean());
         }
 
         static void handle(GrabEndPacket m, Supplier<NetworkEvent.Context> ctx) {
             ctx.get().enqueueWork(() -> DistExecutor.unsafeRunWhenOn(Dist.CLIENT, () -> () ->
-                    LapseBlueClient.onGrabEnd(m.caster)));
+                    LapseBlueClient.onGrabEnd(m.caster, m.thrown)));
             ctx.get().setPacketHandled(true);
         }
     }
@@ -875,9 +876,10 @@ public final class LapseBlue {
         return grabPos(g.origins.get(i), hold, age);
     }
 
-    static void endGrab(ServerPlayer player) {
+    /** thrown — блоки брошены (у игрока анимация броска), иначе просто отпущены. */
+    static void endGrab(ServerPlayer player, boolean thrown) {
         if (GRABS.remove(player.getUUID()) == null) return;
-        CHANNEL.send(PacketDistributor.TRACKING_ENTITY_AND_SELF.with(() -> player), new GrabEndPacket(player.getUUID()));
+        CHANNEL.send(PacketDistributor.TRACKING_ENTITY_AND_SELF.with(() -> player), new GrabEndPacket(player.getUUID(), thrown));
     }
 
     // ================================================================== события

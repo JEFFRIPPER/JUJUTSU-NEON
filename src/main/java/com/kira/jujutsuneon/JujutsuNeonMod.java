@@ -58,6 +58,8 @@ import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.AABB;
+import net.minecraft.world.entity.TamableAnimal;
+import net.minecraft.world.entity.decoration.ArmorStand;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
@@ -737,44 +739,72 @@ public class JujutsuNeonMod {
     private static final int BLUE_MODE_BLOCKS = 1;
     private static final int BLUE_MODE_ENTITY = 2;
     private static final int BLUE_MODE_PROJECTILE = 3;
-    private static final double BLUE_RANGE = 7.0;
+    private static final double BLUE_RANGE = 20.0;
+    /** Автоаим Синего: цель берётся, если прицел хотя бы примерно рядом (в этом конусе от края хитбокса). */
+    private static final double BLUE_AIM_CONE_DEG = 10.0;
 
     private static boolean isBlueInteractionActive(ServerPlayer player) {
         int mode = player.getPersistentData().getInt("jn_blue_mode");
         return mode == BLUE_MODE_BLOCKS || mode == BLUE_MODE_ENTITY;
     }
 
+    /**
+     * Цель Синего с жёстким автоаимом: любое живое существо до 20 блоков, если луч прицела прошёл рядом
+     * с его хитбоксом или оно в конусе ~10° от прицела; из таких — ближайшее к прицелу и видимое (не за стеной).
+     */
     private static LivingEntity findBlueLivingTarget(ServerLevel level, ServerPlayer player) {
-        Vec3 start = player.getEyePosition();
+        Vec3 eye = player.getEyePosition();
         Vec3 look = player.getLookAngle().normalize();
-        Vec3 end = start.add(look.scale(BLUE_RANGE));
+        Vec3 end = eye.add(look.scale(BLUE_RANGE));
+        AABB area = player.getBoundingBox().inflate(BLUE_RANGE + 2.0);
 
-        BlockHitResult blockHit = level.clip(new ClipContext(
-                start, end,
-                ClipContext.Block.OUTLINE,
-                ClipContext.Fluid.NONE,
-                player
-        ));
+        LivingEntity best = null;
+        double bestScore = Double.MAX_VALUE;
+        for (LivingEntity e : level.getEntitiesOfClass(LivingEntity.class, area,
+                e -> e.isAlive() && e != player && !e.isSpectator() && !(e instanceof ArmorStand))) {
+            if (e instanceof TamableAnimal pet && player.getUUID().equals(pet.getOwnerUUID())) continue;
+            if (e.isPassengerOfSameVehicle(player) || player.hasPassenger(e) || e.hasPassenger(player)) continue;
+            AABB box = e.getBoundingBox();
+            Vec3 center = box.getCenter();
+            Vec3 to = center.subtract(eye);
+            double dist = to.length();
+            if (dist > BLUE_RANGE + Math.max(box.getXsize(), box.getYsize()) * 0.5 || dist < 1.0E-3) continue;
 
-        double blockDistanceSq = blockHit.getType() == HitResult.Type.MISS
-                ? BLUE_RANGE * BLUE_RANGE
-                : start.distanceToSqr(blockHit.getLocation());
+            // Луч прошёл рядом с хитбоксом (с запасом, растущим с дистанцией)?
+            boolean rayHit = box.inflate(0.6 + dist * 0.035).clip(eye, end).isPresent();
+            // Насколько прицел мимо края хитбокса, в градусах.
+            double cos = Mth.clamp(to.scale(1.0 / dist).dot(look), -1.0, 1.0);
+            double angle = Math.toDegrees(Math.acos(cos));
+            double halfSize = Math.max(box.getXsize(), Math.max(box.getYsize(), box.getZsize())) * 0.5;
+            double edge = Math.max(0.0, angle - Math.toDegrees(Math.atan2(halfSize, dist)));
+            if (!rayHit && edge > BLUE_AIM_CONE_DEG) continue;
+            if (cos < 0.2) continue;
+            if (!blueCanSee(level, player, eye, e)) continue;
 
-        AABB searchBox = player.getBoundingBox()
-                .expandTowards(look.scale(BLUE_RANGE))
-                .inflate(1.25);
+            double score = (rayHit ? 0.0 : edge) * 4.0 + dist * 0.12;
+            if (score < bestScore) {
+                bestScore = score;
+                best = e;
+            }
+        }
+        return best;
+    }
 
-        return level.getEntitiesOfClass(
-                        LivingEntity.class,
-                        searchBox,
-                        e -> e.isAlive() && e != player && !e.isSpectator()
-                )
-                .stream()
-                .filter(e -> e.getBoundingBox().inflate(0.35).clip(start, end)
-                        .map(hit -> start.distanceToSqr(hit) <= blockDistanceSq + 0.20)
-                        .orElse(false))
-                .min(Comparator.comparingDouble(e -> start.distanceToSqr(e.getBoundingBox().getCenter())))
-                .orElse(null);
+    /** Цель видно: до центра, до головы или до ног нет стены. */
+    private static boolean blueCanSee(ServerLevel level, ServerPlayer player, Vec3 eye, LivingEntity e) {
+        AABB box = e.getBoundingBox();
+        Vec3[] points = {
+                box.getCenter(),
+                new Vec3(box.getCenter().x, box.maxY - 0.1, box.getCenter().z),
+                new Vec3(box.getCenter().x, box.minY + 0.1, box.getCenter().z)
+        };
+        for (Vec3 p : points) {
+            BlockHitResult hit = level.clip(new ClipContext(eye, p, ClipContext.Block.COLLIDER, ClipContext.Fluid.NONE, player));
+            if (hit.getType() == HitResult.Type.MISS || hit.getLocation().distanceToSqr(eye) >= eye.distanceToSqr(p) - 0.25) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static List<BlockPos> findBlueBlocks(ServerLevel level, ServerPlayer owner, BlockPos center) {
@@ -951,7 +981,7 @@ public class JujutsuNeonMod {
     }
 
     private static void clearBlueState(ServerPlayer player) {
-        LapseBlue.endGrab(player);
+        LapseBlue.endGrab(player, false);
         player.getPersistentData().putInt("jn_blue_mode", BLUE_MODE_NONE);
         player.getPersistentData().remove("jn_blue_target_uuid");
         player.getPersistentData().remove("jn_blue_block_ids");
@@ -1000,7 +1030,7 @@ public class JujutsuNeonMod {
             }
         }
 
-        LapseBlue.endGrab(player);
+        LapseBlue.endGrab(player, true);
         player.getPersistentData().putInt("jn_blue_mode", BLUE_MODE_PROJECTILE);
         player.getPersistentData().putLong("jn_blue_projectile_until", level.getGameTime() + 70);
         playSfx(level, player, SFX_BLUE, 0.82f, 1.32f);
