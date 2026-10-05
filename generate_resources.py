@@ -389,6 +389,9 @@ for _n in ("move_dash_front", "move_dash_side", "move_crouch", "move_takeoff", "
 for _n in ("infinity_on", "infinity_off", "infinity_block", "rct_heal",
            "simple_domain_cast", "simple_domain_hit", "simple_domain_break", "simple_domain_end"):
     sound_json[_n] = {"sounds": [{"name": "jujutsu_neon:cursed/" + _n}]}
+# M1-комбо (свой синтез, tools/gen_m1_assets.py).
+for _n in ("m1_swing", "m1_hit", "m1_final", "m1_block"):
+    sound_json[_n] = {"sounds": [{"name": "jujutsu_neon:m1/" + _n}]}
 ROOT.joinpath("sounds.json").write_text(json.dumps(sound_json, indent=2))
 
 sr = 48000

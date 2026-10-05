@@ -484,7 +484,18 @@ public final class DomainExpansion {
 
     /** Игроку сейчас нельзя ничего делать (обездвижен или кастует территорию). */
     static boolean blocksActions(Player player) {
-        return (isStunned(player) && !SimpleDomain.frees(player)) || isCasting(player) || LapseBlue.isBusy(player);
+        return (isStunned(player) && !SimpleDomain.frees(player)) || isCasting(player) || LapseBlue.isBusy(player)
+                || M1Combo.isStunned(player);
+    }
+
+    /** Моб — статуя территории. */
+    static boolean isFrozenMob(Entity e) {
+        return STUNS.containsKey(e.getUUID());
+    }
+
+    /** Чем был NoAI моба до статуи (M1 мог временно включить NoAI раньше территории). */
+    static void setFrozenPrevNoAi(Mob mob, boolean value) {
+        mob.getPersistentData().putBoolean(TAG_PREV_NOAI, value);
     }
 
     /** Владелец территории, которая сейчас стоит. */

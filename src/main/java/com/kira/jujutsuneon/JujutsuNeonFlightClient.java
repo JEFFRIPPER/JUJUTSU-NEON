@@ -409,7 +409,7 @@ public final class JujutsuNeonFlightClient {
         // Прыжок «взводит» полёт через onJumpFired() (любой прыжок, не только заряженный).
 
         boolean otherLock = MaximumPurpleClient.isLocalActive() || DomainExpansionClient.locksLocalPlayer()
-                || DomainExpansionClient.isStunnedLocal() || LapseBlueClient.locksLocalPlayer();
+                || DomainExpansionClient.isStunnedLocal() || LapseBlueClient.locksLocalPlayer() || M1ComboClient.locksLocalPlayer();
         if (!otherLock && RedTechniqueClient.locksLocalPlayer()) {
             // Максимальный Красный: полёт не снимается — зависаем на месте, после выстрела летим дальше.
             armedFromChargedJump = false;

@@ -81,6 +81,30 @@ final class MaximumPurpleAnimation {
         }
     }
 
+    /** Удары руками (M1): от первого лица видны обе руки (модель третьего лица) первые armUntilTick тиков. */
+    static void playWithBothArms(AbstractClientPlayer player, String name, int armUntilTick) {
+        if (player == null) return;
+        try {
+            KeyframeAnimation animation = PlayerAnimationRegistry.getAnimation(new ResourceLocation(JujutsuNeonMod.MODID, name));
+            if (animation == null) return;
+            ModifierLayer<IAnimation> layer = layer(player);
+            if (layer == null) return;
+            KeyframeAnimationPlayer anim = new KeyframeAnimationPlayer(animation) {
+                @Override
+                public FirstPersonMode getFirstPersonMode(float tickDelta) {
+                    return getTick() < armUntilTick ? FirstPersonMode.THIRD_PERSON_MODEL : FirstPersonMode.NONE;
+                }
+
+                @Override
+                public FirstPersonConfiguration getFirstPersonConfiguration(float tickDelta) {
+                    return new FirstPersonConfiguration(true, true, true, true);
+                }
+            };
+            layer.replaceAnimationWithFade(AbstractFadeModifier.standardFadeIn(1, Ease.INOUTSINE), anim, true);
+        } catch (RuntimeException | LinkageError ignored) {
+        }
+    }
+
     static void stop(AbstractClientPlayer player) {
         if (player == null) return;
         try {

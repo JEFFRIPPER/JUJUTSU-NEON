@@ -248,6 +248,10 @@ public class JujutsuNeonMod {
     public static final RegistryObject<SoundEvent> SFX_SIMPLE_DOMAIN_HIT = sound("simple_domain_hit");
     public static final RegistryObject<SoundEvent> SFX_SIMPLE_DOMAIN_BREAK = sound("simple_domain_break");
     public static final RegistryObject<SoundEvent> SFX_SIMPLE_DOMAIN_END = sound("simple_domain_end");
+    public static final RegistryObject<SoundEvent> SFX_M1_SWING = sound("m1_swing");
+    public static final RegistryObject<SoundEvent> SFX_M1_HIT = sound("m1_hit");
+    public static final RegistryObject<SoundEvent> SFX_M1_FINAL = sound("m1_final");
+    public static final RegistryObject<SoundEvent> SFX_M1_BLOCK = sound("m1_block");
 
     public static final RegistryObject<Item> GOJO_BLINDFOLD = ITEMS.register(
             "gojo_blindfold",
@@ -276,6 +280,7 @@ public class JujutsuNeonMod {
         RedTechnique.init();
         CursedFx.init();
         SimpleDomain.init();
+        M1Combo.init();
         MovementFx.init();
         modBus.addListener(this::addToCreativeTab);
 
@@ -4802,6 +4807,16 @@ public class JujutsuNeonMod {
         private static boolean hudInfinity = false;
         private static boolean hudBlindfold = false;
         private static boolean hudBlueActive = false;
+
+        /** Для M1-комбо: повязка надета (по данным HUD). */
+        static boolean hudHasBlindfold() {
+            return hudBlindfold;
+        }
+
+        /** Для M1-комбо: ЛКМ сейчас занята техникой (Синий держит цель/блоки, Макс. Синий, каст Фиолетового). */
+        static boolean attackClickBusy() {
+            return hudBlueActive || hudMaxBlueActive || hudPurpleCasting;
+        }
         private static boolean hudMaxBlueActive = false;
         private static boolean hudPurpleCasting = false;
 
@@ -5334,7 +5349,8 @@ public class JujutsuNeonMod {
 
         private static ClientMovementState resolveMovementState(Minecraft mc, boolean superRun) {
             if (hudMaxBlueActive || hudPurpleCasting || MaximumPurpleClient.isLocalActive()
-                    || DomainExpansionClient.locksLocalPlayer() || LapseBlueClient.locksLocalPlayer() || RedTechniqueClient.locksLocalPlayer()) return ClientMovementState.LOCKED;
+                    || DomainExpansionClient.locksLocalPlayer() || LapseBlueClient.locksLocalPlayer() || RedTechniqueClient.locksLocalPlayer()
+                    || M1ComboClient.locksLocalPlayer()) return ClientMovementState.LOCKED;
             if (clientDashMode != DASH_NONE) return ClientMovementState.DASH;
             if (JujutsuNeonFlightClient.isCustomFlightActive()) return ClientMovementState.FLIGHT;
             // С Ctrl поверхность воды — опора: WATER_RUN, если игрок у поверхности
@@ -5620,7 +5636,7 @@ public class JujutsuNeonMod {
             if (mc.player == null) return;
 
             if (event.phase == TickEvent.Phase.START) {
-                if (MaximumPurpleClient.isLocalActive() || DomainExpansionClient.locksLocalPlayer() || LapseBlueClient.locksLocalPlayer() || RedTechniqueClient.locksLocalPlayer()) {
+                if (MaximumPurpleClient.isLocalActive() || DomainExpansionClient.locksLocalPlayer() || LapseBlueClient.locksLocalPlayer() || RedTechniqueClient.locksLocalPlayer() || M1ComboClient.locksLocalPlayer()) {
                     mc.player.input.jumping = false;
                     return;
                 }
@@ -5662,7 +5678,7 @@ public class JujutsuNeonMod {
             }
 
             // Кат-сцена Максимального Фиолетового или территории, обездвиживание: техники и движение недоступны.
-            if (MaximumPurpleClient.isLocalActive() || DomainExpansionClient.locksLocalPlayer() || LapseBlueClient.locksLocalPlayer() || RedTechniqueClient.locksLocalPlayer()) {
+            if (MaximumPurpleClient.isLocalActive() || DomainExpansionClient.locksLocalPlayer() || LapseBlueClient.locksLocalPlayer() || RedTechniqueClient.locksLocalPlayer() || M1ComboClient.locksLocalPlayer()) {
                 if (lastSpeedHeld) {
                     NETWORK.sendToServer(new MovementPacket(MovementAction.SPEED_OFF));
                     lastSpeedHeld = false;
