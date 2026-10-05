@@ -239,6 +239,11 @@ public class JujutsuNeonMod {
     public static final RegistryObject<SoundEvent> SFX_MOVE_BOOST = sound("move_boost");
     public static final RegistryObject<SoundEvent> SFX_MOVE_STEP = sound("move_step");
     public static final RegistryObject<SoundEvent> SFX_MOVE_LAND = sound("move_land");
+    public static final RegistryObject<SoundEvent> SFX_MOVE_SLAM = sound("move_slam");
+    public static final RegistryObject<SoundEvent> SFX_INFINITY_ON = sound("infinity_on");
+    public static final RegistryObject<SoundEvent> SFX_INFINITY_OFF = sound("infinity_off");
+    public static final RegistryObject<SoundEvent> SFX_INFINITY_BLOCK = sound("infinity_block");
+    public static final RegistryObject<SoundEvent> SFX_RCT_HEAL = sound("rct_heal");
 
     public static final RegistryObject<Item> GOJO_BLINDFOLD = ITEMS.register(
             "gojo_blindfold",
@@ -265,6 +270,7 @@ public class JujutsuNeonMod {
         PARTICLES.register(modBus);
         DomainExpansion.register(modBus);
         RedTechnique.init();
+        CursedFx.init();
         MovementFx.init();
         modBus.addListener(this::addToCreativeTab);
 
@@ -3334,18 +3340,9 @@ public class JujutsuNeonMod {
         ServerLevel level = player.serverLevel();
         boolean enabled = !player.getPersistentData().getBoolean("jn_infinity");
         player.getPersistentData().putBoolean("jn_infinity", enabled);
-        playSfx(level, player, SFX_INFINITY, 1.15f, enabled ? 1.08f : 0.82f);
-        if (enabled) spawnVfx(level, VFX_INFINITY, player.position().add(0, 1.0, 0), 1);
-        if (enabled) {
-            spawnStylizedShockwave(level, player.position().add(0, 1.0, 0), 2.0,
-                    new Vector3f(0.10f, 0.82f, 1.0f));
-            playEnergyLayer(level, player.position().add(0, 1.0, 0), 0.62f, 1.35f);
-        }
-
-        for (int r = 0; r < 3; r++) {
-            spawnNeonRing(level, player.position().add(0, 1.0, 0), 1.15 + r * 0.32,
-                    new Vector3f(0.15f, 0.8f, 1.0f));
-        }
+        // Свои звук и эффекты (CursedFxClient): рябь пространства, оболочка, вязнущие пылинки.
+        playSfx(level, player, enabled ? SFX_INFINITY_ON : SFX_INFINITY_OFF, 1.6f, 1.0f);
+        CursedFx.send(player, enabled ? CursedFx.EV_INFINITY_ON : CursedFx.EV_INFINITY_OFF);
 
         player.displayClientMessage(
                 Component.literal(enabled ? "INFINITY: ON" : "INFINITY: OFF")
@@ -3357,25 +3354,11 @@ public class JujutsuNeonMod {
     private static void castRCT(ServerPlayer player) {
         ServerLevel level = player.serverLevel();
         handSign(player);
-        playSfx(level, player, SFX_RCT, 1.05f, 1.1f);
         player.heal(10.0F);
         player.addEffect(new MobEffectInstance(MobEffects.REGENERATION, 100, 1, false, false, true));
-        spawnVfx(level, VFX_RCT, player.position().add(0, 1.0, 0), 1);
-        spawnStylizedShockwave(level, player.position().add(0, 0.4, 0), 1.8,
-                new Vector3f(0.25f, 1.0f, 0.70f));
-        spawnEnergySpiral(level, player.position().add(0, 0.15, 0), new Vec3(0, 1, 0),
-                2.8, 0.95, 3.0,
-                new Vector3f(0.25f, 1.0f, 0.70f),
-                new Vector3f(1.0f, 0.30f, 0.68f));
-        level.playSound(null, player.blockPosition(), SoundEvents.EXPERIENCE_ORB_PICKUP,
-                SoundSource.PLAYERS, 0.70f, 1.55f);
-
-        for (int i = 0; i < 70; i++) {
-            sendDust(level,
-                    player.position().add(rnd(-0.8, 0.8), rnd(0.05, 1.9), rnd(-0.8, 0.8)),
-                    i % 2 == 0 ? new Vector3f(0.35f, 1.0f, 0.8f) : new Vector3f(1.0f, 0.35f, 0.65f),
-                    1.0f);
-        }
+        // Свои звук и эффекты (CursedFxClient): кольцо у ног, спирали света, удары сердца, искры.
+        playSfx(level, player, SFX_RCT_HEAL, 1.6f, 1.0f);
+        CursedFx.send(player, CursedFx.EV_RCT);
 
         player.displayClientMessage(
                 Component.literal("REVERSED CURSED TECHNIQUE").withStyle(ChatFormatting.GREEN, ChatFormatting.BOLD),
@@ -4132,14 +4115,22 @@ public class JujutsuNeonMod {
             if (event.getSource().getEntity() != null || event.getSource().getDirectEntity() != null) {
                 if (!consumeEnergy(player, 1.5)) {
                     player.getPersistentData().putBoolean("jn_infinity", false);
+                    CursedFx.send(player, CursedFx.EV_INFINITY_OFF);
                     return;
                 }
                 event.setCanceled(true);
                 ServerLevel level = player.serverLevel();
-                for (int r = 0; r < 3; r++) {
-                    spawnNeonRing(level, player.position().add(0, 1.0, 0), 1.05 + r * 0.24,
-                            new Vector3f(0.08f, 0.82f, 1.0f));
+                // Откуда пришёл удар: от снаряда/атакующего к игроку.
+                Entity src = event.getSource().getDirectEntity() != null ? event.getSource().getDirectEntity() : event.getSource().getEntity();
+                Vec3 chest = player.position().add(0, 0.95, 0);
+                Vec3 dir = src != null ? src.position().add(0, src.getBbHeight() * 0.5, 0).subtract(chest) : player.getLookAngle();
+                long now = level.getGameTime();
+                if (now - player.getPersistentData().getLong("jn_inf_block_sfx") >= 3) {
+                    player.getPersistentData().putLong("jn_inf_block_sfx", now);
+                    level.playSound(null, chest.x, chest.y, chest.z, SFX_INFINITY_BLOCK.get(), SoundSource.PLAYERS,
+                            1.0f, 0.92f + level.random.nextFloat() * 0.16f);
                 }
+                CursedFx.send(player, CursedFx.EV_INFINITY_BLOCK, dir);
             }
         }
 
@@ -4225,11 +4216,8 @@ public class JujutsuNeonMod {
 
                 tickBlindfoldRun(player, level, now);
 
-                if (infinity && now % 3 == 0) {
-                    double a = now * 0.25;
-                    Vec3 p = player.position().add(Math.cos(a) * 1.25, 1.0 + Math.sin(a * 0.5) * 0.35, Math.sin(a) * 1.25);
-                    sendDust(level, p, new Vector3f(0.08f, 0.82f, 1.0f), 0.9f);
-                }
+                // Бесконечность включена — клиенты рисуют едва заметную оболочку (напоминание раз в секунду).
+                if (infinity && now % 20 == 0) CursedFx.send(player, CursedFx.EV_INFINITY_HOLD);
 
             }
 

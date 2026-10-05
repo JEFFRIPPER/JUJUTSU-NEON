@@ -257,10 +257,10 @@ public final class JujutsuNeonFlightPatch {
         level.playSound(
                 null,
                 center.x, center.y, center.z,
-                SoundEvents.GENERIC_EXPLODE,
+                JujutsuNeonMod.SFX_MOVE_SLAM.get(),
                 SoundSource.PLAYERS,
-                1.55F,
-                0.82F
+                3.0F,
+                1.0F
         );
 
         AABB hitBox = new AABB(

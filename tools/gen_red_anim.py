@@ -9,10 +9,10 @@
 Покадрово по референсам (1 тик = 0,05 с):
   Красный: 0–2 рука вверх, 3–8 кисть у лба (над головой искра), 9–11 рука к груди (шарик в ладони),
            12 замах, 13 бросок вперёд, 14–18 возврат.
-  Макс.:   0–3 разворот боком (правое плечо к цели), правая рука — печать у лба, левая поперёк груди;
-           5 вспыхивает аура; 6–10 сильный прогиб назад со скруткой; 11–14 выпрямляется, руки к груди;
-           15–21 держит шар у плеча; 22 ударная волна (присел); 23–25 замах; 26 выстрел — рука вбок к цели;
-           27–31 отдача: откинулся, рука над головой; 32–36 возврат.
+  Макс.:   всё время лицом к цели. 0–3 правая рука — печать у лба, левая поперёк груди;
+           5 вспыхивает аура; 6–10 прогиб назад, руки раскрыты; 11–14 выпрямляется, ладони к груди;
+           15–21 шар у правого плеча, левая рука целится; 22 ударная волна (присел); 23–25 замах;
+           26 выстрел — правая рука прямо вперёд, луч из ладони; 27–31 отдача; 32–36 возврат.
 
 Плавность: каждое движение — ключ с OUTQUAD/INOUTSINE и промежуточные «живые» ключи (дыхание, вес,
 доводки), никаких резких перескоков; в конце stopTick даёт мягкий выход в обычную позу.
@@ -130,68 +130,100 @@ r.key(18, **neutral_changes())
 
 
 # ============================================================================ Максимальный Красный
+# Лицом к цели всё время (без разворота корпуса): печать у лба → прогиб с аурой → руки к груди →
+# шар у правого плеча, левая рука вытянута и целится → присел (ударная волна) → замах →
+# ВЫСТРЕЛ прямой правой рукой вперёд, луч из ладони → отдача → стойка.
 m = Anim()
 m.key(0)
-# 0–3: разворот боком, руки поднимаются; правая — печать у лба, левая поперёк груди
-m.key(1, ease="OUTQUAD", rightArm__pitch=-70, rightArm__roll=46, rightArm__bend=-30, leftArm__pitch=-64,
-      leftArm__roll=-44, leftArm__bend=-30, head__yaw=-20, rightLeg__bend=6, leftLeg__bend=6, body__y=-0.01)
+# 0–3: правая рука — печать у лба, левая поперёк груди; левая нога чуть вперёд
+m.key(1, ease="OUTQUAD", rightArm__pitch=-70, rightArm__roll=30, rightArm__bend=-30, leftArm__pitch=-50,
+      leftArm__roll=-24, leftArm__bend=-30, rightLeg__pitch=4, leftLeg__pitch=-4, body__y=-0.01)
 m.key(3, ease="OUTQUAD", rightArm__pitch=-150, rightArm__yaw=-30, rightArm__roll=10, rightArm__bend=-96,
-      leftArm__pitch=-92, leftArm__yaw=-58, leftArm__roll=-6, leftArm__bend=-64, head__yaw=-66, head__pitch=-2,
-      torso__bend=-2, rightLeg__pitch=8, rightLeg__roll=4, rightLeg__bend=8, leftLeg__pitch=-8, leftLeg__roll=-4,
-      leftLeg__bend=8, body__y=-0.015)
-m.key(5, rightArm__pitch=-154, rightArm__bend=-98, leftArm__pitch=-95, torso__bend=-4, head__yaw=-68,
-      body__y=-0.02)
-# 6–10: аура — сильный прогиб назад со скруткой, ноги упираются
-m.key(7, ease="INOUTQUAD", body__pitch=14, torso__bend=-9, torso__yaw=8, rightArm__pitch=-166, rightArm__roll=18,
-      rightArm__bend=-70, leftArm__pitch=-112, leftArm__roll=-20, leftArm__bend=-48, head__pitch=-10, head__yaw=-60,
-      rightLeg__pitch=16, rightLeg__bend=18, leftLeg__pitch=-20, leftLeg__bend=24, body__y=-0.05)
-m.key(9, body__pitch=24, torso__bend=-13, torso__yaw=14, rightArm__pitch=-172, rightArm__roll=24,
-      rightArm__bend=-58, leftArm__pitch=-124, leftArm__roll=-28, head__pitch=-16, head__yaw=-54,
-      rightLeg__pitch=22, rightLeg__bend=28, leftLeg__pitch=-28, leftLeg__bend=34, body__y=-0.08)
-m.key(10, body__pitch=22, torso__bend=-12, torso__yaw=12, head__pitch=-13)
-# 11–14: выпрямляется, ленты сходятся — обе руки к груди
-m.key(12, ease="INOUTQUAD", body__pitch=9, torso__bend=-2, torso__yaw=4, rightArm__pitch=-100, rightArm__yaw=-38,
-      rightArm__roll=6, rightArm__bend=-96, leftArm__pitch=-84, leftArm__yaw=-46, leftArm__roll=-6,
-      leftArm__bend=-98, head__pitch=-2, head__yaw=-64, rightLeg__pitch=14, rightLeg__bend=16,
-      leftLeg__pitch=-16, leftLeg__bend=18, body__y=-0.04)
-m.key(14, body__pitch=3, torso__bend=3, torso__yaw=0, rightArm__pitch=-90, rightArm__yaw=-34,
-      rightArm__bend=-92, leftArm__pitch=-80, leftArm__yaw=-44, leftArm__bend=-100, head__pitch=0, head__yaw=-68,
-      rightLeg__pitch=10, rightLeg__bend=12, leftLeg__pitch=-12, leftLeg__bend=14, body__y=-0.03)
-# 15–21: шар у правого плеча, целится в сторону цели; дышит
-m.key(16, rightArm__pitch=-64, rightArm__yaw=-6, rightArm__roll=44, rightArm__bend=-96, leftArm__pitch=-70,
-      leftArm__yaw=-40, leftArm__bend=-92, torso__yaw=-6, torso__bend=4, head__yaw=-74)
-m.key(18, rightArm__pitch=-66, rightArm__roll=46, rightArm__bend=-98, torso__bend=5, body__y=-0.035)
-m.key(20, rightArm__pitch=-62, rightArm__roll=44, rightArm__bend=-94, torso__bend=4, body__y=-0.03)
-# 22: ударная волна — чуть присел
-m.key(22, ease="OUTQUAD", rightLeg__pitch=-16, rightLeg__bend=34, leftLeg__pitch=-20, leftLeg__bend=38,
-      body__y=crouch_y(18), torso__bend=8)
-# 23–25: замах — рука к груди, корпус скручивается от цели
-m.key(25, ease="INQUAD", rightArm__pitch=-74, rightArm__yaw=-30, rightArm__roll=20, rightArm__bend=-110,
-      torso__yaw=10, torso__bend=6, leftArm__pitch=-56, leftArm__roll=-24)
-# 26: ВЫСТРЕЛ — правая рука выпрямляется вбок, к цели; отдача начинается
-m.key(26, ease="OUTQUAD", rightArm__pitch=-6, rightArm__yaw=0, rightArm__roll=92, rightArm__bend=0,
-      torso__yaw=-10, torso__bend=2, leftArm__pitch=-34, leftArm__yaw=0, leftArm__roll=-64, leftArm__bend=-36,
-      head__yaw=-76, body__pitch=8, rightLeg__pitch=16, rightLeg__bend=18, leftLeg__pitch=-22, leftLeg__bend=24,
+      leftArm__pitch=-88, leftArm__yaw=-52, leftArm__roll=-6, leftArm__bend=-64, head__pitch=-2,
+      torso__bend=-2, rightLeg__pitch=8, rightLeg__bend=6, leftLeg__pitch=-8, leftLeg__bend=6, body__y=-0.015)
+m.key(5, rightArm__pitch=-154, rightArm__bend=-98, leftArm__pitch=-92, torso__bend=-3, body__y=-0.02)
+# 6–10: аура — прогиб назад, руки раскрываются, ноги упираются
+m.key(7, ease="INOUTQUAD", body__pitch=10, torso__bend=-6, rightArm__pitch=-160, rightArm__yaw=-10,
+      rightArm__roll=26, rightArm__bend=-60, leftArm__pitch=-150, leftArm__yaw=8, leftArm__roll=-26,
+      leftArm__bend=-56, head__pitch=-10, rightLeg__pitch=12, rightLeg__bend=14, leftLeg__pitch=-14,
+      leftLeg__bend=18, body__y=-0.04)
+m.key(9, body__pitch=16, torso__bend=-9, rightArm__pitch=-164, rightArm__roll=34, rightArm__bend=-46,
+      leftArm__pitch=-154, leftArm__roll=-34, leftArm__bend=-44, head__pitch=-14, rightLeg__pitch=16,
+      rightLeg__bend=20, leftLeg__pitch=-18, leftLeg__bend=24, body__y=-0.06)
+m.key(10, body__pitch=15, torso__bend=-8, head__pitch=-12)
+# 11–14: выпрямляется, ленты сходятся — обе ладони перед грудью
+m.key(12, ease="INOUTQUAD", body__pitch=5, torso__bend=0, rightArm__pitch=-78, rightArm__yaw=-34,
+      rightArm__roll=4, rightArm__bend=-90, leftArm__pitch=-78, leftArm__yaw=34, leftArm__roll=-4,
+      leftArm__bend=-90, head__pitch=-2, rightLeg__pitch=10, rightLeg__bend=12, leftLeg__pitch=-12,
+      leftLeg__bend=14, body__y=-0.035)
+m.key(14, body__pitch=2, torso__bend=2, rightArm__pitch=-74, rightArm__yaw=-36, rightArm__bend=-94,
+      leftArm__pitch=-74, leftArm__yaw=36, leftArm__bend=-94, head__pitch=0, body__y=-0.03)
+# 15–21: шар у правого плеча; левая рука вытянута вперёд — целится
+m.key(16, rightArm__pitch=-42, rightArm__yaw=-6, rightArm__roll=18, rightArm__bend=-112, leftArm__pitch=-84,
+      leftArm__yaw=12, leftArm__roll=-2, leftArm__bend=-10, torso__yaw=6, torso__bend=3)
+m.key(18, rightArm__pitch=-44, rightArm__bend=-114, leftArm__pitch=-86, torso__bend=4, body__y=-0.035)
+m.key(20, rightArm__pitch=-41, rightArm__bend=-112, leftArm__pitch=-85, torso__bend=3, body__y=-0.03)
+# 22: ударная волна — слегка присел
+m.key(22, ease="OUTQUAD", rightLeg__pitch=-6, rightLeg__bend=26, leftLeg__pitch=-18, leftLeg__bend=30,
+      body__y=crouch_y(15), torso__bend=6)
+# 23–25: замах — локоть назад, ладонь у плеча, корпус уводит правое плечо назад
+m.key(25, ease="INQUAD", rightArm__pitch=-22, rightArm__yaw=-4, rightArm__roll=22, rightArm__bend=-120,
+      torso__yaw=12, torso__bend=6, leftArm__pitch=-80, leftArm__yaw=14, leftArm__bend=-14)
+# 26: ВЫСТРЕЛ — правая рука прямо вперёд, ладонью к цели; левая уходит назад
+m.key(26, ease="OUTQUAD", rightArm__pitch=-90, rightArm__yaw=-6, rightArm__roll=2, rightArm__bend=0,
+      torso__yaw=-8, torso__bend=3, leftArm__pitch=20, leftArm__yaw=0, leftArm__roll=-22, leftArm__bend=-18,
+      body__pitch=2, rightLeg__pitch=10, rightLeg__bend=16, leftLeg__pitch=-18, leftLeg__bend=22,
       body__y=-0.04)
-# 27–31: отдача — откинулся назад, правая рука вскинута над головой
-m.key(28, ease="OUTQUAD", body__pitch=18, torso__bend=-6, rightArm__pitch=-140, rightArm__roll=44,
-      rightArm__bend=-78, leftArm__pitch=-64, leftArm__roll=-42, leftArm__bend=-30, head__pitch=-8, head__yaw=-58,
-      rightLeg__pitch=22, rightLeg__bend=22, leftLeg__pitch=-26, leftLeg__bend=26, body__y=-0.06)
-m.key(30, body__pitch=16, torso__bend=-4, rightArm__pitch=-146, rightArm__bend=-84, head__pitch=-6)
+# 27–31: отдача — корпус чуть откидывается, рука подбрасывается вверх
+m.key(28, ease="OUTQUAD", body__pitch=9, torso__bend=-3, torso__yaw=-4, rightArm__pitch=-112,
+      rightArm__bend=-10, leftArm__pitch=14, leftArm__roll=-20, head__pitch=-4, rightLeg__pitch=14,
+      rightLeg__bend=18, leftLeg__pitch=-20, leftLeg__bend=22, body__y=-0.05)
+m.key(30, body__pitch=7, torso__bend=-2, rightArm__pitch=-104, rightArm__bend=-14, head__pitch=-3)
 # 32–36: возвращается в стойку
-m.key(33, ease="INOUTQUAD", body__pitch=5, torso__bend=2, rightArm__pitch=-56, rightArm__roll=26,
-      rightArm__bend=-40, leftArm__pitch=-18, leftArm__roll=-18, leftArm__bend=-20, head__pitch=0, head__yaw=-24,
-      rightLeg__pitch=6, rightLeg__bend=8, leftLeg__pitch=-6, leftLeg__bend=8, body__y=-0.015)
+m.key(33, ease="INOUTQUAD", body__pitch=2, torso__bend=1, torso__yaw=0, rightArm__pitch=-40, rightArm__roll=10,
+      rightArm__bend=-30, leftArm__pitch=-6, leftArm__roll=-10, leftArm__bend=-14, head__pitch=0,
+      rightLeg__pitch=4, rightLeg__bend=6, leftLeg__pitch=-4, leftLeg__bend=6, body__y=-0.01)
 m.key(36, **neutral_changes())
-
-# Поворот всего тела: боком к цели (правое плечо вперёд), к концу — обратно.
-m.yaw(0, 0)
-m.yaw(1, 30, "OUTQUAD")
-m.yaw(3, 80, "INOUTSINE")
-m.yaw(26, 80, "OUTQUAD")
-m.yaw(29, 72, "INOUTSINE")
-m.yaw(33, 28, "INOUTSINE")
-m.yaw(36, 0)
 (OUT / "max_red.json").write_text(json.dumps(m.build("max_red", 36, 8), indent=1))
+
+
+# ---------------------------------------------------------------------------- ладонь (для клиента)
+def hand_of(pose):
+    """Примерно: где центр правой ладони в осях тела (вперёд, вправо, вверх от ног), модель 0,9375."""
+    px = 1.0 / 16.0 * MODEL_SCALE
+    p = lambda k: math.radians(pose.get("rightArm." + k, 0.0))
+
+    def rx(v, a):
+        x, y, z = v
+        return (x, y * math.cos(a) - z * math.sin(a), y * math.sin(a) + z * math.cos(a))
+
+    def ry(v, a):
+        x, y, z = v
+        return (x * math.cos(a) + z * math.sin(a), y, -x * math.sin(a) + z * math.cos(a))
+
+    def rz(v, a):
+        x, y, z = v
+        return (x * math.cos(a) - y * math.sin(a), x * math.sin(a) + y * math.cos(a), z)
+
+    # (вправо, вверх, вперёд); плечо: 5 px вправо, 22 px вверх; локоть 4 px ниже, ладонь ещё 5 px
+    fore = rx((0.0, -5.0, 0.0), p("bend"))
+    local = (fore[0], -4.0 + fore[1], fore[2])
+    v = rz(ry(rx(local, p("pitch")), p("yaw")), p("roll"))
+    v = ry(v, math.radians(pose.get("torso.yaw", 0.0)))
+    r, u, f = 5.0 + v[0], 22.0 + v[1], v[2]
+    r, u, f = r * px, u * px + pose.get("body.y", 0.0), f * px
+    lean = math.radians(pose.get("body.pitch", 0.0))
+    du = u - 0.7
+    u2 = 0.7 + du * math.cos(lean) + f * math.sin(lean)
+    f2 = f * math.cos(lean) - du * math.sin(lean)
+    return f2, r, u2
+
+
+pose = dict(NEUTRAL)
+print("MAX_HAND:")
+for tick, changes, _ in m.keys:
+    pose.update(changes)
+    f, rr, u = hand_of(pose)
+    print("            {%d, %.2f, %.2f, %.2f}," % (tick, f, rr, u))
 
 print("ok: red_cast.json, max_red.json")

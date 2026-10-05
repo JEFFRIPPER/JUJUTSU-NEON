@@ -319,8 +319,9 @@ public final class MovementFxClient {
         s.boostW += (bT - s.boostW) * 0.2f;
         s.landW += (lT - s.landW) * 0.25f;
         if (s.crouching) s.crouchAge++;
-        float cT = s.crouching ? (float) smooth(s.crouchAge / (double) CROUCH_FULL_TICKS * 1.3) : 0f;
-        s.crouchW += (cT - s.crouchW) * (s.crouching ? 0.45f : 0.35f);
+        // Вес слоя — быстро к 1; глубину приседа набирает сама поза (плавно, без рывков).
+        float cT = s.crouching ? 1f : 0f;
+        s.crouchW += (cT - s.crouchW) * (s.crouching ? 0.5f : 0.35f);
         if (Math.abs(s.flightW) < 0.001f) s.flightW = 0f;
         if (Math.abs(s.crouchW) < 0.001f) s.crouchW = 0f;
 
@@ -1110,16 +1111,18 @@ public final class MovementFxClient {
     private static Pose crouchPose(PState s, float pt, float w) {
         Pose p = new Pose();
         p.w = w;
-        double t = s.crouchAge + pt;
-        float shake = s.crouchAge >= CROUCH_FULL_TICKS ? (float) Math.sin(t * 2.6) * 1.2f : 0f;
-        // Полуприсед, руки сгруппированы у тела — готовится к прыжку.
-        p.bodyY = crouchY(52f);
-        p.bodyPitch = -6f;
-        p.bodyRoll = shake;
-        p.torsoBend = 22f;
-        p.headPitch = 4f;
-        p.set(p.rLeg, -52f, 0f, 6f, 100f).set(p.lLeg, -48f, 0f, -6f, 96f);
-        p.set(p.rArm, -30f, -34f, 4f, -112f).set(p.lArm, -30f, 34f, -4f, -112f);
+        double t = s.crouchAge + (s.crouching ? pt : 0f);
+        // Как перед настоящим прыжком: колени плавно сгибаются, таз уходит назад, корпус чуть
+        // наклоняется вперёд, руки отводятся назад для замаха, взгляд вперёд-вверх. Без тряски —
+        // набрав глубину, просто держит стойку и едва заметно дышит.
+        float d = (float) smooth(t / CROUCH_FULL_TICKS);
+        float breath = d >= 0.999f ? (float) Math.sin(t * 0.22) * 0.006f : 0f;
+        p.bodyY = crouchY(40f * d) + breath;
+        p.bodyPitch = -7f * d;
+        p.torsoBend = 14f * d;
+        p.headPitch = -5f * d;
+        p.set(p.rLeg, -44f * d, 0f, 3f * d, 84f * d).set(p.lLeg, -40f * d, 0f, -3f * d, 80f * d);
+        p.set(p.rArm, 30f * d, 0f, 7f, -6f - 12f * d).set(p.lArm, 30f * d, 0f, -7f, -6f - 12f * d);
         return p;
     }
 

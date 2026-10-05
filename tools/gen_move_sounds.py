@@ -9,6 +9,8 @@
   move_boost      — включение ускоренного полёта: порыв ветра
   move_step       — шаг сверхбега: глухой удар и шорох
   move_land       — приземление из полёта
+  move_slam       — жёсткое приземление из ускоренного полёта: тяжёлый удар телом о землю,
+                    хруст грунта, разлёт камешков, пыльный выдох и низкий гул земли
 """
 import subprocess
 import wave
@@ -161,10 +163,41 @@ def land():
     finish("move_land", reverb(th + dust, 0.6, 0.2), -2.0)
 
 
-dash_front()
-dash_side()
-crouch()
-takeoff()
-boost()
-step()
-land()
+def crunch(dur, density, seed):
+    """Хруст грунта: плотные короткие щелчки разной громкости."""
+    rng = np.random.default_rng(seed)
+    n = int(SR * dur)
+    x = np.zeros(n)
+    hits = rng.random(n) < density / SR
+    x[hits] = rng.standard_normal(hits.sum())
+    k = np.exp(-np.arange(int(SR * 0.004)) / (SR * 0.0009))
+    return np.convolve(x, k)[:n]
+
+
+def slam():
+    d = 2.6
+    t = t_axis(d)
+    # удар телом: два слоя — плотный низ и «тело» удара
+    hit = np.zeros_like(t)
+    th = thump(1.4, 150, 32, 0.32)
+    hit[:len(th)] += th * 1.6
+    th2 = thump(0.5, 260, 70, 0.07)
+    hit[:len(th2)] += th2 * 0.9
+    body = band(noise(d), 60, 700) * env(t, 0.003, 0.5, 2.2) * 1.4
+    # хруст грунта и трещины
+    grit = band(crunch(d, 900, 3), 500, 6000) * env(t, 0.002, 0.35, 1.8) * 1.3
+    # камешки осыпаются чуть позже
+    peb_env = np.clip((t - 0.12) / 0.15, 0, 1) * np.exp(-np.clip(t - 0.3, 0, None) / 0.45)
+    pebbles = band(crunch(d, 120, 7), 1800, 8000) * peb_env * 1.1
+    # пыльный выдох во все стороны
+    dust = moving_band(noise(d), 1400, 400, 0.9) * env(t, 0.02, 0.9, 1.6) * 0.8
+    # низкий гул земли
+    rumble = band(noise(d), 25, 120) * env(t, 0.01, 2.3, 1.4) * 1.3
+    finish("move_slam", reverb(hit + body + grit + pebbles + dust + rumble, 1.2, 0.22), -0.8)
+
+
+import sys
+ALL = {"move_dash_front": dash_front, "move_dash_side": dash_side, "move_crouch": crouch,
+       "move_takeoff": takeoff, "move_boost": boost, "move_step": step, "move_land": land, "move_slam": slam}
+for name in (sys.argv[1:] or list(ALL)):
+    ALL[name]()

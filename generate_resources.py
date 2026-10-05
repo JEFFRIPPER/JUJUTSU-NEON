@@ -384,8 +384,10 @@ for _n in ("lapse_cast", "lapse_burst", "lapse_pull", "lapse_kick", "lapse_blink
 for _n in ("red_cast", "max_red_cast", "red_boom"):
     sound_json[_n] = {"sounds": [{"name": "jujutsu_neon:red/" + _n}]}
 # Движение: дэши, взлёт, полёт, сверхбег (свой синтез, tools/gen_move_sounds.py).
-for _n in ("move_dash_front", "move_dash_side", "move_crouch", "move_takeoff", "move_boost", "move_step", "move_land"):
+for _n in ("move_dash_front", "move_dash_side", "move_crouch", "move_takeoff", "move_boost", "move_step", "move_land", "move_slam"):
     sound_json[_n] = {"sounds": [{"name": "jujutsu_neon:move/" + _n}]}
+for _n in ("infinity_on", "infinity_off", "infinity_block", "rct_heal"):
+    sound_json[_n] = {"sounds": [{"name": "jujutsu_neon:cursed/" + _n}]}
 ROOT.joinpath("sounds.json").write_text(json.dumps(sound_json, indent=2))
 
 sr = 48000
