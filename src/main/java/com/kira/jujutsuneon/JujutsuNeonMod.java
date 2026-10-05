@@ -230,6 +230,7 @@ public class JujutsuNeonMod {
     // Красный / Максимальный Красный — звук из референса
     public static final RegistryObject<SoundEvent> SFX_RED_CAST = sound("red_cast");
     public static final RegistryObject<SoundEvent> SFX_MAX_RED_CAST = sound("max_red_cast");
+    public static final RegistryObject<SoundEvent> SFX_RED_BOOM = sound("red_boom");
     // Движение (tools/gen_move_sounds.py)
     public static final RegistryObject<SoundEvent> SFX_MOVE_DASH_FRONT = sound("move_dash_front");
     public static final RegistryObject<SoundEvent> SFX_MOVE_DASH_SIDE = sound("move_dash_side");
@@ -2948,8 +2949,8 @@ public class JujutsuNeonMod {
             owner.getPersistentData().putBoolean("jn_red_custom_damage", false);
         }
 
-        level.playSound(null, center.x, center.y, center.z, SoundEvents.GENERIC_EXPLODE, SoundSource.PLAYERS, 3.2f, 0.62f);
-        level.playSound(null, center.x, center.y, center.z, SFX_RED.get(), SoundSource.PLAYERS, 2.0f, 0.72f);
+        // Свой звук взрыва (ванильный «бум» взрыва глушит RedTechniqueClient).
+        level.playSound(null, center.x, center.y, center.z, SFX_RED_BOOM.get(), SoundSource.PLAYERS, 8.0f, 1.0f);
     }
 
     /** Летящие шарики Красного (у всех игроков). */
@@ -3208,6 +3209,27 @@ public class JujutsuNeonMod {
             if (age == RedTechnique.M_FIRE) fireMaximumRed(player);
             if (age >= RedTechnique.M_END) clearRedCast(player);
         }
+    }
+
+    /**
+     * У игрока сейчас идёт какая-то техника (каст, удержание, летящий снаряд, луч).
+     * Пассивные переключатели (Бесконечность, обратная техника) не считаются.
+     * Нужно территории: она не рушится посреди техники владельца.
+     */
+    static boolean hasActiveTechnique(ServerPlayer player) {
+        if (player == null) return false;
+        var data = player.getPersistentData();
+        if (data.getInt("jn_red_mode") != RED_MODE_NONE) return true;
+        if (data.getInt("jn_purple_mode") != PURPLE_MODE_NONE) return true;
+        if (data.getInt("jn_blue_mode") != BLUE_MODE_NONE) return true;
+        if (isMaximumBlueActive(player)) return true;
+        if (MaximumPurple.isActive(player) || LapseBlue.isBusy(player)) return true;
+        UUID id = player.getUUID();
+        if (MAX_RED_RUNTIMES.containsKey(id) || PURPLE_RUNTIMES.containsKey(id)) return true;
+        for (RedShot shot : RED_SHOTS) {
+            if (id.equals(shot.ownerId)) return true;
+        }
+        return false;
     }
 
     /** Игрок сейчас в анимации Максимального Красного (стоит на месте). */

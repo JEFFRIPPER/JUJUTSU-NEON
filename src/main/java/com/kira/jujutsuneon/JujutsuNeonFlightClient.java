@@ -408,7 +408,22 @@ public final class JujutsuNeonFlightClient {
 
         // Прыжок «взводит» полёт через onJumpFired() (любой прыжок, не только заряженный).
 
-        if (MaximumPurpleClient.isLocalActive() || DomainExpansionClient.locksLocalPlayer() || LapseBlueClient.locksLocalPlayer() || RedTechniqueClient.locksLocalPlayer()) {
+        boolean otherLock = MaximumPurpleClient.isLocalActive() || DomainExpansionClient.locksLocalPlayer() || LapseBlueClient.locksLocalPlayer();
+        if (!otherLock && RedTechniqueClient.locksLocalPlayer()) {
+            // Максимальный Красный: полёт не снимается — зависаем на месте, после выстрела летим дальше.
+            armedFromChargedJump = false;
+            if (customFlight) {
+                if (boost) setBoost(mc, false);
+                if (!mc.player.getAbilities().mayfly || !mc.player.getAbilities().flying) {
+                    mc.player.getAbilities().mayfly = true;
+                    mc.player.getAbilities().flying = true;
+                    mc.player.onUpdateAbilities();
+                }
+                mc.player.setDeltaMovement(Vec3.ZERO);
+                mc.player.fallDistance = 0.0F;
+                previousFlightVelocity = Vec3.ZERO;
+            }
+        } else if (otherLock) {
             // Кат-сцена Максимального Фиолетового: полёт снимается и не взводится.
             if (customFlight) endFlight(mc, true);
             armedFromChargedJump = false;

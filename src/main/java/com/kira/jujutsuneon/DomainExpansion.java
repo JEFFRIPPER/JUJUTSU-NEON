@@ -114,7 +114,8 @@ import org.slf4j.Logger;
  *  - снаружи — гладкая чёрная сфера (рисует клиент), через неё нельзя пройти ни внутрь, ни наружу,
  *    удары и снаряды через неё не проходят;
  *  - все живые внутри, кроме владельца, обездвижены всё время территории и ещё 2 минуты после;
- *  - территория держится 15 секунд после катсцены каста (10,8 с), повторное T рушит её раньше;
+ *  - территория держится ровно 30 реальных секунд после катсцены каста (10,8 с); если у владельца в этот
+ *    момент идёт техника — до её конца и ещё 1 с; повторное T рушит её раньше;
  *  - при разрушении мир возвращается в точности как был, а застрявших в блоках поднимает наверх.
  *
  * Стоит 100% проклятой энергии, внутри территории энергия владельца бесконечна, после — 0.
@@ -132,8 +133,12 @@ public final class DomainExpansion {
     static final int T_WALL = 116;
     /** 10,8 с: катсцена закончилась, владелец свободен. */
     static final int T_CAST_END = 216;
-    /** Сколько стоит территория после катсцены. */
-    static final int ACTIVE_TICKS = 300;
+    /** Сколько стоит территория после катсцены (для оценок в тиках; сам срок — по реальным часам). */
+    static final int ACTIVE_TICKS = 600;
+    /** Ровно 30 реальных секунд после катсцены. */
+    static final long ACTIVE_NANOS = 30_000_000_000L;
+    /** Если территорию держала техника владельца — рушится через 1 с после её конца. */
+    static final long AFTER_TECHNIQUE_NANOS = 1_000_000_000L;
     /** Сколько после начала разрушения длятся трещины до белого экрана. */
     static final int T_SHATTER = 9;
 
@@ -371,6 +376,12 @@ public final class DomainExpansion {
         int phase = PHASE_CAST;
         int collapseAge = -1;
         boolean ownerAbilitiesRestored;
+        /** Реальное время конца катсцены (начало 30 секунд). */
+        long activeStartNanos = Long.MIN_VALUE;
+        /** Срок вышел, но шла техника владельца — ждём её конца. */
+        boolean heldByTechnique;
+        /** Когда техника закончилась + 1 с (Long.MIN_VALUE — ещё идёт). */
+        long releaseAtNanos = Long.MIN_VALUE;
 
         final Set<UUID> captured = new HashSet<>();
         final List<UUID> watchers = new ArrayList<>();
@@ -420,7 +431,10 @@ public final class DomainExpansion {
 
         int remainingEstimate() {
             if (phase >= PHASE_COLLAPSE) return 0;
-            return Math.max(0, T_CAST_END + ACTIVE_TICKS - age);
+            if (activeStartNanos == Long.MIN_VALUE) return Math.max(0, T_CAST_END + ACTIVE_TICKS - age);
+            long left = ACTIVE_NANOS - (System.nanoTime() - activeStartNanos);
+            // Пока держит техника — оцениваем ещё на пару секунд вперёд (оценка обновится при разрушении).
+            return heldByTechnique ? 40 : (int) Math.max(0L, left / 50_000_000L);
         }
     }
 
@@ -666,11 +680,27 @@ public final class DomainExpansion {
                 }
             }
 
-            if (d.phase == PHASE_CAST && d.age >= T_CAST_END) d.phase = PHASE_ACTIVE;
-            // Пока владелец кастует Максимальный Фиолетовый, территория держится до конца техники:
-            // вся кат-сцена и удар проходят внутри неё.
-            boolean purpleHold = ownerHere && MaximumPurple.isActive(owner);
-            if (d.phase == PHASE_ACTIVE && d.age >= T_CAST_END + ACTIVE_TICKS && !purpleHold) beginCollapse(d);
+            if (d.phase == PHASE_CAST && d.age >= T_CAST_END) {
+                d.phase = PHASE_ACTIVE;
+                d.activeStartNanos = System.nanoTime();
+            }
+            // Ровно 30 реальных секунд после катсцены. Если в этот момент у владельца идёт
+            // техника — территория стоит до её конца и рушится через 1 секунду после него.
+            if (d.phase == PHASE_ACTIVE && d.activeStartNanos != Long.MIN_VALUE) {
+                long now = System.nanoTime();
+                if (now - d.activeStartNanos >= ACTIVE_NANOS) {
+                    boolean busy = ownerHere && JujutsuNeonMod.hasActiveTechnique(owner);
+                    if (busy) {
+                        d.heldByTechnique = true;
+                        d.releaseAtNanos = Long.MIN_VALUE;
+                    } else if (!d.heldByTechnique) {
+                        beginCollapse(d);
+                    } else {
+                        if (d.releaseAtNanos == Long.MIN_VALUE) d.releaseAtNanos = now + AFTER_TECHNIQUE_NANOS;
+                        if (now - d.releaseAtNanos >= 0) beginCollapse(d);
+                    }
+                }
+            }
         }
 
         if (d.prepared && !d.restored) enforceWalls(d);

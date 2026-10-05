@@ -24,6 +24,9 @@ import net.minecraftforge.client.event.MovementInputUpdateEvent;
 import net.minecraftforge.client.event.RenderGuiEvent;
 import net.minecraftforge.client.event.RenderLevelStageEvent;
 import net.minecraftforge.client.event.ViewportEvent;
+import net.minecraftforge.client.event.sound.PlaySoundEvent;
+import net.minecraft.client.resources.sounds.SoundInstance;
+import net.minecraft.sounds.SoundEvents;
 import net.minecraftforge.event.TickEvent;
 import net.minecraftforge.eventbus.api.EventPriority;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
@@ -236,7 +239,27 @@ public final class RedTechniqueClient {
         SHOTS.put(shotId, new Shot(shotId, casterEntity, start, velocity, hand));
     }
 
+    /** Точки свежих взрывов Красного: ванильный звук взрыва там глушится (у Красного свой). */
+    private static final List<double[]> MUTE_EXPLODE = new ArrayList<>();
+
+    @SubscribeEvent
+    public static void onPlaySound(PlaySoundEvent event) {
+        SoundInstance sound = event.getSound();
+        if (sound == null || MUTE_EXPLODE.isEmpty()) return;
+        if (!SoundEvents.GENERIC_EXPLODE.getLocation().equals(sound.getLocation())) return;
+        long now = System.currentTimeMillis();
+        MUTE_EXPLODE.removeIf(m -> now - (long) m[3] > 1500L);
+        for (double[] m : MUTE_EXPLODE) {
+            double dx = sound.getX() - m[0], dy = sound.getY() - m[1], dz = sound.getZ() - m[2];
+            if (dx * dx + dy * dy + dz * dz < 36.0) {
+                event.setSound(null);
+                return;
+            }
+        }
+    }
+
     static void onShotEnd(int shotId, Vec3 pos, boolean exploded) {
+        if (exploded) MUTE_EXPLODE.add(new double[]{pos.x, pos.y, pos.z, System.currentTimeMillis()});
         Shot s = SHOTS.get(shotId);
         if (s != null && s.endPos == null) {
             s.endPos = pos;

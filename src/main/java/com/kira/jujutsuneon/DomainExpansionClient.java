@@ -417,7 +417,7 @@ public final class DomainExpansionClient {
                 continue;
             }
             // Сервер пропал без сигнала — не держим вечно.
-            if (!s.ended && s.clock > T_CAST_END + ACTIVE_TICKS + 1200) {
+            if (!s.ended && s.clock > T_CAST_END + ACTIVE_TICKS + 2400) {
                 if (s == cutscene) stopCutscene(mc);
                 stopOwnerAnimation(s);
                 it.remove();

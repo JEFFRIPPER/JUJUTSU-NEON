@@ -735,6 +735,7 @@ public final class LapseBlueClient {
         for (GrabScene g : GRABS.values()) {
             double t = g.ticks + (mc.isPaused() ? 0.0 : pt);
             if (t < G_FX_END + 2) renderGrab(mc, pose, cam, camera, g, t, pt);
+            if (t > G_PULL_END - 4) renderHold(mc, pose, cam, camera, g, t, pt);
         }
 
         HollowPurpleReferenceClient.mpAlphaBlend();
@@ -1000,6 +1001,110 @@ public final class LapseBlueClient {
                     streak(pose, camera, a, a.add(dir.scale(Math.min(0.5, len - ph))), 0.05f, TEX_GLINT, 0.55f, 0.85f, 1f, pull * 0.8f, true);
                 }
             }
+        }
+    }
+
+    /**
+     * Блоки в руке: у каждого — синий ореол и бегущие по нему молнии, вокруг кружат искры,
+     * между соседними блоками проскакивают разряды, к ладони тянутся тонкие нити, а весь
+     * пучок медленно обвивает вихрь. Своему игроку от первого лица всё приглушено — не мешает смотреть.
+     */
+    private static void renderHold(Minecraft mc, PoseStack pose, Camera cam, Vec3 camera, GrabScene g, double t, float pt) {
+        if (!(mc.level.getEntity(g.casterEntityId) instanceof Player owner)) return;
+        int n = Math.min(g.ids.length, g.origins.size());
+        if (n <= 0) return;
+        Vec3 eye = owner.getEyePosition(pt);
+        Vec3 look = owner.getViewVector(pt);
+        Vec3 side = look.cross(new Vec3(0.0, 1.0, 0.0));
+        side = side.lengthSqr() < 1.0E-4 ? new Vec3(1, 0, 0) : side.normalize();
+        Vec3 palm = eye.add(0.0, -0.42, 0.0).add(look.scale(0.62)).add(side.scale(0.30));
+
+        float fade = (float) smooth((t - (G_PULL_END - 4)) / 6.0);
+        boolean firstPerson = owner == mc.player && mc.options.getCameraType().isFirstPerson();
+        float a = fade * (firstPerson ? 0.55f : 1.0f);
+        if (a < 0.01f) return;
+        float breathe = (float) (0.82 + 0.18 * Math.sin(t * 0.21));
+
+        Vec3[] pos = new Vec3[n];
+        Vec3 mid = Vec3.ZERO;
+        for (int i = 0; i < n; i++) {
+            pos[i] = grabPos(g.origins.get(i), holdPos(eye, look, i), t).add(0.0, 0.5, 0.0);
+            mid = mid.add(pos[i]);
+        }
+        mid = mid.scale(1.0 / n);
+
+        for (int i = 0; i < n; i++) {
+            Vec3 c = pos[i];
+            long seed = g.seed + i * 101L;
+            // ореол и голубая дымка вокруг блока
+            billboard(pose, cam, camera, c, 2.1f * breathe, 0f, TEX_BLOOM, 0.25f, 0.55f, 1f, a * 0.32f, true);
+            billboard(pose, cam, camera, c, 1.7f, (float) (t * 0.05 + i), TEX_WISP, 0.5f, 0.75f, 1f, a * 0.35f, false);
+            // молнии по «оболочке» блока
+            crackles(pose, camera, c, 0.78f, t + i * 3, a * 0.8f, seed, 2);
+            // искры на орбите
+            Random rnd = new Random(seed);
+            Vec3 ax = randDir(rnd);
+            Vec3 u = ax.cross(new Vec3(0.0, 1.0, 0.0));
+            u = u.lengthSqr() < 1.0E-4 ? new Vec3(1, 0, 0) : u.normalize();
+            Vec3 v = ax.cross(u).normalize();
+            for (int k = 0; k < 4; k++) {
+                double ang = t * (0.32 + 0.05 * k) + k * Math.PI * 0.5 + i;
+                double rr = 0.72 + 0.08 * Math.sin(t * 0.4 + k);
+                Vec3 p0 = c.add(u.scale(Math.cos(ang) * rr)).add(v.scale(Math.sin(ang) * rr));
+                Vec3 p1 = c.add(u.scale(Math.cos(ang - 0.35) * rr)).add(v.scale(Math.sin(ang - 0.35) * rr));
+                streak(pose, camera, p1, p0, 0.035f, TEX_GLINT, 0.6f, 0.9f, 1f, a * 0.9f, true);
+            }
+            // тонкая нить от ладони
+            if (!firstPerson || i == 0) {
+                Vec3 d = c.subtract(palm);
+                double len = d.length();
+                if (len > 0.2) {
+                    Vec3 dir = d.scale(1.0 / len);
+                    double ph = (t * 0.18 + i * 0.27) % 1.0;
+                    Vec3 s0 = palm.add(dir.scale(len * ph));
+                    streak(pose, camera, palm, c, 0.012f, TEX_GLINT, 0.5f, 0.8f, 1f, a * 0.35f, true);
+                    streak(pose, camera, s0, s0.add(dir.scale(Math.min(0.4, len * (1.0 - ph)))), 0.04f, TEX_GLINT, 0.8f, 0.95f, 1f, a * 0.8f, true);
+                }
+            }
+        }
+
+        // разряды между соседними блоками (вспыхивают и гаснут)
+        for (int i = 0; i < n; i++) {
+            int j = (i + 1) % n;
+            if (j == i) break;
+            double flick = Math.sin(t * 0.9 + i * 2.3);
+            if (flick < 0.15) continue;
+            arcBetween(pose, camera, pos[i], pos[j], t, a * (float) flick, g.seed + i * 17L);
+        }
+
+        // вихрь вокруг всего пучка
+        if (n > 1) {
+            billboard(pose, cam, camera, mid, 3.0f * breathe, (float) (t * 0.04), TEX_ARC, 0.6f, 0.85f, 1f, a * 0.35f, true);
+            billboard(pose, cam, camera, mid, 2.6f, (float) (-t * 0.06 + 1.7), TEX_ARC, 0.45f, 0.7f, 1f, a * 0.25f, true);
+        }
+    }
+
+    /** Ломаная молния между двумя точками (перерисовывается каждые 2 тика). */
+    private static void arcBetween(PoseStack pose, Vec3 camera, Vec3 from, Vec3 to, double t, float alpha, long seed) {
+        Random rnd = new Random(seed * 31L + (long) (t * 0.5));
+        Vec3 d = to.subtract(from);
+        double len = d.length();
+        if (len < 0.05) return;
+        Vec3 dir = d.scale(1.0 / len);
+        Vec3 side = dir.cross(new Vec3(0, 1, 0));
+        side = side.lengthSqr() < 1.0E-4 ? new Vec3(1, 0, 0) : side.normalize();
+        Vec3 upv = side.cross(dir).normalize();
+        int segs = 7;
+        Vec3 prev = from;
+        for (int i = 1; i <= segs; i++) {
+            double u = i / (double) segs;
+            double j = i == segs ? 0.0 : 0.16 * Math.sin(Math.PI * u);
+            Vec3 p = from.add(d.scale(u))
+                    .add(side.scale((rnd.nextDouble() - 0.5) * 2 * j))
+                    .add(upv.scale((rnd.nextDouble() - 0.5) * 2 * j));
+            streak(pose, camera, prev, p, 0.06f, TEX_GLINT, 0.5f, 0.8f, 1f, alpha * 0.6f, true);
+            streak(pose, camera, prev, p, 0.02f, TEX_GLINT, 1f, 1f, 1f, alpha, true);
+            prev = p;
         }
     }
 
