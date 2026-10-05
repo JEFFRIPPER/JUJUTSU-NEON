@@ -366,18 +366,18 @@ public final class LapseBlueClient {
         Vec3 tFeet = s.targetAt(t);
         pin(target, tFeet);
         Vec3 air = s.airXZ();
-        Vec3 rootXZ = new Vec3(air.x, 0.0, air.z);
-        Vec3 right = s.rightFoot(rootXZ), left = s.leftFoot(rootXZ);
         double need = Double.NaN;
         try {
             Capture cap = Capture.of(mc, target, pt);
             if (cap != null) {
-                double topR = cap.topAround(right.x - tFeet.x, right.z - tFeet.z, s.forward, s.right);
-                double topL = cap.topAround(left.x - tFeet.x, left.z - tFeet.z, s.forward, s.right);
-                if (!Double.isNaN(topR)) need = topR + CONTACT_MARGIN - FOOT_RIGHT_LOW;
-                if (!Double.isNaN(topL)) {
-                    double l = topL + CONTACT_MARGIN - FOOT_LEFT_LOW;
-                    need = Double.isNaN(need) ? l : Math.max(need, l);
+                // Каждая точка стопы (и весь путь разгибающейся ноги) — над моделью цели.
+                for (double[] f : feetSamples(t)) {
+                    double fx = air.x + s.forward.x * f[0] + s.right.x * f[1];
+                    double fz = air.z + s.forward.z * f[0] + s.right.z * f[1];
+                    double top = cap.topAround(fx - tFeet.x, fz - tFeet.z, s.forward, s.right);
+                    if (Double.isNaN(top)) continue;
+                    double req = top + CONTACT_MARGIN - f[2];
+                    need = Double.isNaN(need) ? req : Math.max(need, req);
                 }
             }
         } catch (Throwable ignored) {

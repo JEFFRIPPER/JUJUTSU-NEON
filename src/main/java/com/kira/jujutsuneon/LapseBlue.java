@@ -13,6 +13,7 @@ import net.minecraft.util.Mth;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.Mob;
+import net.minecraft.world.entity.monster.Creeper;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.level.ClipContext;
 import net.minecraft.world.level.block.Block;
@@ -24,6 +25,7 @@ import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.event.TickEvent;
+import net.minecraftforge.event.entity.living.LivingAttackEvent;
 import net.minecraftforge.event.entity.living.LivingDeathEvent;
 import net.minecraftforge.event.entity.living.LivingFallEvent;
 import net.minecraftforge.event.entity.player.PlayerEvent;
@@ -106,6 +108,13 @@ public final class LapseBlue {
     static final double KICK_LEG_PITCH = -10.0;
     static final double TUCK_LEG_PITCH = -70.0;
     static final double TUCK_LEG_BEND = 100.0;
+    /** Взведённое колено перед ударом (тик 55). */
+    static final double CHAMBER_PITCH = -116.0;
+    static final double CHAMBER_BEND = 142.0;
+    /** Присед на цели после удара о землю (тики 73–79): бедро -55, колено 110, тело ниже. */
+    static final double CROUCH_THIGH = -55.0;
+    static final double CROUCH_BEND = 110.0;
+    static final double CROUCH_BODY_Y = -0.75 * 0.9375 * (1.0 - Math.cos(Math.toRadians(55.0)));
     /** Насколько стопа выше верха модели цели в момент касания (почти вплотную). */
     static final double CONTACT_MARGIN = 0.01;
     /** Сдвиг ступни от центра игрока вбок (правая нога — вправо, левая — влево). */
@@ -125,8 +134,39 @@ public final class LapseBlue {
         FOOT_LEFT_LOW = l[1];
     }
 
+    /**
+     * Точки стоп, которые в момент t не должны уйти внутрь модели цели:
+     * {вперёд, вбок (+ вправо), низ относительно ног игрока}. До касания — и весь путь
+     * разгибающейся ноги (колено взведено → нога выпрямлена), после удара — присед.
+     */
+    static List<double[]> feetSamples(double t) {
+        List<double[]> out = new ArrayList<>(6);
+        double[] contact = foot(KICK_LEG_PITCH, 0.0);
+        double[] tuck = foot(TUCK_LEG_PITCH, TUCK_LEG_BEND);
+        if (t < T_CONTACT) {
+            for (double u : new double[]{0.5, 0.75, 0.9}) {
+                double[] f = foot(Mth.lerp(u, CHAMBER_PITCH, KICK_LEG_PITCH), Mth.lerp(u, CHAMBER_BEND, 0.0));
+                out.add(new double[]{f[0], FOOT_LAT, f[1]});
+            }
+            out.add(new double[]{contact[0], FOOT_LAT, contact[1]});
+            out.add(new double[]{tuck[0], -FOOT_LAT, tuck[1]});
+            return out;
+        }
+        out.add(new double[]{contact[0], FOOT_LAT, contact[1]});
+        if (t < T_IMPACT) {
+            out.add(new double[]{tuck[0], -FOOT_LAT, tuck[1]});
+            return out;
+        }
+        // С удара и до выпрямления — присед: голень наклонена, её нижний угол ниже, чем у прямой ноги.
+        double[] c = foot(CROUCH_THIGH, CROUCH_BEND);
+        double low = c[1] + CROUCH_BODY_Y;
+        out.add(new double[]{c[0], FOOT_LAT, low});
+        out.add(new double[]{c[0], -FOOT_LAT, low});
+        return out;
+    }
+
     /** {вперёд, низ} стопы относительно ног игрока для бедра thigh° и колена bend° (модель игрока). */
-    private static double[] foot(double thighPitch, double bend) {
+    static double[] foot(double thighPitch, double bend) {
         double a = Math.toRadians(-thighPitch);
         double s = Math.toRadians(-thighPitch - bend);
         double kneeF = 0.375 * Math.sin(a), kneeY = 0.751 - 0.375 * Math.cos(a);
@@ -684,6 +724,7 @@ public final class LapseBlue {
                     mob.setTarget(null);
                     mob.setJumping(false);
                 }
+                if (target instanceof Creeper creeper) creeper.setSwellDir(-1);
             }
         }
 
@@ -840,6 +881,14 @@ public final class LapseBlue {
     }
 
     // ================================================================== события
+
+    /** Цель, которую ведёт приём, никого не бьёт (ни рукой, ни стрелой, ни взрывом). */
+    @SubscribeEvent(priority = EventPriority.HIGHEST)
+    public static void onLivingAttack(LivingAttackEvent event) {
+        if (TARGETS.isEmpty() || event.getEntity().level().isClientSide) return;
+        Entity attacker = event.getSource().getEntity();
+        if (attacker != null && TARGETS.containsKey(attacker.getUUID())) event.setCanceled(true);
+    }
 
     @SubscribeEvent(priority = EventPriority.HIGH)
     public static void onFall(LivingFallEvent event) {

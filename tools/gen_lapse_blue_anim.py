@@ -16,7 +16,7 @@
   body: y в блоках (вверх +), pitch > 0 — откинуться назад,
         yaw > 0 — разворот всего тела влево (против часовой сверху)
 
-Присед без «проваливания» ног: бедро -a, колено 2a → стопа под тазом, body.y = -0.75 * (1 - cos a).
+Присед без «проваливания» ног: бедро -a, колено 2a → стопа под тазом, body.y = -0.75 * 0.9375 * (1 - cos a).
 
 Поза касания (тик 58) зашита и в LapseBlue.java (KICK_LEG_PITCH, TUCK_*): ступня правой ноги
 ставится ровно на верх модели цели, поэтому ноги с 58 по 70 не двигаются.
@@ -46,8 +46,11 @@ TUCK_LEG_PITCH = -70
 TUCK_LEG_BEND = 100
 
 
+MODEL_SCALE = 0.9375  # модель игрока рисуется в 0.9375, а смещение body — в блоках мира
+
+
 def crouch_y(a_deg):
-    return round(-0.75 * (1.0 - math.cos(math.radians(a_deg))), 3)
+    return round(-0.75 * MODEL_SCALE * (1.0 - math.cos(math.radians(a_deg))), 3)
 
 
 class Anim:
@@ -160,8 +163,7 @@ c.key(70, ease="OUTQUAD", torso__bend=14, rightArm__pitch=-20, rightArm__roll=52
 c.key(73, ease="OUTQUAD", rightLeg__pitch=-55, rightLeg__bend=110, leftLeg__pitch=-55, leftLeg__bend=110,
       body__y=crouch_y(55), torso__bend=26, rightArm__pitch=-56, rightArm__roll=8, rightArm__bend=-30,
       leftArm__pitch=-20, leftArm__roll=-50, leftArm__bend=-24, head__pitch=34)
-c.key(79, rightLeg__pitch=-50, rightLeg__bend=100, leftLeg__pitch=-50, leftLeg__bend=100, body__y=crouch_y(50),
-      torso__bend=22, head__pitch=28)
+c.key(79, torso__bend=22, head__pitch=28)
 # 80–89: встаёт и отпрыгивает назад, руки в стороны
 c.key(82, ease="OUTQUAD", rightLeg__pitch=12, rightLeg__bend=2, leftLeg__pitch=14, leftLeg__bend=2, body__y=0.0,
       body__pitch=6, torso__bend=-6, rightArm__pitch=-70, rightArm__roll=84, rightArm__bend=-10,
