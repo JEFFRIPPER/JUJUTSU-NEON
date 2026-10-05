@@ -1415,29 +1415,16 @@ public final class DomainExpansionClient {
         RenderSystem.enableCull();
     }
 
-    /** Белые силуэты владельца и тех, кто попал в территорию, — в ряд по центру. */
+    /** Белый силуэт только владельца — по центру; остальных в этом кадре нет. */
     private static void drawSilhouettes(GuiGraphics g, int w, int h, Scene s) {
         Minecraft mc = Minecraft.getInstance();
         if (mc.level == null) return;
-        List<LivingEntity> list = new ArrayList<>();
         net.minecraft.world.entity.player.Player owner = mc.level.getPlayerByUUID(s.ownerId);
-        if (owner != null) list.add(owner);
-        AABB box = new AABB(s.center, s.center).inflate(RADIUS);
-        for (LivingEntity e : mc.level.getEntitiesOfClass(LivingEntity.class, box,
-                e -> e.isAlive() && !(e instanceof ArmorStand) && !e.getUUID().equals(s.ownerId))) {
-            if (list.size() >= 5) break;
-            if (e.position().distanceTo(s.center) <= RADIUS) list.add(e);
-        }
-        int n = list.size();
-        for (int i = 0; i < n; i++) {
-            LivingEntity e = list.get(i);
-            float scaleMul = i == 0 ? 1.0f : 0.7f;
-            int slot = i == 0 ? 0 : (i % 2 == 1 ? -((i + 1) / 2) : (i / 2));
-            int x = (int) (w / 2.0f + slot * w * 0.11f);
-            int baseY = (int) (h * 0.66f);
-            int scale = (int) (h * 0.13f * scaleMul / Math.max(0.6f, e.getBbHeight() / 1.8f));
-            silhouette(g, e, x, baseY, scale);
-        }
+        if (owner == null) return;
+        int x = (int) (w / 2.0f);
+        int baseY = (int) (h * 0.66f);
+        int scale = (int) (h * 0.13f);
+        silhouette(g, owner, x, baseY, scale);
     }
 
     private static void silhouette(GuiGraphics g, LivingEntity e, int x, int y, int scale) {
@@ -1470,6 +1457,93 @@ public final class DomainExpansionClient {
         int a = Mth.clamp((int) (alpha * 255.0f), 0, 255);
         if (a <= 0) return;
         g.fill(0, 0, w, h, (a << 24) | (rgb & 0x00FFFFFF));
+    }
+
+    // ------------------------------------------------------------------ мобы-статуи
+
+    /** id мобов, которые застыли статуей: id → tickCount в момент заморозки. */
+    private static final it.unimi.dsi.fastutil.ints.Int2IntOpenHashMap FROZEN = new it.unimi.dsi.fastutil.ints.Int2IntOpenHashMap();
+    private static boolean renderingFrozen;
+
+    static void onFreeze(int id, boolean frozen) {
+        Minecraft mc = Minecraft.getInstance();
+        if (!frozen) {
+            FROZEN.remove(id);
+            return;
+        }
+        Entity e = mc.level != null ? mc.level.getEntity(id) : null;
+        FROZEN.put(id, e != null ? e.tickCount : 0);
+        if (e instanceof LivingEntity le) calmLimbs(le);
+    }
+
+    private static void calmLimbs(LivingEntity e) {
+        e.walkAnimation.setSpeed(0.0f);
+        e.walkAnimation.update(0.0f, 1.0f);
+    }
+
+    /**
+     * Свой тик у статуи не идёт: ни анимаций, ни поворотов, ни плескания. Только позиция
+     * плавно идёт за сервером — отбрасывание от ударов видно.
+     */
+    @SubscribeEvent(priority = EventPriority.HIGHEST)
+    public static void onLivingTick(net.minecraftforge.event.entity.living.LivingEvent.LivingTickEvent event) {
+        if (FROZEN.isEmpty()) return;
+        LivingEntity e = event.getEntity();
+        if (!e.level().isClientSide || !FROZEN.containsKey(e.getId())) return;
+        if (e.isDeadOrDying() || e instanceof net.minecraft.world.entity.player.Player) return;
+        event.setCanceled(true);
+        e.tickCount = FROZEN.get(e.getId());
+        if (e.hurtTime > 0) e.hurtTime--;
+        if (e.invulnerableTime > 0) e.invulnerableTime--;
+        calmLimbs(e);
+        Vec3 target = e.getPositionCodec().decode(0L, 0L, 0L);
+        Vec3 pos = e.position();
+        Vec3 d = target.subtract(pos);
+        if (d.lengthSqr() > 64.0) {
+            e.setPos(target.x, target.y, target.z);
+        } else if (d.lengthSqr() > 1.0E-6) {
+            Vec3 next = pos.add(d.scale(0.5));
+            e.setPos(next.x, next.y, next.z);
+        }
+    }
+
+    /** Статую рисуем без «дрожи» между тиками: время анимаций застыло. */
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    @SubscribeEvent(priority = EventPriority.HIGHEST)
+    public static void onRenderLiving(net.minecraftforge.client.event.RenderLivingEvent.Pre event) {
+        if (renderingFrozen || FROZEN.isEmpty()) return;
+        LivingEntity e = event.getEntity();
+        if (!FROZEN.containsKey(e.getId()) || e.isDeadOrDying()) return;
+        if (event.getPartialTick() == 0.0f) return;
+        event.setCanceled(true);
+        renderingFrozen = true;
+        try {
+            calmLimbs(e);
+            ((net.minecraft.client.renderer.entity.LivingEntityRenderer) event.getRenderer()).render(e, e.getYRot(), 0.0f,
+                    event.getPoseStack(), event.getMultiBufferSource(), event.getPackedLight());
+        } finally {
+            renderingFrozen = false;
+        }
+    }
+
+    @SubscribeEvent
+    public static void onEntityLeave(net.minecraftforge.event.entity.EntityLeaveLevelEvent event) {
+        if (event.getLevel().isClientSide() && !FROZEN.isEmpty()) FROZEN.remove(event.getEntity().getId());
+    }
+
+    /**
+     * Камера чужой кат-сцены внутри территории не выходит за её стену — иначе вместо кадра
+     * видна чёрная сфера снаружи.
+     */
+    static Vec3 clampCameraInside(Vec3 anchor, Vec3 camera) {
+        for (Scene s : SCENES.values()) {
+            if (!s.wallsVisible() || anchor.distanceTo(s.center) >= RADIUS) continue;
+            Vec3 off = camera.subtract(s.center);
+            double max = RADIUS - 1.5;
+            if (off.length() > max) return s.center.add(off.normalize().scale(max));
+            return camera;
+        }
+        return camera;
     }
 
     /** Нужна ли клиенту отрисовка через Entity (для совместимости при вызове из других мест). */

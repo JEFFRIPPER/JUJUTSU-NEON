@@ -380,6 +380,9 @@ for _n in ("domain_voice", "domain_voice_world", "domain_shatter", "domain_shatt
 for _n in ("lapse_cast", "lapse_burst", "lapse_pull", "lapse_kick", "lapse_blink", "lapse_slowmo",
            "lapse_contact", "lapse_slam", "lapse_land"):
     sound_json[_n] = {"sounds": [{"name": "jujutsu_neon:lapse/" + _n}]}
+# Красный и Максимальный Красный: звук из референса (моно — звучит из точки в мире).
+for _n in ("red_cast", "max_red_cast"):
+    sound_json[_n] = {"sounds": [{"name": "jujutsu_neon:red/" + _n}]}
 ROOT.joinpath("sounds.json").write_text(json.dumps(sound_json, indent=2))
 
 sr = 48000

@@ -29,6 +29,8 @@ import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.Mob;
 import net.minecraft.world.entity.MoverType;
+import net.minecraft.world.entity.MobType;
+import net.minecraft.world.entity.animal.WaterAnimal;
 import net.minecraft.world.entity.decoration.ArmorStand;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.entity.projectile.AbstractArrow;
@@ -60,6 +62,7 @@ import net.minecraftforge.event.TickEvent;
 import net.minecraftforge.event.entity.EntityJoinLevelEvent;
 import net.minecraftforge.event.entity.living.LivingAttackEvent;
 import net.minecraftforge.event.entity.living.LivingDeathEvent;
+import net.minecraftforge.event.entity.living.LivingEvent;
 import net.minecraftforge.event.entity.living.LivingEntityUseItemEvent;
 import net.minecraftforge.event.entity.living.LivingFallEvent;
 import net.minecraftforge.event.entity.player.AttackEntityEvent;
@@ -211,6 +214,26 @@ public final class DomainExpansion {
         CHANNEL.registerMessage(id++, CollapsePacket.class, CollapsePacket::encode, CollapsePacket::decode, CollapsePacket::handle);
         CHANNEL.registerMessage(id++, EndPacket.class, EndPacket::encode, EndPacket::decode, EndPacket::handle);
         CHANNEL.registerMessage(id++, StunPacket.class, StunPacket::encode, StunPacket::decode, StunPacket::handle);
+        CHANNEL.registerMessage(id++, FreezePacket.class, FreezePacket::encode, FreezePacket::decode, FreezePacket::handle);
+    }
+
+    /** S2C: моб застыл статуей (или ожил) — клиент перестаёт его анимировать. */
+    public record FreezePacket(int entityId, boolean frozen) {
+        static void encode(FreezePacket msg, FriendlyByteBuf buf) {
+            buf.writeVarInt(msg.entityId);
+            buf.writeBoolean(msg.frozen);
+        }
+
+        static FreezePacket decode(FriendlyByteBuf buf) {
+            return new FreezePacket(buf.readVarInt(), buf.readBoolean());
+        }
+
+        static void handle(FreezePacket msg, Supplier<NetworkEvent.Context> ctx) {
+            NetworkEvent.Context context = ctx.get();
+            context.enqueueWork(() -> DistExecutor.unsafeRunWhenOn(Dist.CLIENT, () -> () ->
+                    DomainExpansionClient.onFreeze(msg.entityId, msg.frozen)));
+            context.setPacketHandled(true);
+        }
     }
 
     /** C2S: нажата T. */
@@ -409,6 +432,8 @@ public final class DomainExpansion {
         final ServerLevel level;
         UUID domainOwner;
         long until = Long.MAX_VALUE;
+        /** Когда территория рухнула: ещё 2 секунды проверяем, не зажало ли его блоками. */
+        long releasedAt = Long.MIN_VALUE;
 
         Stun(UUID entityId, ServerLevel level, UUID domainOwner) {
             this.entityId = entityId;
@@ -422,6 +447,7 @@ public final class DomainExpansion {
     private static final Map<ServerLevel, List<UUID>> PENDING_DELETE = new HashMap<>();
     private static final String TAG_STUN_UNTIL = "jn_dom_stun_until";
     private static final String TAG_PREV_NOAI = "jn_dom_prev_noai";
+    private static final String TAG_PREV_SILENT = "jn_dom_prev_silent";
     /** Способности владельца до каста — на случай вылета сервера посреди катсцены. */
     private static final String TAG_OWNER_MAYFLY = "jn_dom_owner_mayfly";
     private static final String TAG_OWNER_FLYING = "jn_dom_owner_flying";
@@ -451,6 +477,17 @@ public final class DomainExpansion {
     static boolean ownsActiveDomain(Player player) {
         Domain d = DOMAINS.get(player.getUUID());
         return d != null && d.phase == PHASE_ACTIVE;
+    }
+
+    /** Все живые, пойманные территорией этого владельца (пока она стоит). */
+    static List<LivingEntity> insidersOf(ServerPlayer owner) {
+        List<LivingEntity> out = new ArrayList<>();
+        Domain d = DOMAINS.get(owner.getUUID());
+        if (d == null || d.restored || d.level != owner.level()) return out;
+        for (UUID id : d.captured) {
+            if (d.level.getEntity(id) instanceof LivingEntity le && le.isAlive()) out.add(le);
+        }
+        return out;
     }
 
     /** Точка внутри какой-либо территории (со стенами). */
@@ -508,8 +545,8 @@ public final class DomainExpansion {
     private static void onRequest(ServerPlayer player) {
         Domain own = DOMAINS.get(player.getUUID());
         if (own != null) {
-            // Повторное T рушит территорию (после катсцены каста).
-            if (own.phase == PHASE_ACTIVE) beginCollapse(own);
+            // Повторное T рушит территорию (после катсцены каста), но не посреди Максимального Фиолетового.
+            if (own.phase == PHASE_ACTIVE && !MaximumPurple.isActive(player)) beginCollapse(own);
             return;
         }
         tryStart(player);
@@ -630,7 +667,10 @@ public final class DomainExpansion {
             }
 
             if (d.phase == PHASE_CAST && d.age >= T_CAST_END) d.phase = PHASE_ACTIVE;
-            if (d.phase == PHASE_ACTIVE && d.age >= T_CAST_END + ACTIVE_TICKS) beginCollapse(d);
+            // Пока владелец кастует Максимальный Фиолетовый, территория держится до конца техники:
+            // вся кат-сцена и удар проходят внутри неё.
+            boolean purpleHold = ownerHere && MaximumPurple.isActive(owner);
+            if (d.phase == PHASE_ACTIVE && d.age >= T_CAST_END + ACTIVE_TICKS && !purpleHold) beginCollapse(d);
         }
 
         if (d.prepared && !d.restored) enforceWalls(d);
@@ -956,6 +996,7 @@ public final class DomainExpansion {
         for (Stun s : STUNS.values()) {
             if (!s.domainOwner.equals(d.ownerId) || s.until != Long.MAX_VALUE) continue;
             s.until = now + STUN_AFTER_TICKS;
+            s.releasedAt = now;
             Entity e = s.level.getEntity(s.entityId);
             if (e instanceof Mob mob) mob.getPersistentData().putLong(TAG_STUN_UNTIL, s.until);
             if (e instanceof ServerPlayer sp) {
@@ -981,11 +1022,44 @@ public final class DomainExpansion {
     /** Кого после возвращения блоков зажало — поднимаем на ближайшее свободное место сверху. */
     private static void unstickAll(Domain d) {
         AABB box = new AABB(d.center, d.center).inflate(REMOVE_RADIUS + 2.0);
+        Set<UUID> done = new HashSet<>();
         for (LivingEntity e : d.level.getEntitiesOfClass(LivingEntity.class, box, LivingEntity::isAlive)) {
             if (!d.contains(e.position(), REMOVE_RADIUS + 2.0)) continue;
             unstick(e);
             e.fallDistance = 0.0f;
+            done.add(e.getUUID());
         }
+        // Все обитатели территории — даже если их отбросило к самой стене.
+        for (UUID id : d.captured) {
+            if (done.contains(id)) continue;
+            Entity e = d.level.getEntity(id);
+            if (e instanceof LivingEntity le && le.isAlive()) {
+                unstick(le);
+                le.fallDistance = 0.0f;
+            }
+        }
+    }
+
+    /**
+     * Свободно ли место: в блоки не заходит, и (если это не водный житель) не заперт в воде
+     * или лаве подо льдом/камнем — до воздуха над жидкостью можно всплыть.
+     */
+    private static boolean freeSpot(Entity e, AABB box) {
+        Level level = e.level();
+        if (!level.noCollision(e, box)) return false;
+        boolean aquatic = e instanceof WaterAnimal || (e instanceof LivingEntity le && le.getMobType() == MobType.WATER);
+        if (aquatic || !level.containsAnyLiquid(box)) return true;
+        MutableBlockPos p = new MutableBlockPos();
+        int x = Mth.floor((box.minX + box.maxX) * 0.5), z = Mth.floor((box.minZ + box.maxZ) * 0.5);
+        int top = Math.min(level.getMaxBuildHeight() - 1, Mth.floor(box.maxY) + 64);
+        for (int y = Mth.floor(box.maxY); y <= top; y++) {
+            p.set(x, y, z);
+            BlockState st = level.getBlockState(p);
+            if (!st.getFluidState().isEmpty()) continue;
+            // Над жидкостью воздух — всплывёт сам; твёрдый блок — заперт.
+            return st.getCollisionShape(level, p).isEmpty();
+        }
+        return true;
     }
 
     private static void unstick(Entity e) {
@@ -994,13 +1068,13 @@ public final class DomainExpansion {
         int maxUp = level.getMaxBuildHeight() - Mth.floor(e.getY());
         for (int up = 0; up <= maxUp && up < 400; up++) {
             AABB moved = box.move(0.0, up, 0.0);
-            if (level.noCollision(e, moved)) {
+            if (freeSpot(e, moved)) {
                 if (up == 0) return;
                 double y = e.getY() + up;
                 // Встаём ровно на верх блока под ногами, а не висим над ним.
                 for (int k = 0; k < 8; k++) {
                     AABB lower = box.move(0.0, y - e.getY() - 0.125, 0.0);
-                    if (!level.noCollision(e, lower)) break;
+                    if (!freeSpot(e, lower)) break;
                     y -= 0.125;
                 }
                 if (e instanceof ServerPlayer sp) sp.connection.teleport(e.getX(), y, e.getZ(), sp.getYRot(), sp.getXRot());
@@ -1110,9 +1184,7 @@ public final class DomainExpansion {
                 mob.getPersistentData().putBoolean(TAG_PREV_NOAI, mob.isNoAi());
             }
             mob.getPersistentData().putLong(TAG_STUN_UNTIL, d.level.getGameTime() + d.remainingEstimate() + STUN_AFTER_TICKS + 40);
-            mob.setNoAi(true);
-            mob.getNavigation().stop();
-            mob.setTarget(null);
+            statue(mob);
         }
         if (e instanceof ServerPlayer sp) {
             sp.stopUsingItem();
@@ -1121,12 +1193,42 @@ public final class DomainExpansion {
         }
     }
 
+    /**
+     * Моб — статуя: без ИИ, без звуков, без собственных движений и анимаций (тик сущности
+     * пропускается, см. onLivingTick). Урон и отбрасывание при этом работают.
+     */
+    private static void statue(Mob mob) {
+        if (!mob.getPersistentData().contains(TAG_PREV_NOAI)) {
+            mob.getPersistentData().putBoolean(TAG_PREV_NOAI, mob.isNoAi());
+        }
+        if (!mob.getPersistentData().contains(TAG_PREV_SILENT)) {
+            mob.getPersistentData().putBoolean(TAG_PREV_SILENT, mob.isSilent());
+        }
+        mob.setNoAi(true);
+        mob.setSilent(true);
+        mob.getNavigation().stop();
+        mob.setTarget(null);
+        mob.setSprinting(false);
+        mob.stopUsingItem();
+        mob.setDeltaMovement(new Vec3(0.0, Math.min(0.0, mob.getDeltaMovement().y), 0.0));
+        sendFreeze(mob, true);
+    }
+
+    private static void sendFreeze(Entity e, boolean frozen) {
+        if (e.level() instanceof ServerLevel) {
+            CHANNEL.send(PacketDistributor.TRACKING_ENTITY.with(() -> e), new FreezePacket(e.getId(), frozen));
+        }
+    }
+
     private static void unfreeze(Stun s, Entity e) {
         if (e instanceof Mob mob) {
             boolean prev = mob.getPersistentData().getBoolean(TAG_PREV_NOAI);
             mob.setNoAi(prev);
+            mob.setSilent(mob.getPersistentData().getBoolean(TAG_PREV_SILENT));
             mob.getPersistentData().remove(TAG_PREV_NOAI);
+            mob.getPersistentData().remove(TAG_PREV_SILENT);
             mob.getPersistentData().remove(TAG_STUN_UNTIL);
+            sendFreeze(mob, false);
         }
         if (e instanceof ServerPlayer sp) {
             CHANNEL.send(PacketDistributor.PLAYER.with(() -> sp), new StunPacket(s.domainOwner, 0, 0));
@@ -1151,6 +1253,8 @@ public final class DomainExpansion {
             }
             // Падение на пол внутри территории — без урона.
             e.fallDistance = 0.0f;
+            // Мир только что вернулся: никого не оставляем внутри блоков или подо льдом.
+            if (s.releasedAt != Long.MIN_VALUE && now - s.releasedAt >= 0 && now - s.releasedAt < 40 && (now - s.releasedAt) % 5 == 0) unstick(e);
             // Пока цель ведёт сценарий Синего, её не трогаем.
             if (e instanceof Mob mob && !LapseBlue.isControlled(mob)) mobPhysics(mob);
         }
@@ -1166,6 +1270,30 @@ public final class DomainExpansion {
         double friction = mob.onGround() ? 0.546 : 0.91;
         double vy = mob.onGround() && after.y < 0.0 ? 0.0 : after.y * 0.98;
         mob.setDeltaMovement(after.x * friction, vy, after.z * friction);
+    }
+
+    /**
+     * Обездвиженный моб — статуя: его собственный тик (ИИ, звуки, плескание рыбы, анимации)
+     * не идёт вовсе. Падение и отбрасывание от ударов считает mobPhysics, урон проходит как обычно.
+     */
+    @SubscribeEvent(priority = EventPriority.HIGHEST)
+    public static void onLivingTick(LivingEvent.LivingTickEvent event) {
+        if (STUNS.isEmpty()) return;
+        LivingEntity e = event.getEntity();
+        if (e.level().isClientSide || !(e instanceof Mob) || e.isDeadOrDying()) return;
+        if (!STUNS.containsKey(e.getUUID())) return;
+        if (e.hurtTime > 0) e.hurtTime--;
+        if (e.invulnerableTime > 0) e.invulnerableTime--;
+        if (e.getRemainingFireTicks() > 0) e.setRemainingFireTicks(e.getRemainingFireTicks() - 1);
+        event.setCanceled(true);
+    }
+
+    /** Игрок начал видеть статую — пусть и у него она не шевелится. */
+    @SubscribeEvent
+    public static void onStartTracking(PlayerEvent.StartTracking event) {
+        if (STUNS.isEmpty() || !(event.getTarget() instanceof Mob mob)) return;
+        if (!STUNS.containsKey(mob.getUUID()) || !(event.getEntity() instanceof ServerPlayer sp)) return;
+        CHANNEL.send(PacketDistributor.PLAYER.with(() -> sp), new FreezePacket(mob.getId(), true));
     }
 
     // ------------------------------------------------------------------ защита
@@ -1319,10 +1447,12 @@ public final class DomainExpansion {
             Stun s = new Stun(mob.getUUID(), level, new UUID(0L, 0L));
             s.until = until;
             STUNS.put(mob.getUUID(), s);
-            mob.setNoAi(true);
+            statue(mob);
         } else {
             mob.setNoAi(mob.getPersistentData().getBoolean(TAG_PREV_NOAI));
+            if (mob.getPersistentData().contains(TAG_PREV_SILENT)) mob.setSilent(mob.getPersistentData().getBoolean(TAG_PREV_SILENT));
             mob.getPersistentData().remove(TAG_PREV_NOAI);
+            mob.getPersistentData().remove(TAG_PREV_SILENT);
             mob.getPersistentData().remove(TAG_STUN_UNTIL);
         }
     }
@@ -1407,12 +1537,13 @@ public final class DomainExpansion {
         if (!from.getPersistentData().contains(TAG_STUN_UNTIL)) return;
         to.getPersistentData().putLong(TAG_STUN_UNTIL, from.getPersistentData().getLong(TAG_STUN_UNTIL));
         to.getPersistentData().putBoolean(TAG_PREV_NOAI, from.getPersistentData().getBoolean(TAG_PREV_NOAI));
+        to.getPersistentData().putBoolean(TAG_PREV_SILENT, from.getPersistentData().getBoolean(TAG_PREV_SILENT));
         Stun old = STUNS.remove(from.getUUID());
         if (old != null && to.level() instanceof ServerLevel sl) {
             Stun s = new Stun(to.getUUID(), sl, old.domainOwner);
             s.until = old.until;
             STUNS.put(to.getUUID(), s);
-            to.setNoAi(true);
+            statue(to);
         }
     }
 

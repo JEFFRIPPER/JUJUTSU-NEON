@@ -867,7 +867,8 @@ public final class MaximumPurpleClient {
         currentFov = cs.fov;
         currentRoll = cs.roll;
 
-        Vec3 pos = cs.pos;
+        // Внутри территории камера не выходит за её стену (иначе в кадре — чёрная сфера снаружи).
+        Vec3 pos = DomainExpansionClient.clampCameraInside(scene.feet, cs.pos);
         Vec3 d = cs.target.subtract(pos);
         float yaw = (float) Math.toDegrees(Math.atan2(-d.x, d.z));
         float pitch = (float) Math.toDegrees(-Math.atan2(d.y, Math.sqrt(d.x * d.x + d.z * d.z)));

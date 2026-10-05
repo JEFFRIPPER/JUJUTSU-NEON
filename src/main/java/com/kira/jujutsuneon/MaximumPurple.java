@@ -385,15 +385,20 @@ public final class MaximumPurple {
     private static void dealDamage(Cast cast, ServerPlayer owner) {
         Vec3 center = owner.position().add(0.0, 1.0, 0.0);
         AABB box = new AABB(center, center).inflate(RADIUS);
-        List<LivingEntity> targets = cast.level.getEntitiesOfClass(LivingEntity.class, box,
-                e -> e.isAlive() && e != owner && !e.isSpectator());
+        List<LivingEntity> targets = new ArrayList<>(cast.level.getEntitiesOfClass(LivingEntity.class, box,
+                e -> e.isAlive() && e != owner && !e.isSpectator()));
+        // В своей территории удар достаёт всех её обитателей, где бы они ни были.
+        List<LivingEntity> insiders = DomainExpansion.insidersOf(owner);
+        for (LivingEntity e : insiders) {
+            if (!targets.contains(e) && !e.isSpectator()) targets.add(e);
+        }
 
         owner.getPersistentData().putBoolean("jn_purple_custom_damage", true);
         owner.getPersistentData().putBoolean("jn_max_purple_damage", true);
         try {
             for (LivingEntity target : targets) {
                 Vec3 c = target.position().add(0.0, target.getBbHeight() * 0.5, 0.0);
-                if (c.distanceToSqr(center) > RADIUS * RADIUS) continue;
+                if (c.distanceToSqr(center) > RADIUS * RADIUS && !insiders.contains(target)) continue;
                 target.invulnerableTime = 0;
                 target.hurt(cast.level.damageSources().playerAttack(owner), DAMAGE);
             }

@@ -55,7 +55,7 @@ public final class MaximumBlueReferenceClient {
     private static final int PHASE_ACTIVE = 2;
     private static final int PHASE_FADING = 3;
 
-    private static final int FORM_TICKS = 60;
+    private static final int FORM_TICKS = 40;
     private static final int MAX_VISUALS = 8;
     private static final int MAX_DEBRIS = 1400;
 
@@ -260,8 +260,8 @@ public final class MaximumBlueReferenceClient {
             dark = Math.max(dark, (0.06f * burst + 0.27f * settled) * proximity * visual.currentAlpha);
             blueWash = Math.max(blueWash, (0.04f + 0.10f * settled) * proximity * visual.currentAlpha);
 
-            if (visual.phase == PHASE_FORMING && visual.phaseAge >= 12 && visual.phaseAge <= 19) {
-                float local = 1.0f - Math.abs(15.5f - visual.phaseAge) / 4.0f;
+            if (visual.phase == PHASE_FORMING && visual.phaseAge >= 8 && visual.phaseAge <= 13) {
+                float local = 1.0f - Math.abs(10.5f - visual.phaseAge) / 3.0f;
                 flash = Math.max(flash, Math.max(0.0f, local) * 0.22f * proximity);
             }
         }
