@@ -230,6 +230,14 @@ public class JujutsuNeonMod {
     // Красный / Максимальный Красный — звук из референса
     public static final RegistryObject<SoundEvent> SFX_RED_CAST = sound("red_cast");
     public static final RegistryObject<SoundEvent> SFX_MAX_RED_CAST = sound("max_red_cast");
+    // Движение (tools/gen_move_sounds.py)
+    public static final RegistryObject<SoundEvent> SFX_MOVE_DASH_FRONT = sound("move_dash_front");
+    public static final RegistryObject<SoundEvent> SFX_MOVE_DASH_SIDE = sound("move_dash_side");
+    public static final RegistryObject<SoundEvent> SFX_MOVE_CROUCH = sound("move_crouch");
+    public static final RegistryObject<SoundEvent> SFX_MOVE_TAKEOFF = sound("move_takeoff");
+    public static final RegistryObject<SoundEvent> SFX_MOVE_BOOST = sound("move_boost");
+    public static final RegistryObject<SoundEvent> SFX_MOVE_STEP = sound("move_step");
+    public static final RegistryObject<SoundEvent> SFX_MOVE_LAND = sound("move_land");
 
     public static final RegistryObject<Item> GOJO_BLINDFOLD = ITEMS.register(
             "gojo_blindfold",
@@ -256,6 +264,7 @@ public class JujutsuNeonMod {
         PARTICLES.register(modBus);
         DomainExpansion.register(modBus);
         RedTechnique.init();
+        MovementFx.init();
         modBus.addListener(this::addToCreativeTab);
 
         NETWORK.registerMessage(
@@ -1210,12 +1219,9 @@ public class JujutsuNeonMod {
                 hit.hurtMarked = true;
 
                 Vec3 impact = hit.position().add(0.0, hit.getBbHeight() * 0.5, 0.0);
-                for (int i = 0; i < 22; i++) {
-                    sendDust(level,
-                            impact.add(rnd(-0.42, 0.42), rnd(-0.42, 0.42), rnd(-0.42, 0.42)),
-                            new Vector3f(0.16f, 0.72f, 1.0f),
-                            0.82f);
-                }
+                // Удар блоками: синие искры и вспышка (без старых квадратных частиц).
+                level.sendParticles(ParticleTypes.ELECTRIC_SPARK, impact.x, impact.y, impact.z, 22, 0.35, 0.35, 0.35, 0.28);
+                level.sendParticles(ParticleTypes.FLASH, impact.x, impact.y, impact.z, 1, 0.0, 0.0, 0.0, 0.0);
                 playImpactLayer(level, impact, 0.62f, 1.42f);
 
                 for (int id : ids) {
@@ -1488,40 +1494,8 @@ public class JujutsuNeonMod {
     }
 
     private static void spawnMaximumBlueVisual(ServerLevel level, Vec3 center, double radius, long now, double fadeFactor) {
-        // Основное тело Maximum Blue теперь рисуется отдельной непрерывной 3D-моделью.
-        // Здесь остаются только вторичные искры/дымка, чтобы не было billboard-ядра.
-        if (radius <= 0.02 || fadeFactor <= 0.01) return;
-        if (now % 3 != 0) return;
-
-        int sparks = Math.max(2, (int) Math.round(6.0 * fadeFactor));
-        for (int i = 0; i < sparks; i++) {
-            double theta = rnd(0.0, Math.PI * 2.0);
-            double phi = Math.acos(rnd(-1.0, 1.0));
-            double r = radius * rnd(1.10, 1.42);
-
-            Vec3 p = center.add(
-                    Math.sin(phi) * Math.cos(theta) * r,
-                    Math.cos(phi) * r,
-                    Math.sin(phi) * Math.sin(theta) * r
-            );
-
-            sendDust(
-                    level,
-                    p,
-                    i % 3 == 0
-                            ? new Vector3f(0.36f, 0.90f, 1.0f)
-                            : new Vector3f(0.02f, 0.44f, 1.0f),
-                    (float) (0.36 + 0.14 * fadeFactor)
-            );
-        }
-
-        level.sendParticles(
-                ParticleTypes.ELECTRIC_SPARK,
-                center.x, center.y, center.z,
-                Math.max(1, (int) (2 * fadeFactor)),
-                radius * 0.72, radius * 0.72, radius * 0.72,
-                0.018
-        );
+        // Максимальный Синий целиком рисует клиент (объёмная модель, молнии, обломки).
+        // Старые квадратные частицы-пыль и искры вокруг шара убраны.
     }
 
     private static boolean canMaximumBlueConsume(ServerLevel level, ServerPlayer owner, BlockPos pos) {
@@ -1654,12 +1628,6 @@ public class JujutsuNeonMod {
                 }
                 target.getPersistentData().putLong(hitKey, now);
 
-                Vec3 p = target.position().add(0.0, target.getBbHeight() * 0.5, 0.0);
-                for (int i = 0; i < 8; i++) {
-                    sendDust(level,
-                            p.add(rnd(-0.35, 0.35), rnd(-0.35, 0.35), rnd(-0.35, 0.35)),
-                            new Vector3f(0.02f, 0.72f, 1.0f), 0.62f);
-                }
             }
 
             target.getPersistentData().putLong(seenKey, now);
@@ -3499,9 +3467,8 @@ public class JujutsuNeonMod {
         player.getPersistentData().putDouble("jn_dash_dy", dir.y);
         player.getPersistentData().putDouble("jn_dash_dz", dir.z);
 
-        playSfx(level, player, SFX_DASH, 1.0f, longitudinalDash ? 0.92f : 1.18f);
-        spawnVfx(level, VFX_DASH, player.position().add(0, 0.85, 0), 1);
-        spawnVfx(level, VFX_TRAIL, player.position().add(0, 0.85, 0), 1);
+        // Звук, анимация тела и эффекты рисуют клиенты (MovementFxClient); остальным — событие.
+        MovementFx.broadcastDash(player, side);
     }
 
     private static boolean tryDashMove(ServerPlayer player, Vec3 delta, boolean allowStepUp) {
@@ -3600,7 +3567,7 @@ public class JujutsuNeonMod {
     }
 
     private static void finishDash(ServerPlayer player, boolean impactEffect) {
-        if (impactEffect) spawnFrontDashImpact(player);
+        // Торможение (пыль, комья) рисуют клиенты по таймингу дэша.
 
         player.getPersistentData().putInt("jn_dash_mode", DASH_NONE);
         player.getPersistentData().remove("jn_dash_started");
@@ -3668,9 +3635,6 @@ public class JujutsuNeonMod {
                 return;
             }
 
-            if (now % 2 == 0) {
-                spawnVfx(level, VFX_TRAIL, player.position().add(0, 0.9, 0), 1);
-            }
             return;
         }
 
@@ -3680,7 +3644,6 @@ public class JujutsuNeonMod {
                 return;
             }
 
-            spawnVfx(level, VFX_TRAIL, player.position().add(0, 0.85, 0), 1);
             return;
         }
 
@@ -3688,7 +3651,7 @@ public class JujutsuNeonMod {
 
     // Прыжки: обычный ванильный и заряженный на 10 блоков (заряд 0.75 с).
     private static final double NORMAL_JUMP_VELOCITY = 0.42;     // ~1.25 блока
-    private static final double CHARGED_JUMP_VELOCITY = 1.3433;  // ~10 блоков
+    private static final double CHARGED_JUMP_VELOCITY = 1.55;    // ~13 блоков — взлёт
     private static final int JUMP_CHARGE_TICKS = 15;             // 0.75 секунды
     private static final int MAX_JUMPS = 4;                      // включая прыжок с земли
 
@@ -3726,25 +3689,7 @@ public class JujutsuNeonMod {
         player.hurtMarked = true;
         player.fallDistance = 0.0F;
 
-        ServerLevel level = player.serverLevel();
-
-        // Воздушный слабый прыжок получает компактный импульсный VFX,
-        // заряженные наземные — более крупное кольцо.
-        spawnNeonRing(
-                level,
-                player.position().add(0.0, grounded ? 0.08 : 0.35, 0.0),
-                clamped == 0 ? 0.65 : 0.90 + clamped * 0.25,
-                new Vector3f(0.10f, 0.78f, 1.0f)
-        );
-
-        level.playSound(
-                null,
-                player.blockPosition(),
-                SoundEvents.PLAYER_ATTACK_SWEEP,
-                SoundSource.PLAYERS,
-                grounded ? 0.45f : 0.30f,
-                grounded ? 1.25f - clamped * 0.08f : 1.42f
-        );
+        // Взлёт (присед, прыжок, пыль, вихрь, звук) рисуют клиенты — MovementFxClient.
     }
 
     private static void executeLongRangeTeleport(ServerPlayer player, BlockPos targetBlock, Direction face) {
@@ -4061,72 +4006,12 @@ public class JujutsuNeonMod {
         // игрока и не отправляет ему скорость: это гасило разгон каждый тик.
         player.fallDistance = 0.0F;
 
-        if (level.getGameTime() % 2 == 0) {
-            level.sendParticles(
-                    ParticleTypes.SPLASH,
-                    player.getX(),
-                    surfaceY + 0.07,
-                    player.getZ(),
-                    10,
-                    0.55, 0.04, 0.55,
-                    0.20
-            );
-
-            spawnNeonRing(
-                    level,
-                    new Vec3(player.getX(), surfaceY + 0.04, player.getZ()),
-                    0.75,
-                    new Vector3f(0.08f, 0.72f, 1.0f)
-            );
-        }
+        // Брызги и круги на воде рисуют клиенты (MovementFxClient).
     }
 
     private static void spawnSuperRunEffects(ServerPlayer player, ServerLevel level, long now) {
-        if (now % 2 == 0) {
-            Vec3 base = player.position().add(0.0, 0.85, 0.0);
-
-            for (int i = 0; i < 5; i++) {
-                Vec3 trail = base.add(
-                        rnd(-0.42, 0.42),
-                        rnd(-0.70, 0.75),
-                        rnd(-0.42, 0.42)
-                );
-                sendDust(
-                        level,
-                        trail,
-                        i % 2 == 0
-                                ? new Vector3f(0.72f, 0.94f, 1.0f)
-                                : new Vector3f(0.06f, 0.68f, 1.0f),
-                        0.48f
-                );
-            }
-
-            spawnVfx(level, VFX_TRAIL, base, 1);
-        }
-
-        if (now % 4 == 0) {
-            BlockPos ground = BlockPos.containing(
-                    player.getX(),
-                    player.getY() - 0.10,
-                    player.getZ()
-            );
-            BlockState state = level.getBlockState(ground);
-            if (!state.isAir() && state.getFluidState().isEmpty()) {
-                level.sendParticles(
-                        new BlockParticleOption(ParticleTypes.BLOCK, state),
-                        player.getX(),
-                        player.getY() + 0.05,
-                        player.getZ(),
-                        7,
-                        0.38, 0.05, 0.38,
-                        0.07
-                );
-            }
-        }
-
-        if (now % 30 == 0) {
-            playSfx(level, player, SFX_DASH, 0.34f, 1.45f);
-        }
+        // Пыль, полосы ветра, шлейф и шаги сверхбега рисуют клиенты (MovementFxClient) —
+        // по фактической скорости игрока, так их видят все.
     }
 
     private static void tickBlindfoldRun(ServerPlayer player, ServerLevel level, long now) {
@@ -4768,7 +4653,7 @@ public class JujutsuNeonMod {
         );
 
         public static final KeyMapping RED_KEY = new KeyMapping(
-                "X: Red / 2с: Maximum Red / авто-выстрел 5с",
+                "X: Red / держать 2с: Maximum Red",
                 InputConstants.Type.KEYSYM,
                 GLFW.GLFW_KEY_X,
                 CATEGORY
@@ -4806,6 +4691,13 @@ public class JujutsuNeonMod {
                 "T: Расширение территории (повторно — разрушить)",
                 InputConstants.Type.KEYSYM,
                 GLFW.GLFW_KEY_T,
+                CATEGORY
+        );
+
+        public static final KeyMapping DOUBLE_JUMP_KEY = new KeyMapping(
+                "Двойные прыжки: вкл/выкл",
+                InputConstants.Type.KEYSYM,
+                GLFW.GLFW_KEY_J,
                 CATEGORY
         );
 
@@ -4849,6 +4741,7 @@ public class JujutsuNeonMod {
             event.register(UTILITY_KEY);
             event.register(HUD_KEY);
             event.register(TELEPORT_KEY);
+            event.register(DOUBLE_JUMP_KEY);
             event.register(DOMAIN_EXPANSION_KEY);
         }
     }
@@ -5571,7 +5464,8 @@ public class JujutsuNeonMod {
                 }
                 mc.player.setMaxUpStep(2.0F);
 
-                Vec3 dir = clientHorizontalDirection(mc);
+                // В полуприседе перед взлётом стоит на месте.
+                Vec3 dir = takeoffCrouch ? Vec3.ZERO : clientHorizontalDirection(mc);
                 Vec3 v = mc.player.getDeltaMovement();
                 double vy = v.y;
                 if (waterRun) {
@@ -5614,11 +5508,67 @@ public class JujutsuNeonMod {
         private static void fireChargedJump(Minecraft mc, int tier) {
             // Не больше MAX_JUMPS прыжков подряд, включая прыжок с земли.
             if (jumpsUsed >= MAX_JUMPS) return;
+            boolean grounded = mc.player != null && mc.player.onGround();
             jumpsUsed++;
             performClientChargedJump(mc, tier);
             NETWORK.sendToServer(new JumpControlPacket(tier));
-            // Полёт может начаться в верхней точке любого прыжка (если 4+ блока до земли/воды).
-            JujutsuNeonFlightClient.onJumpFired();
+            if (tier >= 1 && grounded) {
+                // Взлёт: прыжок с эффектами, в верхней точке — зависание и полёт.
+                MovementFxClient.localLeap();
+                JujutsuNeonFlightClient.onTakeoff();
+            }
+        }
+
+        // ---- двойные прыжки: клавиша J включает/выключает (по умолчанию выключены)
+        private static boolean doubleJumpsEnabled = false;
+        private static boolean doubleJumpsLoaded = false;
+        private static boolean takeoffCrouch = false;
+
+        private static java.nio.file.Path clientConfig(Minecraft mc) {
+            return mc.gameDirectory.toPath().resolve("config").resolve("jujutsu_neon-client.properties");
+        }
+
+        private static void loadClientSettings(Minecraft mc) {
+            if (doubleJumpsLoaded) return;
+            doubleJumpsLoaded = true;
+            try {
+                java.nio.file.Path file = clientConfig(mc);
+                if (java.nio.file.Files.exists(file)) {
+                    java.util.Properties props = new java.util.Properties();
+                    try (var in = java.nio.file.Files.newInputStream(file)) {
+                        props.load(in);
+                    }
+                    doubleJumpsEnabled = Boolean.parseBoolean(props.getProperty("doubleJumps", "false"));
+                }
+            } catch (Exception ignored) {
+            }
+        }
+
+        private static void saveClientSettings(Minecraft mc) {
+            try {
+                java.nio.file.Path file = clientConfig(mc);
+                java.nio.file.Files.createDirectories(file.getParent());
+                java.util.Properties props = new java.util.Properties();
+                props.setProperty("doubleJumps", Boolean.toString(doubleJumpsEnabled));
+                try (var out = java.nio.file.Files.newOutputStream(file)) {
+                    props.store(out, "Jujutsu Neon client settings");
+                }
+            } catch (Exception ignored) {
+            }
+        }
+
+        private static void processDoubleJumpToggle(Minecraft mc) {
+            loadClientSettings(mc);
+            while (ClientModEvents.DOUBLE_JUMP_KEY.consumeClick()) {
+                doubleJumpsEnabled = !doubleJumpsEnabled;
+                saveClientSettings(mc);
+                if (mc.player != null) {
+                    mc.player.displayClientMessage(Component.literal(doubleJumpsEnabled
+                                    ? "Двойные прыжки: включены"
+                                    : "Двойные прыжки: выключены")
+                            .withStyle(ChatFormatting.AQUA), true);
+                }
+            }
         }
 
         @SubscribeEvent
@@ -5747,6 +5697,7 @@ public class JujutsuNeonMod {
             processPurpleKey();
 
 
+            processDoubleJumpToggle(mc);
             boolean jumpHeldNow = mc.options.keyJump.isDown();
 
             // Счётчик прыжков сбрасывается на земле и в воде.
@@ -5791,9 +5742,9 @@ public class JujutsuNeonMod {
                         }
                     }
 
-                    // Воздух: один physical impulse ровно на НАЖАТИЕ.
-                    // Удерживание Space не повторяет прыжок и не заряжает шкалу.
-                    if (!mc.player.getAbilities().flying && jumpPressStartedInAir) {
+                    // Воздух: прыжок только если двойные прыжки включены (клавиша J).
+                    // Выключены (по умолчанию) — в воздухе Space ничего не делает, как в ванилле.
+                    if (!mc.player.getAbilities().flying && jumpPressStartedInAir && doubleJumpsEnabled) {
                         fireChargedJump(mc, 0);
                     }
                 }
@@ -5802,14 +5753,21 @@ public class JujutsuNeonMod {
                     if (jumpHeldNow && !jumpPressStartedInAir) {
                         // Зарядка существует ТОЛЬКО у нажатия, начавшегося на земле.
                         jumpChargeTicks = Math.min(JUMP_CHARGE_TICKS, jumpChargeTicks + 1);
+                        // Держит Space — персонаж уходит в полуприсед, руки к телу (подготовка к взлёту).
+                        if (jumpChargeTicks == 4 && !takeoffCrouch && mc.player.onGround()) {
+                            takeoffCrouch = true;
+                            MovementFxClient.localCrouch(true);
+                        }
                     } else if (releasedNow) {
                         if (jumpPressStartedInAir) {
                             // Воздушный прыжок уже был выполнен на press.
                             // Release ничего больше не делает.
                             jumpChargeTicks = 0;
                         } else {
-                            // 0.75 с и дольше — прыжок на 10 блоков, иначе обычный прыжок.
+                            // 0.75 с и дольше — взлёт на ~13 блоков (дальше полёт), иначе обычный прыжок.
                             int tier = jumpChargeTicks >= JUMP_CHARGE_TICKS ? 1 : 0;
+                            if (takeoffCrouch && tier == 0) MovementFxClient.localCrouch(false);
+                            takeoffCrouch = false;
 
                             if (tier == 0 && mc.player.getAbilities().mayfly) {
                                 // На земле оставляем короткое окно второго tap
@@ -5831,6 +5789,10 @@ public class JujutsuNeonMod {
                 jumpChargeWasDown = false;
                 jumpChargeTicks = 0;
                 jumpPressStartedInAir = false;
+                if (takeoffCrouch) {
+                    takeoffCrouch = false;
+                    MovementFxClient.localCrouch(false);
+                }
             }
 
             // Dash Q is consumed exclusively by JujutsuNeonMovementPatchClient.

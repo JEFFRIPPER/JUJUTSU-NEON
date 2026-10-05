@@ -168,10 +168,8 @@ public final class JujutsuNeonMovementPatchClient {
             case FRONT, BACK -> 14;
         };
 
-        try {
-            START_ANIM.invoke(null, animation, ticks);
-        } catch (ReflectiveOperationException ignored) {
-        }
+        // Анимация тела и эффекты дэша — MovementFxClient (Player Animator, весь корпус целиком).
+        MovementFxClient.localDash(kind);
     }
 
     private static boolean startPatchedDash(Minecraft mc, JujutsuNeonMovementPatch.DashKind kind) {

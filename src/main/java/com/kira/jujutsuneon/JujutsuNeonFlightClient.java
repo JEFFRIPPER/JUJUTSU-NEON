@@ -149,8 +149,15 @@ public final class JujutsuNeonFlightClient {
         beginFlight(mc);
     }
 
-    /** Вызывается из ClientForgeEvents при каждом прыжке (обычном или заряженном). */
+    /**
+     * Обычные и двойные прыжки полёт больше не включают (раньше он включался сам).
+     * Полёт начинается только после взлёта — заряженного прыжка (см. onTakeoff).
+     */
     public static void onJumpFired() {
+    }
+
+    /** Взлёт (присед и прыжок на ~13 блоков): в верхней точке начинается полёт. */
+    public static void onTakeoff() {
         Minecraft mc = Minecraft.getInstance();
         if (mc.player == null || customFlight) return;
         if (!hasBlindfold(mc) || mc.player.getAbilities().flying) return;
@@ -208,6 +215,7 @@ public final class JujutsuNeonFlightClient {
 
         previousFlightVelocity = Vec3.ZERO;
         JujutsuNeonFlightPatch.send(JujutsuNeonFlightPatch.Action.START);
+        MovementFxClient.localFlight(MovementFx.FLIGHT_ON);
     }
 
     private static void endFlight(Minecraft mc, boolean notifyServer) {
@@ -228,6 +236,7 @@ public final class JujutsuNeonFlightClient {
         armedFromChargedJump = false;
         armedTicks = 0;
         previousFlightVelocity = Vec3.ZERO;
+        MovementFxClient.localFlight(MovementFx.FLIGHT_OFF);
 
         mc.player.getAbilities().mayfly = originalMayfly;
         mc.player.getAbilities().flying = originalMayfly && originalFlying;
@@ -245,6 +254,7 @@ public final class JujutsuNeonFlightClient {
         JujutsuNeonFlightPatch.send(boost
                 ? JujutsuNeonFlightPatch.Action.BOOST_ON
                 : JujutsuNeonFlightPatch.Action.BOOST_OFF);
+        MovementFxClient.localFlight(boost ? MovementFx.FLIGHT_BOOST : MovementFx.FLIGHT_ON);
     }
 
     private static boolean movementInputHeld(Minecraft mc) {
@@ -272,77 +282,6 @@ public final class JujutsuNeonFlightClient {
 
         Vec3 result = look.scale(forwardInput).add(right.scale(strafeInput));
         return result.lengthSqr() > 1.0E-8 ? result.normalize() : Vec3.ZERO;
-    }
-
-    private static void spawnSprintFlightVfx(Minecraft mc) {
-        if (mc.player == null || mc.level == null || !boost || landing) return;
-        Vec3 velocity = mc.player.getDeltaMovement();
-        if (velocity.lengthSqr() < 0.008) return;
-
-        double time = mc.level.getGameTime() + mc.getFrameTime();
-        Vec3 center = mc.player.position().add(0.0, 0.95, 0.0);
-
-        // Two counter-phased helices wrap around the body, matching the Roblox reference language.
-        for (int strand = 0; strand < 2; strand++) {
-            double strandPhase = strand * Math.PI;
-            for (int i = 0; i < 8; i++) {
-                double t = i / 7.0;
-                double angle = time * 0.48 + strandPhase + i * 0.78;
-                double radius = 0.54 + 0.10 * Math.sin(time * 0.22 + i * 0.65);
-                double y = -0.78 + t * 1.58;
-
-                double x = center.x + Math.cos(angle) * radius;
-                double z = center.z + Math.sin(angle) * radius;
-
-                Vector3f color = strand == 0
-                        ? new Vector3f(0.18F, 0.86F, 1.00F)
-                        : new Vector3f(0.40F, 0.48F, 1.00F);
-
-                mc.level.addParticle(
-                        new DustParticleOptions(color, 0.78F),
-                        x, center.y + y, z,
-                        -velocity.x * 0.06,
-                        0.008,
-                        -velocity.z * 0.06
-                );
-            }
-        }
-
-        Vec3 back = velocity.lengthSqr() > 1.0E-6
-                ? velocity.normalize().scale(-0.65)
-                : Vec3.ZERO;
-
-        for (int i = 0; i < 5; i++) {
-            double spread = (i - 2) * 0.10;
-            mc.level.addParticle(
-                    i % 2 == 0 ? ParticleTypes.ELECTRIC_SPARK : ParticleTypes.END_ROD,
-                    center.x + back.x + spread,
-                    center.y - 0.15 + (i % 3) * 0.16,
-                    center.z + back.z - spread,
-                    -velocity.x * 0.12,
-                    -0.01,
-                    -velocity.z * 0.12
-            );
-        }
-    }
-
-    private static void localImpactFlash(Minecraft mc) {
-        if (mc.player == null || mc.level == null) return;
-        Vec3 center = mc.player.position().add(0.0, 0.20, 0.0);
-
-        for (int i = 0; i < 18; i++) {
-            double a = Math.PI * 2.0 * i / 18.0;
-            double speed = 0.20 + (i % 4) * 0.035;
-            mc.level.addParticle(
-                    ParticleTypes.ELECTRIC_SPARK,
-                    center.x,
-                    center.y,
-                    center.z,
-                    Math.cos(a) * speed,
-                    0.08 + (i % 3) * 0.035,
-                    Math.sin(a) * speed
-            );
-        }
     }
 
     private static void tickArmedJump(Minecraft mc, double currentVerticalVelocity) {
@@ -399,7 +338,6 @@ public final class JujutsuNeonFlightClient {
                 previousFlightVelocity.lengthSqr() > 0.035;
 
         if (crash) {
-            localImpactFlash(mc);
             JujutsuNeonFlightPatch.send(JujutsuNeonFlightPatch.Action.IMPACT);
             endFlight(mc, false);
             return;
@@ -416,6 +354,7 @@ public final class JujutsuNeonFlightClient {
                     (!moving || inputDirection.y < -0.08)) {
                 landing = true;
                 setBoost(mc, false);
+                MovementFxClient.localFlight(MovementFx.FLIGHT_LANDING);
             }
         }
 
@@ -447,7 +386,6 @@ public final class JujutsuNeonFlightClient {
             mc.player.getAbilities().setFlyingSpeed(boost ? BOOST_FLY_SPEED : NORMAL_FLY_SPEED);
             mc.player.setSprinting(false);
             mc.player.fallDistance = 0.0F;
-            spawnSprintFlightVfx(mc);
         }
 
         previousFlightVelocity = mc.player.getDeltaMovement();
@@ -555,7 +493,9 @@ public final class JujutsuNeonFlightClient {
         PlayerModel<AbstractClientPlayer> stuck = ORIGINAL_MODELS.remove(renderer);
         if (stuck != null) setRendererModel(renderer, stuck);
 
-        // Blue/Purple animation layer always wins over locomotion/flight posing.
+        // Позу полёта теперь ставит слой Player Animator (MovementFxClient): весь корпус
+        // наклоняется целиком, и модель не разваливается. Старую подмену модели не используем.
+        if (true) return;
         if (flightBlend <= 0.01F || techniqueAnimationActive() || !hasBlindfold(mc)) return;
 
         PlayerModel<AbstractClientPlayer> original = rendererModel(renderer);

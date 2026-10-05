@@ -180,6 +180,7 @@ public final class JujutsuNeonFlightPatch {
         player.setDeltaMovement(Vec3.ZERO);
         player.fallDistance = 0.0F;
         player.onUpdateAbilities();
+        MovementFx.broadcastFlight(player, MovementFx.FLIGHT_ON);
     }
 
     private static void setBoost(ServerPlayer player, boolean boost) {
@@ -192,6 +193,7 @@ public final class JujutsuNeonFlightPatch {
 
         player.getAbilities().setFlyingSpeed(boost ? BOOST_FLY_SPEED : NORMAL_FLY_SPEED);
         player.onUpdateAbilities();
+        MovementFx.broadcastFlight(player, boost ? MovementFx.FLIGHT_BOOST : MovementFx.FLIGHT_ON);
     }
 
     private static void stopFlight(ServerPlayer player) {
@@ -215,6 +217,7 @@ public final class JujutsuNeonFlightPatch {
         player.getAbilities().setFlyingSpeed(originalSpeed);
         player.fallDistance = 0.0F;
         player.onUpdateAbilities();
+        MovementFx.broadcastFlight(player, MovementFx.FLIGHT_OFF);
     }
 
     private static void impact(ServerPlayer player) {

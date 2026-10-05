@@ -565,7 +565,7 @@ private static void renderLimitlessModel(
         // Stress arcs crawl over the shell as release approaches.
         if (stress > 0.15f) {
             for (int i = 0; i < 3; i++) {
-                double angle = time * (0.42 + i * 0.13) + i * 2.1;
+                double angle = time * (0.85 + i * 0.22) + i * 2.1;
                 Vec3 aPos = position
                         .add(right.scale(Math.cos(angle) * radius * 1.08))
                         .add(up.scale(Math.sin(angle) * radius * 1.08));
@@ -653,7 +653,7 @@ private static void renderLimitlessModel(
         // Radial tearing streaks connect the expanding space rings with the core.
         int streaks = 10;
         for (int i = 0; i < streaks; i++) {
-            double a = Math.PI * 2.0 * i / streaks + time * 0.10;
+            double a = Math.PI * 2.0 * i / streaks + time * 0.32;
             double reach = bodyRadius * (2.6 + (i % 3) * 0.62) * stress;
             Vec3 target = center
                     .add(right.scale(Math.cos(a) * reach))
@@ -705,7 +705,7 @@ private static void renderLimitlessModel(
 
         // Long crooked lightning whips like the reference launch frame.
         for (int i = 0; i < 3; i++) {
-            double angle = time * (0.44 + i * 0.08) + i * 2.35;
+            double angle = time * (0.95 + i * 0.18) + i * 2.35;
             Vec3 start = position
                     .add(right.scale(Math.cos(angle) * radius * 0.72))
                     .add(up.scale(Math.sin(angle) * radius * 0.72));
@@ -1015,7 +1015,11 @@ private static void renderLimitlessModel(
         pose.popPose();
     }
 
-    /** Jagged luminous 3D ribbon. Secondary effect only; the body remains a mesh. */
+    /**
+     * Живая молния: изгибы закручиваются спиралью вокруг своей оси (молния вращается),
+     * зубцы перестраиваются каждые 2 тика (треск), мерцает яркость, от середины отходят
+     * короткие ответвления.
+     */
     private static void drawLightningArc(
             PoseStack pose,
             Vec3 camera,
@@ -1037,26 +1041,56 @@ private static void renderLimitlessModel(
         Vec3 right = rightFor(forward);
         Vec3 up = right.cross(forward).normalize();
 
+        long frame = (long) Math.floor(time * 0.5);
+        double twistDir = lightningHash(seed, 0, 7) > 0.5 ? 1.0 : -1.0;
+        double spin = time * 0.42 * twistDir + seed * 0.37;
+        float flicker = 0.72f + 0.28f * (float) lightningHash(seed, frame, 11);
+        int segs = Math.max(segments, 6) + 2;
+
         Matrix4f matrix = pose.last().pose();
         BufferBuilder buffer = Tesselator.getInstance().getBuilder();
         buffer.begin(VertexFormat.Mode.TRIANGLES, DefaultVertexFormat.POSITION_COLOR);
 
         Vec3 previous = start;
-        for (int i = 1; i <= segments; i++) {
-            double t = i / (double) segments;
+        for (int i = 1; i <= segs; i++) {
+            double t = i / (double) segs;
             double envelope = Math.sin(Math.PI * t);
-            double phase = seed + i * 2.173 + time * 0.31;
-            Vec3 current = start.lerp(end, t)
-                    .add(right.scale(Math.sin(phase * 1.7) * wobble * envelope))
-                    .add(up.scale(Math.cos(phase * 2.3) * wobble * 0.72 * envelope));
+            // Спираль: изгиб вращается вокруг оси молнии.
+            double ang = spin + t * Math.PI * 3.0 * twistDir;
+            double helix = wobble * 0.55 * envelope;
+            // Зубцы: новые каждые 2 тика, тоже повёрнуты вращением.
+            double jx = (lightningHash(seed, frame * 31 + i, 3) - 0.5) * 2.0 * wobble * 0.75 * envelope;
+            double jy = (lightningHash(seed, frame * 31 + i, 5) - 0.5) * 2.0 * wobble * 0.75 * envelope;
+            double cs = Math.cos(spin), sn = Math.sin(spin);
+            double ox = Math.cos(ang) * helix + jx * cs - jy * sn;
+            double oy = Math.sin(ang) * helix + jx * sn + jy * cs;
+            Vec3 current = i == segs ? end : start.lerp(end, t).add(right.scale(ox)).add(up.scale(oy));
 
-            emitBeamSegment(buffer, matrix, camera, previous, current, right, up,
-                    thickness * (0.80f + 0.20f * (float) Math.sin(i * 1.9 + seed)),
-                    color, alpha);
+            float th = thickness * (0.75f + 0.25f * (float) Math.sin(i * 1.9 + seed + time * 0.8));
+            emitBeamSegment(buffer, matrix, camera, previous, current, right, up, th, color, alpha * flicker);
+
+            // Ответвление от середины — короткая вилка, мигает.
+            if (i > 1 && i < segs - 1 && lightningHash(seed, frame * 17 + i, 13) > 0.72) {
+                double fa = ang + 1.3;
+                Vec3 dir = right.scale(Math.cos(fa)).add(up.scale(Math.sin(fa))).add(forward.scale(0.4)).normalize();
+                double len = wobble * (1.2 + lightningHash(seed, frame + i, 17) * 1.6) + axis.length() * 0.06;
+                Vec3 mid = current.add(dir.scale(len * 0.5)).add(right.scale((lightningHash(seed, frame + i, 19) - 0.5) * len * 0.4));
+                Vec3 tip = current.add(dir.scale(len));
+                emitBeamSegment(buffer, matrix, camera, current, mid, right, up, th * 0.55f, color, alpha * flicker * 0.8f);
+                emitBeamSegment(buffer, matrix, camera, mid, tip, right, up, th * 0.35f, color, alpha * flicker * 0.55f);
+            }
             previous = current;
         }
 
         BufferUploader.drawWithShader(buffer.end());
+    }
+
+    private static double lightningHash(double seed, long a, int salt) {
+        long h = Double.doubleToLongBits(seed) * 0x9E3779B97F4A7C15L + a * 0xC2B2AE3D27D4EB4FL + salt * 0x165667B19E3779F9L;
+        h ^= (h >>> 33);
+        h *= 0xFF51AFD7ED558CCDL;
+        h ^= (h >>> 33);
+        return (h >>> 11) * 0x1.0p-53;
     }
 
     private static void emitBeamSegment(
