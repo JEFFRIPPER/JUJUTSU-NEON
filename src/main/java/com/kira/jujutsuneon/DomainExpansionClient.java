@@ -561,6 +561,7 @@ public final class DomainExpansionClient {
     @SubscribeEvent
     public static void onLoggingOut(ClientPlayerNetworkEvent.LoggingOut event) {
         resetAll();
+        FROZEN.clear();
         chatChecked = false;
     }
 

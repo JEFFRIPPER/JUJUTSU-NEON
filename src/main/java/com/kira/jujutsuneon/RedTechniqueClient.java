@@ -309,6 +309,21 @@ public final class RedTechniqueClient {
         }
         if (mc.isPaused()) return;
 
+        // Максимальный Красный: стоит на месте и не падает (иначе сервер дёргал бы его назад).
+        if (mc.player != null) {
+            if (locksLocalPlayer()) {
+                if (!mc.player.isNoGravity()) {
+                    mc.player.setNoGravity(true);
+                    gravityChanged = true;
+                }
+                mc.player.setDeltaMovement(Vec3.ZERO);
+                mc.player.setSprinting(false);
+            } else if (gravityChanged) {
+                mc.player.setNoGravity(false);
+                gravityChanged = false;
+            }
+        }
+
         Iterator<Cast> ci = CASTS.values().iterator();
         while (ci.hasNext()) {
             Cast c = ci.next();
@@ -364,7 +379,12 @@ public final class RedTechniqueClient {
         if (BITS.size() > 1600) BITS.subList(0, BITS.size() - 1600).clear();
     }
 
+    private static boolean gravityChanged;
+
     private static void resetAll() {
+        Minecraft mc = Minecraft.getInstance();
+        if (gravityChanged && mc.player != null) mc.player.setNoGravity(false);
+        gravityChanged = false;
         CASTS.clear();
         CHARGES.clear();
         SHOTS.clear();
