@@ -597,14 +597,15 @@ public final class MaximumPurpleClient {
         Vec3 anchor;
         double ax, ay;
         if (tr == TR_SKY) {
-            // общий план снизу издалека: Красный поднимается от игрока
-            pos = s.at(22.0, -9.0, 4.0);
+            // общий план издалека, камера на высоте ~11 блоков: горизонт как в видео (y≈0,52),
+            // игрок у нижнего края кадра, Красный поднимается от него
+            pos = s.at(20.0, -8.0, 11.5);
             anchor = s.at(0.0, 0.0, 1.2);
             ax = tr.at(MaxPurpleRefTracks.RX, tr.from());
             ay = tr.at(MaxPurpleRefTracks.RY, tr.from());
         } else if (tr == TR_APPROACH) {
-            // средний план чуть сверху рядом с Красным
-            pos = s.off(s.core(), 7.0, -3.5, 2.6);
+            // средний план сверху рядом с Красным: смотрит вниз ~20°, горизонт у верхнего края (y≈0,2)
+            pos = s.off(s.core(), 7.0, -3.5, 3.6);
             anchor = s.core();
             ax = tr.at(MaxPurpleRefTracks.RX, tr.from());
             ay = tr.at(MaxPurpleRefTracks.RY, tr.from());
@@ -871,8 +872,8 @@ public final class MaximumPurpleClient {
             ck(72, A_PLAYER, 2.2, 0.85, 1.65, A_PLAYER, 0.0, 0.15, 1.65, 74f, 1f, false),
             // 3,63–6,33 с (кадры 218–380) — один непрерывный план с неба, 6,37–7,93 с (382–476) — сближение:
             // камера и шары по трекам референса (trackCam), ключи ниже — только запасные.
-            ck(218 / 3.0, A_GROUND, 22.0, -9.0, 4.0, A_GROUND, 0.0, 0.0, 6.0, 60f, 0f, true),
-            ck(382 / 3.0, A_CORE, 7.0, -3.5, 2.6, A_CORE, 0.0, 0.0, 0.0, 66f, 0f, true),
+            ck(218 / 3.0, A_GROUND, 20.0, -8.0, 11.5, A_GROUND, 0.0, 0.0, 6.0, 60f, 0f, true),
+            ck(382 / 3.0, A_CORE, 7.0, -3.5, 3.6, A_CORE, 0.0, 0.0, 0.0, 66f, 0f, true),
             // 7,97–11,4 с (кадр 478): погоня — дальний план на уровне шаров, медленная панорама
             ck(CHASE_FROM, A_CORE, 16.0, -5.5, -1.6, A_CORE, 0.0, 0.0, 0.0, 54f, 0f, true),
             ck(226, A_CORE, 15.0, 3.0, -1.0, A_CORE, 0.0, 0.0, -0.3, 52f, 0f, false),
