@@ -109,8 +109,10 @@ public final class MaximumPurpleClient {
     private static final ResourceLocation MANGA_A2 = tex("max_purple_manga_a2");
     private static final ResourceLocation MANGA_C1 = tex("max_purple_manga_c1");
     private static final ResourceLocation MANGA_C2 = tex("max_purple_manga_c2");
+    /** Шесть аниме-вставок 16,60–16,77 с в порядке референса (кадры 996, 998, 1000, 1002, 1004, 1006). */
     private static final ResourceLocation[] INSERTS = {
-            tex("max_purple_insert_1"), tex("max_purple_insert_2"), tex("max_purple_insert_3"), tex("max_purple_insert_4")
+            tex("max_purple_insert_0"), tex("max_purple_insert_1"), tex("max_purple_insert_2"),
+            tex("max_purple_insert_5"), tex("max_purple_insert_3"), tex("max_purple_insert_4")
     };
 
     private static final ResourceLocation THEME = new ResourceLocation(JujutsuNeonMod.MODID, "max_purple_theme");
@@ -123,8 +125,8 @@ public final class MaximumPurpleClient {
     private static final double CORE_U = RISE_HEIGHT + 3.4;
     private static final double CHASE_R = 3.4;
     private static final double OPEN_R = 3.2;
-    private static final double OMEGA_CHASE = Math.PI * 2.0 / 15.0;
-    private static final double OMEGA_RING = Math.PI * 2.0 / 10.0;
+    /** Кольцо: виток за 6,2 тика (0,31 с) — как в референсе. */
+    private static final double OMEGA_RING = Math.PI * 2.0 / 6.2;
 
     private static final Map<UUID, Scene> SCENES = new HashMap<>();
     private static final List<Spark> SPARKS = new ArrayList<>();
@@ -488,23 +490,52 @@ public final class MaximumPurpleClient {
 
     // ------------------------------------------------------------------ orb paths
 
-    /** Угол погони: сначала 1 оборот за 0,75 с, в кольце — ещё быстрее. */
+    // ---- Склейки референса (кадр 60 к/с / 3 = тик кат-сцены)
+    /** 7,97 с — погоня вокруг ядра. */
+    private static final double CHASE_FROM = 478 / 3.0;
+    /** 11,43 с — снизу: кольцо уже собрано. */
+    private static final double RING_FROM = 686 / 3.0;
+
+    /** Угол камеры погони вокруг ядра (в параметре орбиты): Красный ближе всего к камере, когда угол совпадает. */
+    private static double chaseCamAngle(double t) {
+        double k = win(t, CHASE_FROM, RING_FROM);
+        return Mth.lerp(k, Math.atan2(16.0, -5.5), Math.atan2(15.0, 3.0));
+    }
+
+    /**
+     * Угол погони по референсу: Красный проходит ближе всего к камере на 8,17 с, 9,63 с и 10,63 с
+     * (первый виток ~1,47 с, потом ~1 с), в кольце — виток за 0,31 с.
+     */
     private static double chaseAngle(double t) {
-        double a = (Math.min(t, T_RING) - T_CHASE) * OMEGA_CHASE;
-        if (t > T_RING) a += (Math.min(t, T_RING_OPEN + 16) - T_RING) * OMEGA_RING;
+        double[] kt = {CHASE_FROM, 490 / 3.0, 578 / 3.0, 638 / 3.0, RING_FROM};
+        double[] ka = new double[5];
+        ka[1] = chaseCamAngle(kt[1]);
+        ka[2] = chaseCamAngle(kt[2]) + Math.PI * 2.0;
+        ka[3] = chaseCamAngle(kt[3]) + Math.PI * 4.0;
+        ka[0] = ka[1] - (ka[2] - ka[1]) * (kt[1] - kt[0]) / (kt[2] - kt[1]);
+        ka[4] = ka[3] + (ka[3] - ka[2]) * (kt[4] - kt[3]) / (kt[3] - kt[2]);
+        double a;
+        if (t <= kt[0]) a = ka[0];
+        else if (t >= kt[4]) a = ka[4];
+        else {
+            int i = 0;
+            while (t > kt[i + 1]) i++;
+            a = Mth.lerp((t - kt[i]) / (kt[i + 1] - kt[i]), ka[i], ka[i + 1]);
+        }
+        if (t > RING_FROM) a += (Math.min(t, T_RING_OPEN + 16) - RING_FROM) * OMEGA_RING;
         if (t > T_RING_OPEN + 16) a += (t - T_RING_OPEN - 16) * OMEGA_RING * 0.2;
         return a;
     }
 
-    /** Сдвиг Синего относительно Красного: в погоне ~150°, в кольце — ровно напротив. */
+    /** Сдвиг Синего относительно Красного: в погоне летят парой (Синий впереди на ~60°), в кольце — напротив. */
     private static double chaseGap(double t) {
-        double g = Math.PI * 0.84 + 0.22 * Math.sin(t * 0.09);
-        return Mth.lerp(smooth(win(t, T_RING - 8, T_RING + 12)), g, Math.PI);
+        double g = Math.PI / 3.0 + 0.12 * Math.sin(t * 0.09);
+        return Mth.lerp(smooth(win(t, RING_FROM - 6, RING_FROM)), g, Math.PI);
     }
 
     private static Vec3 orbitPos(Scene s, double t, boolean blue) {
         double a = chaseAngle(t) + (blue ? chaseGap(t) : 0.0);
-        double ringK = smooth(win(t, T_RING - 8, T_RING + 12));
+        double ringK = smooth(win(t, RING_FROM - 6, RING_FROM));
         double radius = Mth.lerp(ringK, CHASE_R + 0.35 * Math.sin(t * 0.13 + (blue ? 1.7 : 0.0)), 3.0);
         double squash = Mth.lerp(ringK, 0.85, 1.0);
         double bob = (1.0 - ringK) * 0.45 * Math.sin(a * 2.0 + (blue ? 1.0 : 0.0));
@@ -541,9 +572,102 @@ public final class MaximumPurpleClient {
         return s.atP(0.08 + c, 0.32 - sn * 0.7071, 1.62 + sn * 0.7071, t);
     }
 
+    // ---- Планы по трекам референса (небо, сближение, «космос»): шары стоят ровно там же на экране,
+    //      что и в видео, относительно камеры кат-сцены; камера поворачивается так же, как в видео.
+
+    private static final MaxPurpleRefTracks.Track TR_SKY = MaxPurpleRefTracks.SKY;
+    private static final MaxPurpleRefTracks.Track TR_APPROACH = MaxPurpleRefTracks.APPROACH;
+    private static final MaxPurpleRefTracks.Track TR_SPACE = MaxPurpleRefTracks.SPACE;
+    /** Видимый радиус пятна в видео (со свечением) / радиус шара. */
+    private static final double GLOW = 1.8;
+    private static final double ASPECT = 16.0 / 9.0;
+
+    private record TrackCam(Vec3 pos, Vec3 fwd, Vec3 right, Vec3 up, double tanV, double tanH, float yaw, float pitch,
+                            double anchorDist) {
+    }
+
+    private static Vec3 dirOf(double yawDeg, double pitchDeg) {
+        double y = Math.toRadians(yawDeg), p = Math.toRadians(pitchDeg);
+        return new Vec3(-Math.sin(y) * Math.cos(p), -Math.sin(p), Math.cos(y) * Math.cos(p));
+    }
+
+    /** Камера плана с треком: точка съёмки, «якорь» в нужной точке экрана в начале плана + повороты из видео. */
+    private static TrackCam trackCam(Scene s, MaxPurpleRefTracks.Track tr, double t) {
+        Vec3 pos;
+        Vec3 anchor;
+        double ax, ay;
+        if (tr == TR_SKY) {
+            // общий план снизу издалека: Красный поднимается от игрока
+            pos = s.at(22.0, -9.0, 4.0);
+            anchor = s.at(0.0, 0.0, 1.2);
+            ax = tr.at(MaxPurpleRefTracks.RX, tr.from());
+            ay = tr.at(MaxPurpleRefTracks.RY, tr.from());
+        } else if (tr == TR_APPROACH) {
+            // средний план чуть сверху рядом с Красным
+            pos = s.off(s.core(), 7.0, -3.5, 2.6);
+            anchor = s.core();
+            ax = tr.at(MaxPurpleRefTracks.RX, tr.from());
+            ay = tr.at(MaxPurpleRefTracks.RY, tr.from());
+        } else {
+            // «космос»: медленный наезд, ядро чуть ниже центра
+            double k = smooth(win(t, tr.from(), tr.to()));
+            pos = s.off(s.core(), 6.6 - 1.6 * k, 0.0, -0.3);
+            anchor = s.core();
+            ax = 0.5;
+            ay = 0.53;
+        }
+        double tanV = Math.tan(Math.toRadians(tr.fov) / 2.0), tanH = tanV * ASPECT;
+        Vec3 d = anchor.subtract(pos);
+        double yawA = Math.toDegrees(Math.atan2(-d.x, d.z));
+        double pitchA = Math.toDegrees(-Math.atan2(d.y, Math.sqrt(d.x * d.x + d.z * d.z)));
+        double yaw = yawA - Math.toDegrees(Math.atan((2.0 * ax - 1.0) * tanH)) + tr.at(MaxPurpleRefTracks.YAW, t);
+        double pitch = pitchA - Math.toDegrees(Math.atan((2.0 * ay - 1.0) * tanV)) + tr.at(MaxPurpleRefTracks.PITCH, t);
+        Vec3 fwd = dirOf(yaw, pitch);
+        Vec3 right = dirOf(yaw + 90.0, 0.0);
+        Vec3 up = right.cross(fwd).normalize();
+        return new TrackCam(pos, fwd, right, up, tanV, tanH, (float) yaw, (float) pitch, d.length());
+    }
+
+    /** Глубина шара вдоль взгляда камеры: Красный — на расстоянии якоря, Синий — по своему размеру в кадре. */
+    private static double trackDepth(MaxPurpleRefTracks.Track tr, double t, boolean blue, TrackCam c) {
+        double dRed = c.anchorDist;
+        if (!blue || tr == TR_SPACE) return dRed;
+        double r = Math.max(0.005, tr.at(MaxPurpleRefTracks.BR, t));
+        double k = tr == TR_SKY ? 0.05 : 0.12;
+        return Mth.clamp(k * dRed / r, 0.25, dRed * 4.0);
+    }
+
+    private static Vec3 trackedOrb(Scene s, MaxPurpleRefTracks.Track tr, double t, boolean blue) {
+        TrackCam c = trackCam(s, tr, t);
+        double sx = tr.at(blue ? MaxPurpleRefTracks.BX : MaxPurpleRefTracks.RX, t);
+        double sy = tr.at(blue ? MaxPurpleRefTracks.BY : MaxPurpleRefTracks.RY, t);
+        double z = trackDepth(tr, t, blue, c);
+        Vec3 ray = c.fwd.add(c.right.scale((2.0 * sx - 1.0) * c.tanH)).add(c.up.scale((1.0 - 2.0 * sy) * c.tanV));
+        return c.pos.add(ray.scale(z));
+    }
+
+    /** Радиус шара так, чтобы в кадре он был того же размера, что в видео. */
+    private static float trackedRadius(Scene s, MaxPurpleRefTracks.Track tr, double t, boolean blue) {
+        TrackCam c = trackCam(s, tr, t);
+        double r = tr.at(blue ? MaxPurpleRefTracks.BR : MaxPurpleRefTracks.RR, t);
+        double z = trackDepth(tr, t, blue, c);
+        double radius = Math.max(0.0, r * 2.0 * z * c.tanV / GLOW);
+        // Синий пролетает сквозь камеру — у самого объектива шар растворяется в голубые клубы
+        if (blue && tr == TR_APPROACH) radius *= smooth((z - 0.9) / 0.8);
+        return (float) radius;
+    }
+
+    /** Номер плана с треком в момент t (или -1) — след шара не тянется через склейку. */
+    private static int trackIndex(double t) {
+        MaxPurpleRefTracks.Track tr = MaxPurpleRefTracks.at(t);
+        return tr == TR_SKY ? 0 : tr == TR_APPROACH ? 1 : tr == TR_SPACE ? 2 : -1;
+    }
+
     /** Позиция Синего или null. */
     private static Vec3 bluePos(Scene s, double t) {
         if (t < T_BLUE_SPAWN - 1 || t >= T_MERGED) return null;
+        MaxPurpleRefTracks.Track tr = MaxPurpleRefTracks.at(t);
+        if (tr != null) return trackedOrb(s, tr, t, true);
         if (t < T_SWEEP) {
             return sweepPos(s, -Math.PI / 4.0, t).add(0.0, 0.02 * Math.sin(t * 0.35), 0.0);
         }
@@ -551,65 +675,52 @@ public final class MaximumPurpleClient {
             double k = win(t, T_SWEEP, T_RELEASE);
             return sweepPos(s, -Math.PI / 4.0 + Math.PI / 2.0 * k * k, t);
         }
-        Vec3 top = sweepPos(s, Math.PI / 4.0, T_RELEASE);
-        Vec3 b1 = s.at(-2.5, -7.0, 25.0);
-        if (t < T_SKY) {
+        if (t < TR_SKY.from()) {
+            // Синий по спирали уходит ввысь (за кадр)
+            Vec3 top = sweepPos(s, Math.PI / 4.0, T_RELEASE);
+            Vec3 b1 = s.at(-2.5, -7.0, 25.0);
             double p = win(t, T_RELEASE, 66);
             Vec3 base = lerp(top, b1, easeOut(p));
             Vec3 pos = base.add(spiralAround(s, b1.subtract(top), p, 3.0, 1.7 * smooth(win(t, T_RELEASE, 45))));
             return pos.add(0.0, 0.08 * Math.sin(t * 0.2) * smooth(win(t, 66, 72)), 0.0);
         }
-
-        Vec3 b2 = s.at(3.5, 1.0, 29.5);
-        if (t < T_APPROACH) {
-            return bezier(b1, s.at(1.0, -3.0, 34.0), b2, smooth(win(t, T_SKY, T_APPROACH)));
-        }
-
-        // Подлетает к Красному и кружит вокруг него, потом уходит в погоню вокруг ядра.
-        Vec3 red = orbitPos(s, T_CHASE, false);
-        Vec3 rel = b2.subtract(red);
-        double phi0 = Math.atan2(rel.dot(s.forward), rel.dot(s.right));
-        double p = win(t, T_APPROACH, T_CHASE + 10);
-        double phi = phi0 + Math.PI * 2.0 * 1.3 * (1.0 - Math.pow(1.0 - p, 1.6));
-        double rad = Mth.lerp(smooth(p), Math.sqrt(rel.x * rel.x + rel.z * rel.z), 1.5);
-        Vec3 around = red.add(circle(s, phi, rad, 1.0)).add(0.0, rel.y * (1.0 - smooth(p)), 0.0);
-        if (t < 150) return around;
-        if (t < T_SPACE - 2 && t >= T_CHASE + 10) return orbitPos(s, t, true);
-        if (t < T_SPACE - 2) return lerp(around, orbitPos(s, t, true), smooth(win(t, 150, T_CHASE + 10)));
+        if (t < T_SPACE - 2) return orbitPos(s, t, true);
         return spacePos(s, t, true);
     }
 
-    private static float blueRadius(double t) {
+    private static float blueRadius(Scene s, double t) {
+        MaxPurpleRefTracks.Track tr = MaxPurpleRefTracks.at(t);
+        if (tr != null) return trackedRadius(s, tr, t, true);
         if (t < T_VORTEX) return (float) (0.05 + 0.10 * smooth(win(t, T_BLUE_SPAWN - 1, T_VORTEX)));
         if (t < T_RELEASE) return 0.16f;
-        if (t < T_SKY) return (float) (0.16 + 0.16 * easeOut(win(t, T_RELEASE, 60)));
-        if (t < T_SPACE) return (float) (0.32 + 0.06 * smooth(win(t, T_APPROACH, T_CHASE)));
+        if (t < CHASE_FROM) return (float) (0.16 + 0.16 * easeOut(win(t, T_RELEASE, 60)));
+        if (t < T_SPACE) return 0.38f;
         return 0.42f;
     }
 
     /** Позиция Красного или null. */
     private static Vec3 redPos(Scene s, double t) {
         if (t < T_RED_GLOW || t >= T_MERGED) return null;
+        MaxPurpleRefTracks.Track tr = MaxPurpleRefTracks.at(t);
+        if (tr != null) return trackedOrb(s, tr, t, false);
         // Кулак поднятой согнутой руки — на уровне головы рядом с лицом.
         Vec3 top = s.atP(0.32, 0.30, 1.9, t);
         if (t < T_RED_FIRE) return top;
-
-        Vec3 park = orbitPos(s, T_CHASE, false);
-        if (t < T_CHASE) {
-            double p = win(t, T_RED_FIRE, 104);
-            Vec3 pos = lerp(top, park, easeOut(p));
-            // лёгкое «виляние» на взлёте — след красиво изгибается
-            pos = pos.add(s.right.scale(0.6 * Math.sin(p * 9.0) * (1.0 - p))).add(s.forward.scale(0.4 * Math.sin(p * 7.0) * (1.0 - p)));
-            return pos.add(0.0, 0.08 * Math.sin(t * 0.2 + 1.7) * smooth(win(t, 104, 112)), 0.0);
+        if (t < TR_SKY.from()) {
+            // вылетает из кулака вверх
+            double p = win(t, T_RED_FIRE, TR_SKY.from() + 2.0);
+            return top.add(0.0, 2.5 * easeOut(p), 0.0);
         }
         if (t < T_SPACE - 2) return orbitPos(s, t, false);
         return spacePos(s, t, false);
     }
 
-    private static float redRadius(double t) {
+    private static float redRadius(Scene s, double t) {
+        MaxPurpleRefTracks.Track tr = MaxPurpleRefTracks.at(t);
+        if (tr != null) return trackedRadius(s, tr, t, false);
         if (t < T_RED_FIRE) return (float) (0.03 + 0.07 * smooth(win(t, T_RED_GLOW, 66)) + 0.01 * Math.sin(t * 1.7));
-        if (t < T_CHASE) return (float) (0.10 + 0.22 * easeOut(win(t, 69, 90)));
-        if (t < T_SPACE) return (float) (0.32 + 0.06 * smooth(win(t, T_CHASE, T_CHASE + 20)));
+        if (t < CHASE_FROM) return (float) (0.10 + 0.22 * easeOut(win(t, 69, 90)));
+        if (t < T_SPACE) return (float) (0.32 + 0.06 * smooth(win(t, CHASE_FROM, CHASE_FROM + 20)));
         return 0.42f;
     }
 
@@ -727,11 +838,11 @@ public final class MaximumPurpleClient {
      * (игрок, земля, ядро, Красный, Синий). Между ключами — сплайн Катмулла–Рома.
      * cut = жёсткая склейка: с этого ключа начинается новый план.
      */
-    private record CamKey(int t, int pa, double cf, double cr, double cu,
+    private record CamKey(double t, int pa, double cf, double cr, double cu,
                           int ta, double tf, double tr, double tu, float fov, float roll, boolean cut) {
     }
 
-    private static CamKey ck(int t, int pa, double cf, double cr, double cu,
+    private static CamKey ck(double t, int pa, double cf, double cr, double cu,
                              int ta, double tf, double tr, double tu, float fov, float roll, boolean cut) {
         return new CamKey(t, pa, cf, cr, cu, ta, tf, tr, tu, fov, roll, cut);
     }
@@ -741,8 +852,8 @@ public final class MaximumPurpleClient {
             ck(0, A_PLAYER, 6.2, 0.6, 1.5, A_PLAYER, 0.0, 0.0, 1.2, 64f, 0f, true),
             ck(3, A_PLAYER, 2.3, -0.3, 0.75, A_PLAYER, 0.0, 0.05, 1.45, 72f, 0f, false),
             ck(12, A_PLAYER, 1.85, -0.55, 0.55, A_PLAYER, 0.0, 0.2, 1.75, 76f, -3f, false),
-            // 0,7 с: вспышка Синего
-            ck(14, A_PLAYER, 2.4, -1.1, 0.95, A_PLAYER, 0.15, 0.2, 1.45, 82f, -6f, true),
+            // 0,67 с (кадр 40): вспышка Синего
+            ck(40 / 3.0, A_PLAYER, 2.4, -1.1, 0.95, A_PLAYER, 0.15, 0.2, 1.45, 82f, -6f, true),
             // 0,8–1,9 с: вихрь — камера медленно облетает игрока
             ck(16, A_PLAYER, 2.5, -1.2, 1.0, A_PLAYER, 0.0, 0.0, 1.05, 80f, -5f, false),
             ck(24, A_PLAYER, 2.7, 0.2, 0.95, A_PLAYER, 0.0, 0.0, 1.05, 78f, 0f, false),
@@ -755,36 +866,29 @@ public final class MaximumPurpleClient {
             // 2,8–3,25 с: спокойный план со спины с медленным наездом; кисть у лица
             ck(56, A_PLAYER, -2.6, -1.4, 1.95, A_PLAYER, 0.35, 0.1, 1.5, 64f, 0f, true),
             ck(65, A_PLAYER, -1.85, -1.0, 1.85, A_PLAYER, 0.35, 0.1, 1.55, 57f, 0f, false),
-            // 3,45–3,6 с: выстрел — сзади-слева, рука поднята, Красный вылетает из неё
-            ck(68, A_PLAYER, -1.6, -1.0, 1.75, A_PLAYER, 0.3, 0.25, 1.75, 70f, 0f, true),
-            ck(72, A_PLAYER, -1.95, -1.2, 1.7, A_PLAYER, 0.3, 0.25, 1.8, 78f, 2f, false),
-            // 3,7–4,9 с: общий план — Красный поднимается со следом, игрок внизу
-            ck(73, A_GROUND, 22.0, -9.0, 4.0, A_GROUND, 0.0, 0.0, 6.0, 60f, 0f, true),
-            ck(98, A_GROUND, 21.0, -8.5, 4.5, A_GROUND, 0.0, 0.0, 15.0, 60f, 0f, false),
-            // 5,0–6,3 с: взгляд в небо — Синий летит дугой, Красный висит
-            ck(100, A_GROUND, 11.0, -15.0, 19.0, A_CORE, 0.0, -2.5, 1.0, 66f, 0f, true),
-            ck(126, A_GROUND, 9.5, -13.0, 20.0, A_CORE, 0.5, -0.5, 1.6, 64f, 0f, false),
-            // 6,4–7,9 с: рядом с Красным, Синий подлетает и кружит; в 7,6 — сквозь камеру
-            ck(128, A_RED, 3.0, -2.0, 1.6, A_RED, 0.0, 0.0, 0.0, 66f, -4f, true),
-            ck(146, A_RED, 2.5, -1.5, 1.2, A_RED, 0.0, 0.0, 0.0, 70f, -2f, false),
-            ck(152, A_BLUE, 0.9, 0.2, 0.4, A_BLUE, 0.0, 0.0, 0.0, 84f, 6f, false),
-            ck(158, A_BLUE, 0.35, 0.05, 0.15, A_BLUE, 0.0, 0.0, 0.0, 92f, 10f, false),
-            // 8,0–11,3 с: погоня — дальний план на уровне шаров, медленная панорама
-            ck(160, A_CORE, 16.0, -5.5, -1.6, A_CORE, 0.0, 0.0, 0.0, 54f, 0f, true),
+            // 3,43–3,6 с (кадр 206): спереди-справа, кулак у лица — в нём рождается Красный, красные ленты
+            ck(206 / 3.0, A_PLAYER, 2.0, 0.75, 1.65, A_PLAYER, 0.0, 0.15, 1.6, 70f, 0f, true),
+            ck(72, A_PLAYER, 2.2, 0.85, 1.65, A_PLAYER, 0.0, 0.15, 1.65, 74f, 1f, false),
+            // 3,63–6,33 с (кадры 218–380) — один непрерывный план с неба, 6,37–7,93 с (382–476) — сближение:
+            // камера и шары по трекам референса (trackCam), ключи ниже — только запасные.
+            ck(218 / 3.0, A_GROUND, 22.0, -9.0, 4.0, A_GROUND, 0.0, 0.0, 6.0, 60f, 0f, true),
+            ck(382 / 3.0, A_CORE, 7.0, -3.5, 2.6, A_CORE, 0.0, 0.0, 0.0, 66f, 0f, true),
+            // 7,97–11,4 с (кадр 478): погоня — дальний план на уровне шаров, медленная панорама
+            ck(CHASE_FROM, A_CORE, 16.0, -5.5, -1.6, A_CORE, 0.0, 0.0, 0.0, 54f, 0f, true),
             ck(226, A_CORE, 15.0, 3.0, -1.0, A_CORE, 0.0, 0.0, -0.3, 52f, 0f, false),
             // 11,4–14,1 с: снизу — кольцо, игрок поднимается к центру, кольцо раскрывается
-            ck(228, A_CORE, 4.6, -1.2, -5.2, A_CORE, 0.0, 0.0, 0.0, 76f, 0f, true),
+            ck(RING_FROM, A_CORE, 4.6, -1.2, -5.2, A_CORE, 0.0, 0.0, 0.0, 76f, 0f, true),
             ck(238, A_GROUND, 12.0, 0.6, 12.0, A_GROUND, 0.0, 0.0, 23.0, 64f, 0f, false),
             ck(266, A_GROUND, 15.5, 0.4, 9.5, A_GROUND, 0.0, 0.0, 22.5, 58f, 0f, false),
             ck(283, A_GROUND, 15.0, 0.4, 10.0, A_GROUND, 0.0, 0.0, 23.0, 56f, 0f, false),
             // 15,25–16,55 с: «космос» — Красный слева, Синий справа, ядро растёт
-            ck(304, A_CORE, 6.6, 0.0, -0.3, A_CORE, 0.0, 0.0, 0.0, 62f, -4f, true),
+            ck(916 / 3.0, A_CORE, 6.6, 0.0, -0.3, A_CORE, 0.0, 0.0, 0.0, 62f, -4f, true),
             ck(331, A_CORE, 5.0, 0.0, -0.15, A_CORE, 0.0, 0.0, 0.0, 58f, -2f, false),
             // 16,8–17,45 с: один большой фиолетовый шар, белый вихрь
             ck(336, A_CORE, 3.6, 0.0, 0.0, A_CORE, 0.0, 0.0, 0.0, 70f, 0f, true),
             ck(349, A_CORE, 1.9, 0.0, 0.0, A_CORE, 0.0, 0.0, 0.0, 82f, 8f, false),
             // 17,5–17,9 с: крупно спереди — руки скрещены перед лицом, огромная спираль за спиной
-            ck(350, A_PLAYER, 1.55, -0.25, 1.75, A_PLAYER, 0.0, 0.0, 1.6, 60f, 0f, true),
+            ck(1048 / 3.0, A_PLAYER, 1.55, -0.25, 1.75, A_PLAYER, 0.0, 0.0, 1.6, 60f, 0f, true),
             ck(358, A_PLAYER, 1.3, -0.2, 1.7, A_PLAYER, 0.0, 0.0, 1.6, 56f, 0f, false),
             // 17,95–18,2 с: выпрямляется — спереди чуть сверху, сфера за спиной
             ck(359, A_PLAYER, 3.0, 0.5, 2.1, A_PLAYER, 0.0, 0.0, 1.25, 72f, -4f, true),
@@ -828,6 +932,11 @@ public final class MaximumPurpleClient {
     }
 
     private static CamState cameraAt(Scene s, double t) {
+        MaxPurpleRefTracks.Track tr = MaxPurpleRefTracks.at(t);
+        if (tr != null) {
+            TrackCam c = trackCam(s, tr, t);
+            return new CamState(c.pos, c.pos.add(c.fwd.scale(10.0)), tr.fov, 0f);
+        }
         int i = 0;
         while (i + 1 < CAM.length && CAM[i + 1].t <= t) i++;
         CamKey k1 = CAM[i];
@@ -1146,8 +1255,11 @@ public final class MaximumPurpleClient {
         if (alpha <= 0.01f || length <= 0.1) return;
         List<Vec3> pts = new ArrayList<>();
         int samples = Math.max(6, (int) (length * 2.0));
+        int seg = trackIndex(t);
         for (int i = 0; i <= samples; i++) {
             double tt = t - length * i / samples;
+            // след не тянется через склейку (другой план — другая камера)
+            if (i > 0 && trackIndex(tt) != seg && (seg >= 0 || trackIndex(tt) >= 0)) break;
             Vec3 p = blue ? bluePos(s, tt) : redPos(s, tt);
             if (p == null) break;
             pts.add(p);
@@ -1230,13 +1342,13 @@ public final class MaximumPurpleClient {
 
         // ---- Синий
         if (blue != null) {
-            float br = blueRadius(t);
+            float br = blueRadius(s, t);
             if (t >= T_SWEEP + 1 && t < T_RELEASE) orbTrail(pose, camera, s, t, true, Math.min(t - T_SWEEP, 5.0), 0.12f, 0.9f);
             else if (t >= T_RELEASE && t < T_CALM) orbTrail(pose, camera, s, t, true, 7.0, br * 0.9f, 0.85f);
-            else if (t >= T_SKY && t < T_APPROACH) orbTrail(pose, camera, s, t, true, 12.0, br * 0.85f, 0.9f);
-            else if (t >= T_APPROACH && t < T_CHASE) orbTrail(pose, camera, s, t, true, 9.0, br * 0.8f, 0.9f);
-            else if (t >= T_CHASE && t < T_RING) orbTrail(pose, camera, s, t, true, 5.0, br * 0.8f, 0.9f);
-            else if (t >= T_RING && t < T_RING_OPEN + 12) orbTrail(pose, camera, s, t, true,
+            else if (TR_SKY.covers(t)) orbTrail(pose, camera, s, t, true, 3.0 + 10.0 * smooth(win(t, 92, 100)), br * 0.85f, 0.9f);
+            else if (TR_APPROACH.covers(t)) orbTrail(pose, camera, s, t, true, 6.0, br * 0.8f, 0.9f);
+            else if (t >= CHASE_FROM && t < RING_FROM) orbTrail(pose, camera, s, t, true, 5.0, br * 0.8f, 0.9f);
+            else if (t >= RING_FROM && t < T_RING_OPEN + 12) orbTrail(pose, camera, s, t, true,
                     9.0 * (1.0 - smooth(win(t, T_RING_OPEN, T_RING_OPEN + 12))), br * 0.7f, 0.9f);
             renderOrb(pose, cam, camera, blue, br, true, t, t < T_BLUE_THROW + 1);
         }
@@ -1244,10 +1356,10 @@ public final class MaximumPurpleClient {
         // ---- Красный: в ладони у лица, выстрел, подъём со следом, погоня
         Vec3 red = redPos(s, t);
         if (red != null) {
-            float rr = redRadius(t);
-            if (t >= T_RED_FIRE + 1 && t < T_CHASE) orbTrail(pose, camera, s, t, false, 8.0, rr * 0.9f, 0.9f * (1.0f - (float) smooth(win(t, 100, 110))));
-            else if (t >= T_CHASE && t < T_RING) orbTrail(pose, camera, s, t, false, 5.0, rr * 0.8f, 0.9f);
-            else if (t >= T_RING && t < T_RING_OPEN + 12) orbTrail(pose, camera, s, t, false,
+            float rr = redRadius(s, t);
+            if (t >= T_RED_FIRE + 1 && t < TR_SKY.to()) orbTrail(pose, camera, s, t, false, 8.0, rr * 0.9f, 0.9f * (1.0f - (float) smooth(win(t, 80, 88))));
+            else if (t >= CHASE_FROM && t < RING_FROM) orbTrail(pose, camera, s, t, false, 9.0, rr * 0.8f, 0.9f);
+            else if (t >= RING_FROM && t < T_RING_OPEN + 12) orbTrail(pose, camera, s, t, false,
                     9.0 * (1.0 - smooth(win(t, T_RING_OPEN, T_RING_OPEN + 12))), rr * 0.7f, 0.9f);
             renderOrb(pose, cam, camera, red, rr, false, t, t < T_RED_FIRE + 1);
         }
@@ -1284,7 +1396,7 @@ public final class MaximumPurpleClient {
                 HollowPurpleReferenceClient.mpArc(pose, camera, c, red, 0.05f, 10, t, Math.floor(t / 3.0) * 7.0, 9, 0.8f * core, 0.45f);
                 HollowPurpleReferenceClient.mpArc(pose, camera, c, blue, 0.05f, 10, t, Math.floor(t / 3.0) * 7.0 + 3.0, 10, 0.8f * core, 0.45f);
             }
-            float ring = env(t, T_RING, T_RING_OPEN + 8, 8.0, 8.0);
+            float ring = env(t, RING_FROM - 0.5, T_RING_OPEN + 8, 0.5, 8.0);
             if (ring > 0.0f) {
                 HollowPurpleReferenceClient.mpRing(pose, camera, c, new Vec3(0.0, 1.0, 0.0), 3.0f, 0.12f, t * 6.0,
                         8, 9, 0.55f * ring, 0.1f, 71.0, false);
@@ -1347,7 +1459,8 @@ public final class MaximumPurpleClient {
         }
 
         // ---- 18,1 с: главный удар — вспышка в сфере
-        float boom = env(t, T_EXPLODE, T_EXPLODE + 8, 1.0, 6.0);
+        // у владельца белой вспышки до манга-кадра нет (как в референсе) — только у наблюдателей
+        float boom = isLocal ? 0.0f : env(t, T_EXPLODE, T_EXPLODE + 8, 1.0, 6.0);
         if (boom > 0.0f) {
             billboard(pose, cam, camera, bigSpherePos(s, t), 22.0f * boom, 0f, TEX_BLOOM, 1.0f, 0.85f, 1.0f, boom, true);
         }
@@ -1620,11 +1733,14 @@ public final class MaximumPurpleClient {
         RenderSystem.enableBlend();
         RenderSystem.defaultBlendFunc();
 
-        // 0,7 с: синяя вспышка на весь экран с кольцом
-        float blueFlash = env(t, T_BLUE_SPAWN - 0.5, T_BLUE_SPAWN + 4, 0.5, 3.5);
+        // 0,67 с (кадр 40): белая вспышка с кольцом, 0,70–0,77 с — синий взрыв на весь экран
+        double b0 = 40 / 3.0;
+        float whiteRing = env(t, b0 - 0.1, b0 + 1.4, 0.1, 1.1);
+        if (whiteRing > 0.0f) fillColor(g, w, h, 0.55f * whiteRing, 0xEAF4FF);
+        float blueFlash = env(t, b0 - 0.1, b0 + 3.4, 0.4, 2.2);
         if (blueFlash > 0.0f) {
-            fillColor(g, w, h, 0.45f * blueFlash, 0x5AA0FF);
-            int size = (int) (h * (1.2f + 2.4f * (float) win(t, T_BLUE_SPAWN - 0.5, T_BLUE_SPAWN + 4)));
+            fillColor(g, w, h, 0.42f * blueFlash, 0x5A8CFF);
+            int size = (int) (h * (1.2f + 2.4f * (float) win(t, b0 - 0.1, b0 + 3.4)));
             RenderSystem.enableBlend();
             RenderSystem.defaultBlendFunc();
             RenderSystem.setShaderColor(0.6f, 0.85f, 1.0f, blueFlash);
@@ -1632,32 +1748,51 @@ public final class MaximumPurpleClient {
             RenderSystem.setShaderColor(1.0f, 1.0f, 1.0f, 1.0f);
         }
 
-        // 2,1 с: белая вспышка броска
-        float throwFlash = env(t, T_BLUE_THROW + 1, T_BLUE_THROW + 5, 0.5, 3.0);
-        if (throwFlash > 0.0f) fillColor(g, w, h, 0.9f * throwFlash, 0xF4F8FF);
+        // 2,13 с (кадр 128): белая вспышка броска — сразу во весь кадр, гаснет к 2,37 с (кадр 142)
+        double w0 = 128 / 3.0;
+        if (t >= w0 - 0.15 && t < 142 / 3.0 + 0.7) {
+            float throwFlash = t < w0 + 0.4 ? (float) smooth((t - (w0 - 0.15)) / 0.3)
+                    : 1.0f - (float) Math.pow(win(t, w0 + 0.4, 142 / 3.0 + 0.7), 0.55);
+            fillColor(g, w, h, 0.9f * throwFlash, 0xF4F8FF);
+        }
 
-        // 3,30–3,37 с: манга-кадр — белый силуэт игрока на чёрной штриховке
-        if (t >= T_MANGA_A && t < T_MANGA_A + 2) {
-            boolean first = t < T_MANGA_A + 1;
+        // 3,30 с (кадр 198) — манга-кадр, 3,33–3,37 с (200–202) — второй, 3,40 с (204) — звезда:
+        // белый силуэт игрока на чёрной штриховке
+        if (t >= T_MANGA_A && t < 68.0) {
+            boolean first = t < 200 / 3.0;
             drawFrame(g, w, h, first ? MANGA_A1 : MANGA_A2, t - T_MANGA_A);
             drawSilhouetteAt(g, w, h, WHITE_TINT, WHITE_TINT, WHITE_TINT, first ? 1.0f : 1.08f, 0.0f, 0.0f, 180.0f);
             drawFrame(g, w, h, TEX_HATCH, 0.0);
+        } else if (t >= 68.0 && t < 206 / 3.0) {
+            drawStarFrame(g, w, h);
         }
 
         // 3,45 с: красный отсвет выстрела
         float redFlash = env(t, T_RED_FIRE, T_RED_FIRE + 4, 0.5, 3.0);
         if (redFlash > 0.0f) fillColor(g, w, h, 0.35f * redFlash, 0xFF1030);
 
-        // 14,15–15,2 с: свет гаснет, ровно секунда темноты, потом «космос» проступает
-        if (t >= T_DARK && t < T_SPACE + 1) {
-            float a = (float) (smooth(win(t, T_DARK, T_DARK + 1.2)) * (1.0 - smooth(win(t, T_BLACK_END, T_SPACE + 1))));
+        // 7,8–7,93 с (кадры 468–476): Синий проходит сквозь камеру — голубые клубы
+        float cloud = env(t, 466 / 3.0, 478 / 3.0, 0.8, 1.6);
+        if (cloud > 0.0f) {
+            fillColor(g, w, h, 0.35f * cloud, 0x54C8FF);
+            RenderSystem.enableBlend();
+            RenderSystem.defaultBlendFunc();
+            RenderSystem.setShaderColor(0.45f, 0.85f, 1.0f, 0.85f * cloud);
+            int size = (int) (h * (1.4f + 1.2f * (float) win(t, 466 / 3.0, 478 / 3.0)));
+            g.blit(TEX_BLOOM, (int) (w * 0.28f) - size / 2, (int) (h * 0.42f) - size / 2, size, size, 0.0f, 0.0f, 512, 512, 512, 512);
+            RenderSystem.setShaderColor(1.0f, 1.0f, 1.0f, 1.0f);
+        }
+
+        // 14,07–14,23 с (кадры 844–854): свет гаснет; ровно до 15,23 с — темнота; 15,27–15,37 с — «космос» проступает
+        if (t >= 844 / 3.0 && t < 922 / 3.0) {
+            float a = (float) (smooth(win(t, 844 / 3.0, 854 / 3.0)) * (1.0 - smooth(win(t, 914 / 3.0, 922 / 3.0))));
             fillColor(g, w, h, a, 0x000000);
         }
 
-        // 16,6–16,75 с: четыре аниме-вставки
-        if (t >= T_INSERTS && t < T_INSERTS + 4) {
-            int idx = Mth.clamp((int) (t - T_INSERTS), 0, INSERTS.length - 1);
-            drawFrame(g, w, h, INSERTS[idx], t - T_INSERTS);
+        // 16,60–16,77 с (кадры 996–1006): шесть аниме-вставок, по одному кадру видео (1/30 с)
+        if (t >= 996 / 3.0 && t < 1008 / 3.0) {
+            int idx = Mth.clamp((int) ((t - 996 / 3.0) * 1.5), 0, INSERTS.length - 1);
+            drawFrame(g, w, h, INSERTS[idx], (t - 996 / 3.0) - idx / 1.5);
         }
 
         // 16,9–17,45 с: белый закрученный взрыв на весь экран
@@ -1669,12 +1804,9 @@ public final class MaximumPurpleClient {
                     0.85f * swirl * (float) smooth(win(t, T_SWIRL, T_SWIRL + 3)));
         }
 
-        // 18,1 с: главный удар
-        float boom = env(t, T_EXPLODE, T_MANGA_C, 0.4, 2.0);
-        if (boom > 0.0f) fillColor(g, w, h, boom, 0xFFFFFF);
-
-        // 18,25–18,4 с: манга-кадр с рукой, потом кадр с белым «X»
-        if (t >= T_MANGA_C && t < T_MANGA_C + 2) {
+        // 18,27–18,37 с (кадры 1096–1102): манга-кадр с рукой, 18,40 с (1104) — кадр с белым «X».
+        // Белой вспышки перед ними в референсе нет — поза сразу сменяется мангой.
+        if (t >= 1096 / 3.0 && t < 1104 / 3.0) {
             drawFrame(g, w, h, MANGA_C1, t - T_MANGA_C);
             // контур чёрным, сверху белый силуэт в позе Годжо и штриховка
             for (int i = 0; i < 4; i++) {
@@ -1683,14 +1815,36 @@ public final class MaximumPurpleClient {
             }
             drawSilhouetteAt(g, w, h, WHITE_TINT, WHITE_TINT, WHITE_TINT, 1.55f, 0.0f, 0.0f, 110.0f);
             drawFrame(g, w, h, TEX_HATCH, 0.0);
-        } else if (t >= T_MANGA_C + 2 && t < T_WHITE_IN) {
-            drawFrame(g, w, h, MANGA_C2, t - T_MANGA_C - 2);
+        } else if (t >= 1104 / 3.0 && t < 1106 / 3.0) {
+            drawFrame(g, w, h, MANGA_C2, t - 1104 / 3.0);
         }
 
-        // Белый экран, пока дорезается кратер
-        if (t >= T_WHITE_IN) {
-            fillColor(g, w, h, (float) smooth(win(t, T_WHITE_IN, T_WHITE_IN + 1.5)), 0xFFFFFF);
+        // 18,43 с (кадр 1106): сразу белый экран, пока дорезается кратер
+        if (t >= 1106 / 3.0) fillColor(g, w, h, 1.0f, 0xFFFFFF);
+    }
+
+    /** 3,40 с (кадр 204): чёрный кадр — слева белая звезда-крест, справа белый силуэт игрока. */
+    private static void drawStarFrame(GuiGraphics g, int w, int h) {
+        fillColor(g, w, h, 1.0f, 0x000000);
+        float cx = w * 0.12f, cy = h * 0.47f;
+        RenderSystem.enableBlend();
+        RenderSystem.defaultBlendFunc();
+        RenderSystem.setShaderColor(1.0f, 1.0f, 1.0f, 0.9f);
+        int size = (int) (h * 0.32f);
+        g.blit(TEX_BLOOM, (int) cx - size / 2, (int) cy - size / 2, size, size, 0.0f, 0.0f, 512, 512, 512, 512);
+        RenderSystem.setShaderColor(1.0f, 1.0f, 1.0f, 1.0f);
+        float[] angles = {-8.0f, 52.0f};
+        float[] lengths = {h * 1.3f, h * 0.9f};
+        for (int i = 0; i < 2; i++) {
+            g.pose().pushPose();
+            g.pose().translate(cx, cy, 0.0f);
+            g.pose().mulPose(Axis.ZP.rotationDegrees(angles[i]));
+            int half = (int) (lengths[i] / 2), th = Math.max(1, h / 120);
+            g.fill(-th, -half, th, half, 0xFFFFFFFF);
+            g.fill(-th * 3, -half / 6, th * 3, half / 6, 0xFFFFFFFF);
+            g.pose().popPose();
         }
+        drawSilhouetteAt(g, w, h, WHITE_TINT, WHITE_TINT, WHITE_TINT, 1.0f, w * 0.18f, 0.0f, 150.0f);
     }
 
     /** Множитель цвета модели «в пересвет»: любой непрозрачный пиксель скина становится белым. */

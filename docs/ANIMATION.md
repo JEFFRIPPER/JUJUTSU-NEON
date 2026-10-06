@@ -164,3 +164,7 @@ FrameAnimNet.play(serverPlayer, "my_punch");
   (рядом или наложением `--overlay 0.45`).
 * `make_examples.py` — служебные `jn_calibration` (проверка знаков осей, по секунде на ось),
   `jn_example_frames`, `jn_example_keys`.
+* `refmetrics.py кадры/ --out metrics.csv` — замеры каждого кадра видео: яркость, склейки, сдвиг камеры,
+  где на экране и какого размера синие/красные/фиолетовые/белые пятна эффектов. Для катсцен:
+  `gen_max_purple_tracks.py` переводит замеры в треки (`MaxPurpleRefTracks.java`) — шары и камера в моде
+  повторяют положение на экране и повороты камеры из видео кадр в кадр.
