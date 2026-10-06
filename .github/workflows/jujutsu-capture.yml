@@ -4,6 +4,9 @@ name: Capture cutscene frames
 # катсцена Максимального Фиолетового, кадры — в артефакт. Релизы не трогает.
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - 'capture/**'
 
 jobs:
   capture:
