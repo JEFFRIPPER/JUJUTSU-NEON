@@ -261,6 +261,11 @@ public final class MaximumPurpleClient {
     // ------------------------------------------------------------------ API
 
     /** Кат-сцена локального игрока идёт (до сигнала сервера о конце). */
+    /** Время катсцены владельца (тики) для служебной съёмки, или -1. */
+    static double localClockForCapture() {
+        return local == null ? -1.0 : local.clock;
+    }
+
     public static boolean isLocalActive() {
         return local != null && !local.ended;
     }
