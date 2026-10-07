@@ -109,6 +109,8 @@ public final class MaximumPurpleClient {
     private static final ResourceLocation MANGA_A2 = tex("max_purple_manga_a2");
     private static final ResourceLocation MANGA_C1 = tex("max_purple_manga_c1");
     private static final ResourceLocation MANGA_C2 = tex("max_purple_manga_c2");
+    private static final ResourceLocation MANGA_D1 = tex("max_purple_manga_d1");
+    private static final ResourceLocation MANGA_D2 = tex("max_purple_manga_d2");
     /** Шесть аниме-вставок 16,60–16,77 с в порядке референса (кадры 996, 998, 1000, 1002, 1004, 1006). */
     private static final ResourceLocation[] INSERTS = {
             tex("max_purple_insert_0"), tex("max_purple_insert_1"), tex("max_purple_insert_2"),
@@ -684,7 +686,7 @@ public final class MaximumPurpleClient {
         TrackCam c = trackCam(s, tr, t);
         double r = tr.at(blue ? MaxPurpleRefTracks.BR : MaxPurpleRefTracks.RR, t);
         double z = trackDepth(tr, t, blue, c);
-        double radius = Math.max(0.0, r * 2.0 * z * c.tanV / GLOW);
+        double radius = Math.max(0.0, r * 2.0 * z * c.tanV / (tr == TR_SPACE ? 1.15 : GLOW));
         // Синий пролетает сквозь камеру — у самого объектива шар растворяется в голубые клубы
         if (blue && tr == TR_APPROACH) radius *= smooth((z - 0.9) / 0.8);
         return (float) radius;
@@ -760,7 +762,9 @@ public final class MaximumPurpleClient {
 
     /** Огромная фиолетовая сфера — всегда за спиной игрока (17,5–18,2 с). */
     private static Vec3 bigSpherePos(Scene s, double t) {
-        return s.atP(-5.0, 0.0, 1.6, t);
+        // референс: камера смотрит сверху — шар за спиной ниже плеч; когда камера у груди — шар за головой
+        double mid = smooth(win(t, 354.0, 358.5)) * (1.0 - smooth(win(t, 360.5, 362.5)));
+        return s.atP(-4.4, 0.0, 0.2 + 1.5 * mid, t);
     }
 
     // ------------------------------------------------------------------ ticks
@@ -950,12 +954,13 @@ public final class MaximumPurpleClient {
             // 16,8–17,45 с: один большой фиолетовый шар, белый вихрь
             ck(336, A_CORE, 3.6, 0.0, 0.0, A_CORE, 0.0, 0.0, 0.0, 70f, 0f, true),
             ck(349, A_CORE, 1.9, 0.0, 0.0, A_CORE, 0.0, 0.0, 0.0, 82f, 8f, false),
-            // 17,5–17,9 с: крупно спереди — руки скрещены перед лицом, огромная спираль за спиной
-            ck(1048 / 3.0, A_PLAYER, 1.55, -0.25, 1.75, A_PLAYER, 0.0, 0.0, 1.6, 60f, 0f, true),
-            ck(358, A_PLAYER, 1.3, -0.2, 1.7, A_PLAYER, 0.0, 0.0, 1.6, 56f, 0f, false),
-            // 17,95–18,2 с: выпрямляется — спереди чуть сверху, сфера за спиной
-            ck(359, A_PLAYER, 3.0, 0.5, 2.1, A_PLAYER, 0.0, 0.0, 1.25, 72f, -4f, true),
-            ck(368, A_PLAYER, 3.6, 0.7, 2.2, A_PLAYER, 0.0, 0.0, 1.2, 80f, -6f, false),
+            // 17,45–18,3 с (референс #2081–2186, один план): спереди-сверху на опущенную голову, шар за спиной;
+            // камера опускается к груди (руки над головой), потом снова сверху — игрок откидывается назад
+            ck(1048 / 3.0, A_PLAYER, 0.95, 0.0, 3.2, A_PLAYER, -0.2, 0.0, 1.45, 70f, 0f, true),
+            ck(355.3, A_PLAYER, 1.05, 0.1, 2.65, A_PLAYER, -0.1, 0.0, 1.55, 70f, 0f, false),
+            ck(359.3, A_PLAYER, 1.35, 0.0, 1.75, A_PLAYER, 0.0, 0.0, 1.6, 70f, 0f, false),
+            ck(361.8, A_PLAYER, 1.25, -0.2, 2.55, A_PLAYER, -0.25, 0.0, 1.05, 72f, 0f, false),
+            ck(366.0, A_PLAYER, 1.35, -0.3, 2.8, A_PLAYER, -0.3, 0.0, 0.95, 74f, 0f, false),
     };
 
     private static Vec3 anchor(Scene s, int a, double f, double r, double u, double t) {
@@ -1220,10 +1225,13 @@ public final class MaximumPurpleClient {
 
         BufferBuilder b = Tesselator.getInstance().getBuilder();
         b.begin(VertexFormat.Mode.QUADS, DefaultVertexFormat.POSITION_TEX_COLOR);
-        quadVertex(b, m, cx + left.x() * halfW + up.x() * halfH, cy + left.y() * halfW + up.y() * halfH, cz + left.z() * halfW + up.z() * halfH, u0, v0, 1f, 1f, 1f, alpha);
-        quadVertex(b, m, cx + left.x() * halfW - up.x() * halfH, cy + left.y() * halfW - up.y() * halfH, cz + left.z() * halfW - up.z() * halfH, u0, v1, 1f, 1f, 1f, alpha);
-        quadVertex(b, m, cx - left.x() * halfW - up.x() * halfH, cy - left.y() * halfW - up.y() * halfH, cz - left.z() * halfW - up.z() * halfH, u1, v1, 1f, 1f, 1f, alpha);
-        quadVertex(b, m, cx - left.x() * halfW + up.x() * halfH, cy - left.y() * halfW + up.y() * halfH, cz - left.z() * halfW + up.z() * halfH, u1, v0, 1f, 1f, 1f, alpha);
+        // референс: фон «космоса» почти чёрный, лучи тёмно-синие и проступают постепенно (#1816–1900)
+        float k = 0.18f + 0.42f * (float) smooth(win(t, T_SPACE, T_SPACE + 25));
+        float br = k * 0.75f, bg = k * 0.7f, bb = k;
+        quadVertex(b, m, cx + left.x() * halfW + up.x() * halfH, cy + left.y() * halfW + up.y() * halfH, cz + left.z() * halfW + up.z() * halfH, u0, v0, br, bg, bb, alpha);
+        quadVertex(b, m, cx + left.x() * halfW - up.x() * halfH, cy + left.y() * halfW - up.y() * halfH, cz + left.z() * halfW - up.z() * halfH, u0, v1, br, bg, bb, alpha);
+        quadVertex(b, m, cx - left.x() * halfW - up.x() * halfH, cy - left.y() * halfW - up.y() * halfH, cz - left.z() * halfW - up.z() * halfH, u1, v1, br, bg, bb, alpha);
+        quadVertex(b, m, cx - left.x() * halfW + up.x() * halfH, cy - left.y() * halfW + up.y() * halfH, cz - left.z() * halfW + up.z() * halfH, u1, v0, br, bg, bb, alpha);
         BufferUploader.drawWithShader(b.end());
 
         RenderSystem.depthFunc(GL11.GL_LEQUAL);
@@ -1679,10 +1687,25 @@ public final class MaximumPurpleClient {
             double grow = win(t, T_SPACE, T_MERGED);
             RenderSystem.setShader(GameRenderer::getPositionColorShader);
             HollowPurpleReferenceClient.mpAdditiveBlend();
-            for (int i = 0; i < 4; i++) {
-                double seed = Math.floor(t * 2.0) * 5.0 + i * 1.9;
-                HollowPurpleReferenceClient.mpArc(pose, camera, red, blue, 0.07f - i * 0.012f, 16, t, seed,
-                        i == 0 ? 11 : (i == 1 ? 10 : 8), 0.95f * space, 0.55f + i * 0.15f);
+            // референс: толстые сиренево-розовые «плазменные» молнии от шаров к ядру, мерцают каждые 2–3 кадра
+            for (int i = 0; i < 3; i++) {
+                double seed = Math.floor(t * 3.0) * 5.0 + i * 1.9;
+                HollowPurpleReferenceClient.mpArc(pose, camera, red, c, 0.16f - i * 0.04f, 14, t, seed, i == 0 ? 10 : 9, 0.9f * space, 0.6f + i * 0.2f);
+                HollowPurpleReferenceClient.mpArc(pose, camera, blue, c, 0.16f - i * 0.04f, 14, t, seed + 31.0, i == 0 ? 10 : 9, 0.9f * space, 0.6f + i * 0.2f);
+            }
+            // розово-белая плазма ядра и закрученные дуги-«серпы» вокруг
+            billboard(pose, cam, camera, c, (float) (4.5 + 2.5 * grow), (float) (t * 0.1), TEX_BLOOM, 0.85f, 0.45f, 1.0f, 0.75f * space, true);
+            billboard(pose, cam, camera, c, (float) (2.2 + 1.4 * grow), 0f, TEX_BLOOM, 1.0f, 0.85f, 1.0f, 0.95f * space, true);
+            Vec3 n0 = camera.subtract(c).normalize();
+            for (int i = 0; i < 5; i++) {
+                Vec3 n = n0.add(hashDir(i * 3.7).scale(0.6)).normalize();
+                HollowPurpleReferenceClient.mpRing(pose, camera, c, n, (float) (1.4 + 0.5 * i + 0.8 * grow), 0.07f, t * (0.6 + 0.2 * i),
+                        9, 10, 0.75f * space, 0.2f, 211.0 + i * 17.0, true);
+            }
+            for (int i = 0; i < 6; i++) {
+                double seed = Math.floor(t * 2.5) * 7.0 + i;
+                HollowPurpleReferenceClient.mpArc(pose, camera, c, c.add(hashDir(seed).scale(2.2 + 1.5 * hash(seed))), 0.09f, 10, t, seed, 10,
+                        0.85f * space, 0.5f);
             }
             HollowPurpleReferenceClient.mpPurple(pose, camera, c, s.forward, (float) (0.35 + 0.65 * grow), 1.0f, t, 1.0f, (float) grow);
             renderCore(pose, cam, camera, c, space, t, (float) (1.0 + 1.2 * grow));
@@ -2139,32 +2162,32 @@ public final class MaximumPurpleClient {
             drawFrame(g, w, h, INSERTS[idx], (t - 996 / 3.0) - idx / 1.5);
         }
 
-        // 16,9–17,45 с: белый закрученный взрыв на весь экран
-        float swirl = env(t, T_SWIRL, T_BEHIND, 0.5, 1.5);
+        // 16,87–16,97 с (референс #2004–2018): мир засвечен белым, по нему тёмно-фиолетовые трещины-молнии
+        if (t >= 1012 / 3.0 && t < 1018 / 3.0) {
+            fillColor(g, w, h, 0.9f, 0xF7F2FA);
+            drawCracks(g, w, h, t);
+        }
+        // 16,97–17,43 с: огромный закрученный фиолетовый шар (центр белый, лепестки с тёмно-фиолетовой кромкой),
+        // пульсирует; по углам виден мир
+        float swirl = env(t, 1018 / 3.0, T_BEHIND - 0.5, 0.3, 1.0);
         if (swirl > 0.0f) {
-            float white = (float) (1.0 - 0.75 * smooth(win(t, T_SWIRL, T_SWIRL + 4)));
-            fillColor(g, w, h, white * swirl, 0xFFF6FF);
-            drawSpinning(g, w, h, TEX_SWIRL, (float) (t * 0.32), (float) (1.6 + 0.6 * win(t, T_SWIRL, T_BEHIND)),
-                    0.85f * swirl * (float) smooth(win(t, T_SWIRL, T_SWIRL + 3)));
+            float pulse = 0.5f + 0.5f * (float) Math.sin(t * 1.6);
+            fillColor(g, w, h, (0.25f + 0.15f * pulse) * swirl, 0xFFF0FF);
+            float sc = (float) (1.05 + 0.08 * pulse + 0.25 * win(t, 1018 / 3.0, T_BEHIND));
+            drawSpinningTint(g, w, h, TEX_SWIRL, (float) (t * 0.32), sc * 1.04f, 0.35f, 0.08f, 0.6f, 0.8f * swirl);
+            drawSpinning(g, w, h, TEX_SWIRL, (float) (t * 0.32), sc, 0.9f * swirl);
+            drawSpinning(g, w, h, TEX_BLOOM, 0f, sc * 0.55f, (0.55f + 0.3f * pulse) * swirl);
         }
 
-        // 18,27–18,37 с (кадры 1096–1102): манга-кадр с рукой, 18,40 с (1104) — кадр с белым «X».
-        // Белой вспышки перед ними в референсе нет — поза сразу сменяется мангой.
-        if (t >= 1096 / 3.0 && t < 1104 / 3.0) {
-            drawFrame(g, w, h, MANGA_C1, t - T_MANGA_C);
-            // контур чёрным, сверху белый силуэт в позе Годжо и штриховка
-            for (int i = 0; i < 4; i++) {
-                float dx = (i % 2 == 0 ? 1.0f : -1.0f) * 2.5f, dy = (i < 2 ? 1.0f : -1.0f) * 2.5f;
-                drawSilhouetteAt(g, w, h, 0.0f, 0.0f, 0.0f, 1.55f, dx, dy, 110.0f);
-            }
-            drawSilhouetteAt(g, w, h, WHITE_TINT, WHITE_TINT, WHITE_TINT, 1.55f, 0.0f, 0.0f, 110.0f);
-            drawFrame(g, w, h, TEX_HATCH, 0.0);
-        } else if (t >= 1104 / 3.0 && t < 1106 / 3.0) {
-            drawFrame(g, w, h, MANGA_C2, t - 1104 / 3.0);
+        // референс 120 к/с #2187–2190: штриховка и кисть «пистолетом»; #2191–2201: белый «X» и контур кисти; #2202 — белый
+        if (t >= 366.0 && t < 366.7) {
+            drawFrame(g, w, h, MANGA_D1, t - 366.0);
+        } else if (t >= 366.7 && t < 368.7) {
+            drawFrame(g, w, h, MANGA_D2, (t - 366.7) * 0.3);
         }
 
         // 18,43 с (кадр 1106): сразу белый экран, пока дорезается кратер
-        if (t >= 1106 / 3.0) fillColor(g, w, h, 1.0f, 0xFFFFFF);
+        if (t >= 368.7) fillColor(g, w, h, 1.0f, 0xFFFFFF);
     }
 
     /** 3,40 с (кадр 204): чёрный кадр — слева белая звезда-крест, справа белый силуэт игрока. */
@@ -2204,6 +2227,44 @@ public final class MaximumPurpleClient {
         RenderSystem.defaultBlendFunc();
         RenderSystem.setShaderColor(1.0f, 1.0f, 1.0f, 1.0f);
         g.blit(frame, ox, oy, dw, dh, 0.0f, 0.0f, 1920, 1080, 1920, 1080);
+    }
+
+    private static void drawSpinningTint(GuiGraphics g, int w, int h, ResourceLocation texture, float angle, float scale,
+                                         float r, float gr, float b, float alpha) {
+        if (alpha <= 0.01f) return;
+        int size = (int) (Math.max(w, h) * scale);
+        g.pose().pushPose();
+        g.pose().translate(w / 2.0f, h / 2.0f, 0.0f);
+        g.pose().mulPose(Axis.ZP.rotation(angle));
+        RenderSystem.enableBlend();
+        RenderSystem.defaultBlendFunc();
+        RenderSystem.setShaderColor(r, gr, b, alpha);
+        g.blit(texture, -size / 2, -size / 2, size, size, 0.0f, 0.0f, 1024, 1024, 1024, 1024);
+        RenderSystem.setShaderColor(1.0f, 1.0f, 1.0f, 1.0f);
+        g.pose().popPose();
+    }
+
+    /** Тёмно-фиолетовые рваные трещины-молнии по белому кадру (меняются каждые 2 кадра видео). */
+    private static void drawCracks(GuiGraphics g, int w, int h, double t) {
+        double seed0 = Math.floor(t * 1.5) * 17.0;
+        for (int i = 0; i < 6; i++) {
+            double seed = seed0 + i * 5.3;
+            double x = w * (0.2 + 0.6 * hash(seed)), y = -h * 0.05;
+            double dir = (hash(seed + 1) - 0.5) * 0.8;
+            int th = Math.max(2, (int) (h * (0.006 + 0.012 * hash(seed + 2))));
+            for (int k = 0; k < 14 && y < h * 1.05; k++) {
+                double nx = x + (hash(seed + k * 3.1) - 0.5) * w * 0.08 + dir * h * 0.08;
+                double ny = y + h * (0.05 + 0.06 * hash(seed + k * 1.7));
+                int steps = 10;
+                for (int q = 0; q < steps; q++) {
+                    int px = (int) Mth.lerp(q / (double) steps, x, nx), py = (int) Mth.lerp(q / (double) steps, y, ny);
+                    g.fill(px - th, py - th, px + th, py + th, 0xE8240A3C);
+                    g.fill(px - th / 3, py - th / 3, px + th / 3 + 1, py + th / 3 + 1, 0xFF8A3CC8);
+                }
+                x = nx;
+                y = ny;
+            }
+        }
     }
 
     /** Квадратная текстура по центру экрана, вращается. */

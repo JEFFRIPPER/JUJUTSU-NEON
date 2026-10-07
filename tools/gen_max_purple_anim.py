@@ -135,20 +135,28 @@ key(268, torso__bend=25, head__pitch=17, rightLeg__pitch=-62, leftLeg__pitch=-72
 key(282, torso__bend=27, head__pitch=19, rightLeg__pitch=-66, leftLeg__pitch=-68)
 # ---- 283–349: темнота и космос (игрока не видно) — сжимается сильнее
 key(330, torso__bend=28, head__pitch=20)
-# ---- 350–358 (17,5–17,9 с): крупно спереди — руки скрещены перед лицом, фиолетовый за спиной
-key(348, rightArm__pitch=-118, rightArm__yaw=-58, rightArm__roll=4, rightArm__bend=-108, leftArm__pitch=-124,
-    leftArm__yaw=58, leftArm__roll=-4, leftArm__bend=-100, torso__bend=22, head__pitch=14,
-    rightLeg__pitch=-44, rightLeg__bend=74, leftLeg__pitch=-48, leftLeg__bend=78)
-key(353, rightArm__bend=-112, leftArm__bend=-104, torso__bend=24, head__pitch=16)
-key(358, ease="OUTQUAD", rightArm__pitch=-122, rightArm__bend=-114, leftArm__pitch=-128, leftArm__bend=-108,
-    torso__bend=26, head__pitch=18, rightLeg__bend=80, leftLeg__bend=84)
-# ---- 359–364 (17,95–18,2 с): выпрямляется — руки широко в стороны, грудь вперёд, голова назад, ноги врозь
-key(361, rightArm__pitch=-18, rightArm__yaw=0, rightArm__roll=78, rightArm__bend=-8, leftArm__pitch=-18,
-    leftArm__yaw=0, leftArm__roll=-78, leftArm__bend=-8, torso__bend=-20, torso__pitch=-6, torso__yaw=0,
-    head__pitch=-38, head__yaw=0, rightLeg__pitch=-6, rightLeg__roll=20, rightLeg__bend=10,
-    leftLeg__pitch=6, leftLeg__roll=-20, leftLeg__bend=12)
-key(364, rightArm__roll=84, leftArm__roll=-84, torso__bend=-23, head__pitch=-42, rightLeg__roll=22, leftLeg__roll=-22)
-key(380, rightArm__roll=82, leftArm__roll=-82, torso__bend=-21, head__pitch=-40)
+# ---- 349–366 (17,45–18,3 с): финал по референсу 120 к/с (#2081–2186), тик ≈ #/6 + 2.
+# #2081–2119: голова опущена вперёд, руки скрещены перед грудью/лицом
+key(348, rightArm__pitch=-112, rightArm__yaw=-58, rightArm__roll=4, rightArm__bend=-104, leftArm__pitch=-118,
+    leftArm__yaw=58, leftArm__roll=-4, leftArm__bend=-98, torso__bend=22, torso__pitch=0, head__pitch=42, head__yaw=0,
+    rightLeg__pitch=-20, rightLeg__bend=30, leftLeg__pitch=-24, leftLeg__bend=34, body__pitch=0, body__y=0.0)
+key(353, rightArm__pitch=-120, rightArm__bend=-110, leftArm__pitch=-126, leftArm__bend=-104, head__pitch=36)
+# #2120–2135: предплечья крест-накрест перед лицом
+key(356, rightArm__pitch=-132, rightArm__yaw=-50, rightArm__bend=-100, leftArm__pitch=-138, leftArm__yaw=50,
+    leftArm__bend=-96, torso__bend=14, head__pitch=18)
+key(358, rightArm__pitch=-138, leftArm__pitch=-142, head__pitch=14)
+# #2144–2151: скрещенные предплечья подняты над головой («крыша»), лицо открыто
+key(359, ease="OUTQUAD", rightArm__pitch=-168, rightArm__yaw=-38, rightArm__roll=8, rightArm__bend=-92,
+    leftArm__pitch=-170, leftArm__yaw=38, leftArm__roll=-8, leftArm__bend=-88, torso__bend=2, head__pitch=-4)
+# #2152–2158: правая рука остаётся согнутой над головой, левая раскрывается в сторону
+key(361, rightArm__pitch=-160, rightArm__yaw=-10, rightArm__roll=30, rightArm__bend=-70, leftArm__pitch=-40,
+    leftArm__yaw=0, leftArm__roll=-80, leftArm__bend=-10, torso__bend=-6, head__pitch=-14)
+# #2159–2186: откидывается далеко назад, руки широко в стороны, голова запрокинута
+key(362, ease="OUTQUAD", body__pitch=58, rightArm__pitch=-20, rightArm__yaw=0, rightArm__roll=86, rightArm__bend=-8,
+    leftArm__pitch=-20, leftArm__roll=-86, leftArm__bend=-8, torso__bend=-18, torso__pitch=0, head__pitch=-34,
+    rightLeg__pitch=-10, rightLeg__roll=12, rightLeg__bend=12, leftLeg__pitch=4, leftLeg__roll=-12, leftLeg__bend=16)
+key(366, body__pitch=62, rightArm__roll=88, leftArm__roll=-88, head__pitch=-38)
+key(380, body__pitch=62)
 key(408)
 
 END_TICK = 408

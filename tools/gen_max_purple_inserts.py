@@ -115,10 +115,71 @@ def insert_bubbles(rng):
     return img.convert("RGB")
 
 
+def hand_poly(cx, cy, s):
+    """Кисть «пистолетом» (блочная, своя рисовка): ладонь-кулак + вытянутый указательный палец влево."""
+    fist = [(cx - 0.05 * s, cy - 0.32 * s), (cx + 0.62 * s, cy - 0.38 * s), (cx + 0.70 * s, cy + 0.40 * s),
+            (cx + 0.02 * s, cy + 0.46 * s)]
+    finger = [(cx - 0.95 * s, cy - 0.40 * s), (cx + 0.10 * s, cy - 0.46 * s), (cx + 0.12 * s, cy - 0.12 * s),
+              (cx - 0.93 * s, cy - 0.10 * s)]
+    thumb = [(cx + 0.18 * s, cy - 0.30 * s), (cx + 0.42 * s, cy - 0.33 * s), (cx + 0.40 * s, cy + 0.05 * s),
+             (cx + 0.20 * s, cy + 0.06 * s)]
+    return fist, finger, thumb
+
+
+def sketch_poly(dr, poly, rng, color, strokes=5, width=3):
+    """Контур «от руки»: несколько дрожащих обводок."""
+    for _ in range(strokes):
+        pts = [(x + rng.uniform(-5, 5), y + rng.uniform(-5, 5)) for x, y in poly]
+        dr.line(pts + [pts[0]], fill=color, width=width)
+
+
+def hatch_inside(dr, poly, rng, color, n=40):
+    xs = [p[0] for p in poly]; ys = [p[1] for p in poly]
+    for _ in range(n):
+        x = rng.uniform(min(xs), max(xs)); y = rng.uniform(min(ys), max(ys))
+        dr.line([(x, y), (x + rng.uniform(10, 30), y + rng.uniform(-25, -8))], fill=color, width=2)
+
+
+def manga_hand(rng):
+    """Кадр 1: белая диагональная штриховка на чёрном, в центре кисть «пистолетом» белым скетчем."""
+    img = Image.new("RGB", (W, H), (0, 0, 0))
+    dr = ImageDraw.Draw(img)
+    for _ in range(420):
+        x = rng.uniform(-400, W + 200); y = rng.uniform(-200, H + 200)
+        L = rng.uniform(150, 700); w = rng.uniform(4, 22)
+        dr.line([(x, y), (x + L * 0.42, y - L)], fill=(255, 255, 255), width=int(w))
+    fist, finger, thumb = hand_poly(W * 0.5, H * 0.5, 420)
+    for poly in (finger, fist, thumb):
+        dr.polygon(poly, fill=(250, 250, 250))
+    for poly in (finger, fist, thumb):
+        sketch_poly(dr, poly, rng, (20, 20, 20), 4, 4)
+        hatch_inside(dr, poly, rng, (60, 60, 60), 30)
+    return img
+
+
+def manga_x(rng):
+    """Кадр 2: слева белый «X» на серо-чёрном градиенте, в центре контур кисти белыми штрихами на чёрном."""
+    x = np.linspace(1.0, 0.0, W, dtype=np.float32)
+    g = np.clip(x * 1.6 - 0.35, 0, 1) ** 1.4 * 95
+    base = np.repeat(np.repeat(g[None, :, None], H, 0), 3, 2)
+    img = Image.fromarray(base.astype(np.uint8))
+    dr = ImageDraw.Draw(img)
+    w = 95
+    dr.line([(-120, -60), (520, H + 60)], fill=(255, 255, 255), width=w)
+    dr.line([(520, -60), (-120, H + 60)], fill=(255, 255, 255), width=w)
+    fist, finger, thumb = hand_poly(W * 0.48, H * 0.47, 330)
+    for poly in (finger, fist, thumb):
+        sketch_poly(dr, poly, rng, (235, 235, 235), 6, 3)
+        hatch_inside(dr, poly, rng, (150, 150, 150), 14)
+    return img
+
+
 def main():
     rng = random.Random(1002)
     insert_collision(rng).save(OUT / "max_purple_insert_0.png", optimize=True)
     insert_bubbles(rng).save(OUT / "max_purple_insert_5.png", optimize=True)
+    manga_hand(rng).save(OUT / "max_purple_manga_d1.png", optimize=True)
+    manga_x(rng).save(OUT / "max_purple_manga_d2.png", optimize=True)
     print("ok")
 
 
