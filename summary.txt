@@ -1,0 +1,67 @@
+[17:21:35] [modloading-worker-0/ERROR] [ne.mi.fm.ja.FMLModContainer/LOADING]: Failed to register automatic subscribers. ModID: jujutsu_neon, class com.kira.jujutsuneon.JujutsuNeonMod
+Caused by: java.lang.ClassNotFoundException: dev.kosmx.playerAnim.api.layered.IAnimation
+[17:21:35] [Render thread/ERROR] [ne.mi.fm.ModLoader/]: Cowardly refusing to send event net.minecraftforge.client.event.sound.SoundEngineLoadEvent to a broken mod state
+[17:21:35] [Render thread/ERROR] [ne.mi.fm.ModLoader/]: Cowardly refusing to send event net.minecraftforge.client.event.RegisterColorHandlersEvent$Block to a broken mod state
+[17:21:35] [Render thread/ERROR] [ne.mi.fm.ModLoader/]: Cowardly refusing to send event net.minecraftforge.client.event.RegisterColorHandlersEvent$Item to a broken mod state
+[17:21:35] [Render thread/ERROR] [ne.mi.fm.ModLoader/]: Cowardly refusing to send event net.minecraftforge.client.event.RenderLevelStageEvent$RegisterStageEvent to a broken mod state
+[17:21:35] [Render thread/ERROR] [ne.mi.fm.ModLoader/]: Cowardly refusing to send event net.minecraftforge.client.event.RegisterParticleProvidersEvent to a broken mod state
+[17:21:35] [Render thread/ERROR] [ne.mi.fm.ModLoader/]: Cowardly refusing to send event net.minecraftforge.client.event.RegisterClientReloadListenersEvent to a broken mod state
+[17:21:35] [Render thread/ERROR] [ne.mi.fm.ModLoader/]: Cowardly refusing to send event net.minecraftforge.client.event.EntityRenderersEvent$RegisterLayerDefinitions to a broken mod state
+[17:21:35] [Render thread/ERROR] [ne.mi.fm.ModLoader/]: Cowardly refusing to send event net.minecraftforge.client.event.EntityRenderersEvent$RegisterRenderers to a broken mod state
+[17:21:35] [Render thread/ERROR] [ne.mi.fm.ModLoader/]: Cowardly refusing to send event net.minecraftforge.client.event.RegisterTextureAtlasSpriteLoadersEvent to a broken mod state
+[17:21:35] [Render thread/ERROR] [ne.mi.fm.ModLoader/]: Cowardly refusing to send event net.minecraftforge.client.event.RegisterClientTooltipComponentFactoriesEvent to a broken mod state
+[17:21:35] [Render thread/ERROR] [ne.mi.fm.ModLoader/]: Cowardly refusing to send event net.minecraftforge.client.event.RegisterEntitySpectatorShadersEvent to a broken mod state
+[17:21:35] [Render thread/ERROR] [ne.mi.fm.ModLoader/]: Cowardly refusing to send event net.minecraftforge.client.event.RegisterKeyMappingsEvent to a broken mod state
+[17:21:35] [Render thread/ERROR] [ne.mi.fm.ModLoader/]: Cowardly refusing to send event net.minecraftforge.client.event.RegisterRecipeBookCategoriesEvent to a broken mod state
+[17:21:35] [Render thread/ERROR] [ne.mi.fm.ModLoader/]: Cowardly refusing to send event net.minecraftforge.client.event.RegisterGuiOverlaysEvent to a broken mod state
+[17:21:35] [Render thread/ERROR] [ne.mi.fm.ModLoader/]: Cowardly refusing to send event net.minecraftforge.client.event.RegisterDimensionSpecialEffectsEvent to a broken mod state
+[17:21:35] [Render thread/ERROR] [ne.mi.fm.ModLoader/]: Cowardly refusing to send event net.minecraftforge.client.event.RegisterNamedRenderTypesEvent to a broken mod state
+[17:21:35] [Render thread/ERROR] [ne.mi.fm.ModLoader/]: Cowardly refusing to send event net.minecraftforge.client.event.RegisterColorHandlersEvent$ColorResolvers to a broken mod state
+[17:21:35] [Render thread/ERROR] [ne.mi.fm.ModLoader/]: Cowardly refusing to send event net.minecraftforge.client.event.RegisterItemDecorationsEvent to a broken mod state
+[17:21:35] [Render thread/ERROR] [ne.mi.fm.ModLoader/]: Cowardly refusing to send event net.minecraftforge.client.event.RegisterPresetEditorsEvent to a broken mod state
+[17:21:35] [Render thread/ERROR] [ne.mi.fm.ModLoader/]: Cowardly refusing to send event net.minecraftforge.client.event.ModelEvent$RegisterGeometryLoaders to a broken mod state
+[17:21:37] [Worker-Main-3/ERROR] [ne.mi.fm.ModLoader/]: Cowardly refusing to send event net.minecraftforge.client.event.ModelEvent$RegisterAdditional to a broken mod state
+[17:21:37] [Worker-Main-3/ERROR] [ne.mi.fm.ModLoader/]: Cowardly refusing to send event net.minecraftforge.client.event.ModelEvent$ModifyBakingResult to a broken mod state
+[17:21:38] [Render thread/ERROR] [minecraft/SoundEngine]: Error starting SoundSystem. Turning off sounds & music
+java.lang.IllegalStateException: Failed to open OpenAL device
+[17:21:38] [Render thread/ERROR] [ne.mi.fm.ModLoader/]: Cowardly refusing to send event net.minecraftforge.client.event.sound.SoundEngineLoadEvent to a broken mod state
+[17:21:38] [Render thread/ERROR] [ne.mi.fm.ModLoader/]: Cowardly refusing to send event net.minecraftforge.client.event.TextureStitchEvent$Post to a broken mod state
+[17:21:38] [Render thread/ERROR] [ne.mi.fm.ModLoader/]: Cowardly refusing to send event net.minecraftforge.client.event.TextureStitchEvent$Post to a broken mod state
+[17:21:38] [Render thread/ERROR] [ne.mi.fm.ModLoader/]: Cowardly refusing to send event net.minecraftforge.client.event.TextureStitchEvent$Post to a broken mod state
+[17:21:38] [Render thread/ERROR] [ne.mi.fm.ModLoader/]: Cowardly refusing to send event net.minecraftforge.client.event.TextureStitchEvent$Post to a broken mod state
+[17:21:38] [Render thread/ERROR] [ne.mi.fm.ModLoader/]: Cowardly refusing to send event net.minecraftforge.client.event.TextureStitchEvent$Post to a broken mod state
+[17:21:38] [Render thread/ERROR] [ne.mi.fm.ModLoader/]: Cowardly refusing to send event net.minecraftforge.client.event.TextureStitchEvent$Post to a broken mod state
+[17:21:38] [Render thread/ERROR] [ne.mi.fm.ModLoader/]: Cowardly refusing to send event net.minecraftforge.client.event.TextureStitchEvent$Post to a broken mod state
+[17:21:38] [Render thread/ERROR] [ne.mi.fm.ModLoader/]: Cowardly refusing to send event net.minecraftforge.client.event.TextureStitchEvent$Post to a broken mod state
+[17:21:38] [Render thread/ERROR] [ne.mi.fm.ModLoader/]: Cowardly refusing to send event net.minecraftforge.client.event.TextureStitchEvent$Post to a broken mod state
+[17:21:38] [Render thread/ERROR] [ne.mi.fm.ModLoader/]: Cowardly refusing to send event net.minecraftforge.client.event.ModelEvent$BakingCompleted to a broken mod state
+[17:21:38] [Render thread/ERROR] [ne.mi.fm.ModLoader/]: Cowardly refusing to send event net.minecraftforge.client.event.EntityRenderersEvent$CreateSkullModels to a broken mod state
+[17:21:38] [Render thread/ERROR] [ne.mi.fm.ModLoader/]: Cowardly refusing to send event net.minecraftforge.client.event.EntityRenderersEvent$CreateSkullModels to a broken mod state
+[17:21:38] [Render thread/ERROR] [ne.mi.fm.ModLoader/]: Cowardly refusing to send event net.minecraftforge.client.event.EntityRenderersEvent$CreateSkullModels to a broken mod state
+[17:21:38] [Render thread/ERROR] [ne.mi.fm.ModLoader/]: Cowardly refusing to send event net.minecraftforge.client.event.EntityRenderersEvent$CreateSkullModels to a broken mod state
+[17:21:38] [Render thread/ERROR] [ne.mi.fm.ModLoader/]: Cowardly refusing to send event net.minecraftforge.client.event.EntityRenderersEvent$CreateSkullModels to a broken mod state
+[17:21:38] [Render thread/ERROR] [ne.mi.fm.ModLoader/]: Cowardly refusing to send event net.minecraftforge.client.event.EntityRenderersEvent$CreateSkullModels to a broken mod state
+[17:21:38] [Render thread/ERROR] [ne.mi.fm.ModLoader/]: Cowardly refusing to send event net.minecraftforge.client.event.EntityRenderersEvent$CreateSkullModels to a broken mod state
+[17:21:38] [Render thread/ERROR] [ne.mi.fm.ModLoader/]: Cowardly refusing to send event net.minecraftforge.client.event.EntityRenderersEvent$CreateSkullModels to a broken mod state
+[17:21:38] [Render thread/ERROR] [ne.mi.fm.ModLoader/]: Cowardly refusing to send event net.minecraftforge.client.event.EntityRenderersEvent$CreateSkullModels to a broken mod state
+[17:21:38] [Render thread/ERROR] [ne.mi.fm.ModLoader/]: Cowardly refusing to send event net.minecraftforge.client.event.EntityRenderersEvent$CreateSkullModels to a broken mod state
+[17:21:38] [Render thread/ERROR] [ne.mi.fm.ModLoader/]: Cowardly refusing to send event net.minecraftforge.client.event.EntityRenderersEvent$CreateSkullModels to a broken mod state
+[17:21:38] [Render thread/ERROR] [ne.mi.fm.ModLoader/]: Cowardly refusing to send event net.minecraftforge.client.event.EntityRenderersEvent$CreateSkullModels to a broken mod state
+[17:21:38] [Render thread/ERROR] [ne.mi.fm.ModLoader/]: Cowardly refusing to send event net.minecraftforge.client.event.EntityRenderersEvent$CreateSkullModels to a broken mod state
+[17:21:38] [Render thread/ERROR] [ne.mi.fm.ModLoader/]: Cowardly refusing to send event net.minecraftforge.client.event.EntityRenderersEvent$CreateSkullModels to a broken mod state
+[17:21:38] [Render thread/ERROR] [ne.mi.fm.ModLoader/]: Cowardly refusing to send event net.minecraftforge.client.event.EntityRenderersEvent$CreateSkullModels to a broken mod state
+[17:21:38] [Render thread/ERROR] [ne.mi.fm.ModLoader/]: Cowardly refusing to send event net.minecraftforge.client.event.EntityRenderersEvent$CreateSkullModels to a broken mod state
+[17:21:38] [Render thread/ERROR] [ne.mi.fm.ModLoader/]: Cowardly refusing to send event net.minecraftforge.client.event.EntityRenderersEvent$CreateSkullModels to a broken mod state
+[17:21:38] [Render thread/ERROR] [ne.mi.fm.ModLoader/]: Cowardly refusing to send event net.minecraftforge.client.event.EntityRenderersEvent$CreateSkullModels to a broken mod state
+[17:21:38] [Render thread/ERROR] [ne.mi.fm.ModLoader/]: Cowardly refusing to send event net.minecraftforge.client.event.EntityRenderersEvent$CreateSkullModels to a broken mod state
+[17:21:38] [Render thread/ERROR] [ne.mi.fm.ModLoader/]: Cowardly refusing to send event net.minecraftforge.client.event.EntityRenderersEvent$CreateSkullModels to a broken mod state
+[17:21:38] [Render thread/ERROR] [ne.mi.fm.ModLoader/]: Cowardly refusing to send event net.minecraftforge.client.event.EntityRenderersEvent$CreateSkullModels to a broken mod state
+[17:21:38] [Render thread/ERROR] [ne.mi.fm.ModLoader/]: Cowardly refusing to send event net.minecraftforge.client.event.EntityRenderersEvent$AddLayers to a broken mod state
+[17:21:38] [Render thread/ERROR] [ne.mi.fm.ModLoader/]: Cowardly refusing to send event net.minecraftforge.client.event.RegisterShadersEvent to a broken mod state
+[17:21:38] [Render thread/ERROR] [ne.mi.fm.ModLoader/]: Cowardly refusing to send event net.minecraftforge.client.event.TextureStitchEvent$Post to a broken mod state
+[17:21:38] [Render thread/ERROR] [ne.mi.fm.ModLoader/]: Cowardly refusing to send event net.minecraftforge.client.event.TextureStitchEvent$Post to a broken mod state
+[17:21:38] [Render thread/ERROR] [ne.mi.fm.ModLoader/]: Cowardly refusing to send event net.minecraftforge.client.event.TextureStitchEvent$Post to a broken mod state
+java.lang.Exception: Mod Loading has failed
+	Caused by 0: java.lang.NoClassDefFoundError: dev/kosmx/playerAnim/api/layered/IAnimation
+	Exception message: java.lang.ClassNotFoundException: dev.kosmx.playerAnim.api.layered.IAnimation
+		main                                              |Jujutsu Neon ACTION VFX       |jujutsu_neon                  |1.9.0               |ERROR     |Manifest: NOSIGNATURE
