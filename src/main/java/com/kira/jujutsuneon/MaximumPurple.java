@@ -138,7 +138,9 @@ public final class MaximumPurple {
         if (t <= T_RISE_START) return 0.0;
         if (t >= T_RISE_END) return RISE_HEIGHT;
         double x = (t - T_RISE_START) / (double) (T_RISE_END - T_RISE_START);
-        return RISE_HEIGHT * x * x * x * (x * (x * 6.0 - 15.0) + 10.0);
+        // референс: игрок быстро взлетает (вне кадра), входит в кадр снизу ~12,3 с и медленно подходит под кольцо
+        double k = x * x * (3.0 - 2.0 * x);
+        return RISE_HEIGHT * (1.0 - Math.pow(1.0 - Math.min(1.0, x * 1.15), 4.0)) * 0.85 + RISE_HEIGHT * 0.15 * k;
     }
 
     // ------------------------------------------------------------------ packets
