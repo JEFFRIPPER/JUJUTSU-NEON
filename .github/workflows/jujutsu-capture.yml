@@ -11,6 +11,8 @@ on:
 jobs:
   capture:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
@@ -73,6 +75,30 @@ jobs:
           grep -a "jn-capture\|Exception\|ERROR" client.log | head -60
           ls run/screenshots | wc -l
           exit 0
+
+      - name: Push frames to branch
+        run: |
+          mkdir -p out
+          cp client.log out/ || true
+          grep -a "jn-capture\|Exception\|ERROR\|Caused by" client.log | head -300 > out/summary.txt || true
+          if ls run/screenshots/*.png > /dev/null 2>&1; then
+            python3 - <<'PY'
+          import glob, os
+          from PIL import Image
+          for p in sorted(glob.glob('run/screenshots/*.png')):
+              im = Image.open(p).convert('RGB')
+              im.save('out/' + os.path.basename(p)[:-4] + '.jpg', quality=85)
+          PY
+          fi
+          ls out | wc -l
+          cd out
+          git init -q
+          git config user.name "capture-bot"
+          git config user.email "capture-bot@users.noreply.github.com"
+          git checkout -q -b "capture-results/${GITHUB_RUN_ID}"
+          git add -A
+          git commit -q -m "capture ${GITHUB_RUN_ID}"
+          git push -q -f "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${GITHUB_REPOSITORY}.git" "capture-results/${GITHUB_RUN_ID}"
 
       - name: Upload frames
         uses: actions/upload-artifact@v4
