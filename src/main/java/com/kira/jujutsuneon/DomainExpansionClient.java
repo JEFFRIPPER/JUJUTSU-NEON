@@ -488,15 +488,24 @@ public final class DomainExpansionClient {
         player.setSprinting(false);
     }
 
-    /** Чат больше не открывается на T (только на «/»): T — Расширение территории. */
+    /**
+     * Раньше мод снимал чат с T (T была Расширением территории). Теперь территория на U, чат не трогаем;
+     * один раз возвращаем чат на T тем, у кого он остался без клавиши после старых версий.
+     */
     private static void checkChatKey(Minecraft mc) {
         if (chatChecked) return;
         chatChecked = true;
-        InputConstants.Key chat = mc.options.keyChat.getKey();
-        if (chat.getType() == InputConstants.Type.KEYSYM && chat.getValue() == GLFW.GLFW_KEY_T) {
-            mc.options.keyChat.setKey(InputConstants.UNKNOWN);
+        java.io.File flag = new java.io.File(mc.gameDirectory, "config/jujutsu_neon_chat_restored.txt");
+        if (flag.exists()) return;
+        if (mc.options.keyChat.isUnbound()) {
+            mc.options.keyChat.setKey(InputConstants.Type.KEYSYM.getOrCreate(GLFW.GLFW_KEY_T));
             KeyMapping.resetMapping();
             mc.options.save();
+        }
+        try {
+            flag.getParentFile().mkdirs();
+            java.nio.file.Files.writeString(flag.toPath(), "chat key restored once by Jujutsu Neon 1.7.1\n");
+        } catch (java.io.IOException ignored) {
         }
     }
 

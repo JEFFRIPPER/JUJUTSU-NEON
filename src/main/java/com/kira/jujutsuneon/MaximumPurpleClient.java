@@ -474,18 +474,6 @@ public final class MaximumPurpleClient {
         return s.right.scale(Math.cos(angle) * radius).add(s.forward.scale(Math.sin(angle) * radius * squash));
     }
 
-    /** Перпендикулярная спираль вокруг пути полёта, радиус сходится к нулю. */
-    private static Vec3 spiralAround(Scene s, Vec3 axis, double p, double turns, double radius0) {
-        Vec3 dir = axis.lengthSqr() < 1.0E-6 ? new Vec3(0, 1, 0) : axis.normalize();
-        Vec3 side = dir.cross(new Vec3(0, 1, 0));
-        if (side.lengthSqr() < 1.0E-4) side = s.right;
-        side = side.normalize();
-        Vec3 up = side.cross(dir).normalize();
-        double r = radius0 * Math.pow(1.0 - p, 1.3);
-        double a = turns * Math.PI * 2.0 * (1.0 - (1.0 - p) * (1.0 - p));
-        return side.scale(Math.cos(a) * r).add(up.scale(Math.sin(a) * r));
-    }
-
     // ------------------------------------------------------------------ orb paths
 
     /** Угол погони: сначала 1 оборот за 0,75 с, в кольце — ещё быстрее. */
@@ -527,37 +515,59 @@ public final class MaximumPurpleClient {
                 .add(0.0, 0.18 * Math.sin(t * 0.21 + (blue ? 1.3 : 0.0)), 0.0);
     }
 
-    /** Синий в ладони, пока персонаж на него смотрит. */
-    private static final int T_SWEEP = 34;
+    /** Замах (питчер) — с 38 рука идёт хлёстом вперёд; 41 — Синий отпущен. */
+    private static final int T_SWEEP = 38;
     private static final int T_RELEASE = 41;
 
     /**
-     * Толчок Синего: рука проводит по воздуху четверть круга по диагонали (плоскость наклонена
-     * на 45° — снизу-справа вверх-влево) и отпускает шар. theta от -45° до +45°.
+     * Ладонь правой руки по ключам анимации max_purple.json (прямая кинематика, tools/gen_max_purple_anim.py):
+     * тик, вперёд, вправо, вверх от ног. Синий лежит на ладони и идёт за рукой: в ладони → замах за плечо → бросок.
      */
-    private static Vec3 sweepPos(Scene s, double theta, double t) {
-        double c = Math.cos(theta) * 0.62, sn = Math.sin(theta) * 0.62;
-        // F = вперёд, U' = (вверх - вправо) / sqrt(2)
-        return s.atP(0.08 + c, 0.32 - sn * 0.7071, 1.62 + sn * 0.7071, t);
+    private static final double[][] BLUE_HAND = {
+            {12, 0.50, 0.27, 1.27},
+            {18, 0.50, 0.26, 1.29},
+            {25, 0.51, 0.26, 1.29},
+            {28, 0.12, 0.62, 1.56},
+            {33, -0.18, 0.51, 1.60},
+            {38, -0.21, 0.49, 1.59},
+            {41, 0.39, 0.25, 1.70},
+    };
+
+    private static Vec3 handPos(Scene s, double t) {
+        double[][] H = BLUE_HAND;
+        if (t <= H[0][0]) return s.atP(H[0][1], H[0][2], H[0][3], t);
+        int i = 0;
+        while (i + 2 < H.length && t > H[i + 1][0]) i++;
+        double k = clamp01((t - H[i][0]) / (H[i + 1][0] - H[i][0]));
+        // замах плавно, бросок (38→41) — с разгоном, как хлёст руки
+        k = H[i][0] >= T_SWEEP ? k * k : smooth(k);
+        return s.atP(Mth.lerp(k, H[i][1], H[i + 1][1]), Mth.lerp(k, H[i][2], H[i + 1][2]),
+                Mth.lerp(k, H[i][3], H[i + 1][3]), t);
+    }
+
+    /** После броска: Синий по спирали поднимается вокруг персонажа (1,75 витка, радиус растёт), потом уходит в небо. */
+    private static final int T_HELIX_END = 60;
+
+    private static Vec3 helixPos(Scene s, double t) {
+        double[] r0 = BLUE_HAND[BLUE_HAND.length - 1];
+        double a0 = Math.atan2(r0[1], r0[2]);
+        double rad0 = Math.sqrt(r0[1] * r0[1] + r0[2] * r0[2]);
+        double p = win(t, T_RELEASE, T_HELIX_END);
+        double ang = a0 + Math.PI * 2.0 * 1.75 * (1.0 - Math.pow(1.0 - p, 1.6));
+        double rad = rad0 + 2.0 * smooth(p);
+        double h = r0[3] + 10.0 * Math.pow(p, 1.5);
+        return s.at(0.0, 0.0, h).add(circle(s, ang, rad, 1.0));
     }
 
     /** Позиция Синего или null. */
     private static Vec3 bluePos(Scene s, double t) {
         if (t < T_BLUE_SPAWN - 1 || t >= T_MERGED) return null;
-        if (t < T_SWEEP) {
-            return sweepPos(s, -Math.PI / 4.0, t).add(0.0, 0.02 * Math.sin(t * 0.35), 0.0);
-        }
-        if (t < T_RELEASE) {
-            double k = win(t, T_SWEEP, T_RELEASE);
-            return sweepPos(s, -Math.PI / 4.0 + Math.PI / 2.0 * k * k, t);
-        }
-        Vec3 top = sweepPos(s, Math.PI / 4.0, T_RELEASE);
+        if (t < T_RELEASE) return handPos(s, t).add(0.0, t < 28 ? 0.02 * Math.sin(t * 0.35) : 0.0, 0.0);
         Vec3 b1 = s.at(-2.5, -7.0, 25.0);
+        if (t < T_HELIX_END) return helixPos(s, t);
         if (t < T_SKY) {
-            double p = win(t, T_RELEASE, 66);
-            Vec3 base = lerp(top, b1, easeOut(p));
-            Vec3 pos = base.add(spiralAround(s, b1.subtract(top), p, 3.0, 1.7 * smooth(win(t, T_RELEASE, 45))));
-            return pos.add(0.0, 0.08 * Math.sin(t * 0.2) * smooth(win(t, 66, 72)), 0.0);
+            Vec3 pos = lerp(helixPos(s, T_HELIX_END), b1, smooth(win(t, T_HELIX_END, 70)));
+            return pos.add(0.0, 0.08 * Math.sin(t * 0.2) * smooth(win(t, 70, 76)), 0.0);
         }
 
         Vec3 b2 = s.at(3.5, 1.0, 29.5);
@@ -1225,7 +1235,7 @@ public final class MaximumPurpleClient {
                 ribbon(pose, camera, pts, 0.09f, 0.02f, purple ? 0.6f : 0.2f, purple ? 0.2f : 0.5f, 1.0f, 0.9f * streaks, 0.0f);
             }
             float burst = env(t, T_BLUE_THROW, T_BLUE_THROW + 8, 1.0, 6.0);
-            billboard(pose, cam, camera, sweepPos(s, Math.PI / 4.0, t), 6.0f * burst, 0f, TEX_BLOOM, 0.3f, 0.6f, 1.0f, 0.9f * burst, true);
+            billboard(pose, cam, camera, handPos(s, T_RELEASE), 6.0f * burst, 0f, TEX_BLOOM, 0.3f, 0.6f, 1.0f, 0.9f * burst, true);
         }
 
         // ---- Синий
@@ -1458,7 +1468,7 @@ public final class MaximumPurpleClient {
         }
         // бросок: синий взрыв
         if (t >= T_RELEASE && t < T_RELEASE + 2) {
-            Vec3 top = sweepPos(s, Math.PI / 4.0, t);
+            Vec3 top = handPos(s, T_RELEASE);
             for (int i = 0; i < 12; i++) {
                 boolean white = RNG.nextInt(3) == 0;
                 spark(top, rndVec(0.3), 0.22f, white ? 0.9f : 0.3f, white ? 0.95f : 0.6f, 1.0f, 8, 0.8);

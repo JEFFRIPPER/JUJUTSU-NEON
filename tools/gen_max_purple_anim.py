@@ -50,18 +50,25 @@ key(12, rightArm__pitch=-62, rightArm__yaw=2, rightArm__roll=30, rightArm__bend=
 # ---- 14–33 (0,7–1,65 с): Синий в ладони, персонаж смотрит на него («дышит»)
 key(18, head__pitch=26, head__yaw=-12, torso__bend=10, rightArm__bend=-34)
 key(25, head__pitch=22, head__yaw=-10, torso__bend=8, rightArm__pitch=-66, rightArm__bend=-28)
-key(31, head__pitch=26, head__yaw=-12, torso__bend=11, rightArm__pitch=-60, rightArm__bend=-34,
-    body__y=-0.04, rightLeg__bend=12, leftLeg__bend=8)
-# ---- 34–41 (1,7–2,05 с): рука проводит по воздуху четверть круга по диагонали (~45°) вверх-влево
-#      и отпускает Синего — он уходит по спирали
-key(34, ease="INQUAD", rightArm__pitch=-56, rightArm__yaw=6, rightArm__roll=34, rightArm__bend=-24,
-    torso__yaw=-14, torso__bend=10, head__pitch=18, head__yaw=-10)
-key(38, ease="LINEAR", rightArm__pitch=-104, rightArm__yaw=-10, rightArm__roll=16, rightArm__bend=-12,
-    torso__yaw=-2, torso__bend=2, head__pitch=0, head__yaw=-4, body__y=0.0, rightLeg__bend=6, leftLeg__bend=4)
-key(41, ease="OUTQUAD", rightArm__pitch=-156, rightArm__yaw=-28, rightArm__roll=2, rightArm__bend=-6,
-    torso__yaw=10, torso__bend=-6, torso__pitch=-2, head__pitch=-26, head__yaw=0)
-key(46, rightArm__pitch=-166, rightArm__yaw=-30, rightArm__bend=-10, torso__yaw=12, torso__bend=-8,
-    head__pitch=-42)
+# ---- 28–41 (1,4–2,05 с): замах как у питчера — корпус разворачивается вбок (правое плечо назад),
+#      локоть на уровне плеча в сторону, предплечье вверх, Синий за плечом; вес на задней ноге
+key(28, rightArm__pitch=-50, rightArm__yaw=60, rightArm__roll=30, rightArm__bend=-80, torso__yaw=15,
+    torso__bend=4, head__pitch=8, head__yaw=0, rightLeg__bend=10, leftLeg__bend=6)
+key(33, rightArm__pitch=20, rightArm__yaw=90, rightArm__roll=100, rightArm__bend=-90, torso__yaw=40,
+    torso__bend=-4, torso__pitch=0, head__pitch=2, leftArm__pitch=-70, leftArm__roll=-14, leftArm__bend=-20,
+    rightLeg__pitch=8, rightLeg__bend=24, leftLeg__pitch=-26, leftLeg__bend=16, body__y=-0.05)
+key(38, ease="INQUAD", rightArm__pitch=26, rightArm__roll=104, torso__yaw=46, torso__bend=-6, leftArm__pitch=-78,
+    rightLeg__bend=28, leftLeg__pitch=-30)
+# ---- 41: бросок — корпус резко доворачивается, рука хлёстом вперёд-вверх и отпускает Синего
+key(41, ease="OUTQUAD", rightArm__pitch=-130, rightArm__yaw=0, rightArm__roll=-20, rightArm__bend=-10,
+    torso__yaw=-25, torso__bend=16, torso__pitch=0, head__pitch=-6, leftArm__pitch=-20, leftArm__roll=-24,
+    leftArm__bend=-50, rightLeg__pitch=26, rightLeg__bend=20, leftLeg__pitch=-20, leftLeg__bend=12, body__y=-0.02)
+# ---- 44–53: провожает взглядом — Синий по спирали поднимается вокруг, голова вверх
+key(44, rightArm__pitch=-160, rightArm__yaw=-10, rightArm__roll=0, rightArm__bend=-12, torso__yaw=-28,
+    torso__bend=6, head__pitch=-30)
+key(48, rightArm__pitch=-120, rightArm__bend=-20, torso__yaw=-12, torso__bend=0, head__pitch=-46,
+    leftArm__pitch=-12, leftArm__bend=-20, rightLeg__pitch=6, rightLeg__bend=8, leftLeg__pitch=-4, leftLeg__bend=6,
+    body__y=0.0)
 key(53, rightArm__pitch=-40, rightArm__yaw=-4, rightArm__roll=10, rightArm__bend=-22, torso__yaw=-2,
     torso__bend=0, torso__pitch=0, head__pitch=-24, leftArm__pitch=-10, leftArm__roll=-10, leftArm__bend=-16,
     rightLeg__pitch=0, rightLeg__bend=6, leftLeg__pitch=0, leftLeg__bend=4)

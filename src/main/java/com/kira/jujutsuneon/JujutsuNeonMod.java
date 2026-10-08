@@ -4710,9 +4710,9 @@ public class JujutsuNeonMod {
         );
 
         public static final KeyMapping DOMAIN_EXPANSION_KEY = new KeyMapping(
-                "T: Расширение территории (повторно — разрушить)",
+                "U (рус. Г): Расширение территории (повторно — разрушить)",
                 InputConstants.Type.KEYSYM,
-                GLFW.GLFW_KEY_T,
+                GLFW.GLFW_KEY_U,
                 CATEGORY
         );
 
