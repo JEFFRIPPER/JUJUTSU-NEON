@@ -504,7 +504,7 @@ public final class DomainExpansionClient {
         }
         try {
             flag.getParentFile().mkdirs();
-            java.nio.file.Files.writeString(flag.toPath(), "chat key restored once by Jujutsu Neon 1.7.1\n");
+            java.nio.file.Files.writeString(flag.toPath(), "chat key restored once by Jujutsu Neon\n");
         } catch (java.io.IOException ignored) {
         }
     }

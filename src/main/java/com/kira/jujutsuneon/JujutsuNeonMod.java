@@ -281,6 +281,7 @@ public class JujutsuNeonMod {
         CursedFx.init();
         SimpleDomain.init();
         M1Combo.init();
+        FrameAnimNet.init();
         MovementFx.init();
         modBus.addListener(this::addToCreativeTab);
 
