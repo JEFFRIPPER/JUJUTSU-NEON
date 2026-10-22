@@ -21,6 +21,11 @@ minecraft {
             workingDirectory project.file('run')
             property 'forge.logging.markers', 'REGISTRIES'
             property 'forge.logging.console.level', 'info'
+            if (project.hasProperty('jnDevLibs')) {
+                // миксины библиотек ссылаются на SRG-имена: в dev-запуске их надо перевести
+                property 'mixin.env.remapRefMap', 'true'
+                property 'mixin.env.refMapRemappingFile', "${projectDir}/build/createSrgToMcp/output.srg"
+            }
             mods {
                 "${mod_id}" {
                     source sourceSets.main
