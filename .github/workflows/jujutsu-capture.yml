@@ -37,15 +37,20 @@ jobs:
       - name: Install tools
         timeout-minutes: 15
         run: |
-          # зеркала apt иногда зависают: ограничиваем время и пробуем ещё раз
-          for i in 1 2 3; do
-            sudo dpkg --configure -a || true
-            sudo timeout 180 apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 update -qq \
-              && sudo timeout 300 apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 install -y -qq \
-                   ffmpeg xvfb mesa-utils libgl1-mesa-dri libegl1 libglx-mesa0 > /dev/null \
-              && break
-            echo "apt не ответил, попытка $i"; sleep 5
-          done
+          # ffmpeg (статическая сборка с libvorbis) из PyPI: apt-зеркала GitHub иногда виснут на десятки минут
+          python3 -m pip install --quiet imageio-ffmpeg==0.6.0
+          sudo ln -sf "$(python3 -c 'import imageio_ffmpeg; print(imageio_ffmpeg.get_ffmpeg_exe())')" /usr/local/bin/ffmpeg
+          # Xvfb и программный OpenGL обычно уже есть в образе; apt — только если чего-то не хватает
+          PKGS="xvfb libgl1-mesa-dri libegl1 libglx-mesa0"
+          if ! dpkg -s $PKGS > /dev/null 2>&1; then
+            for i in 1 2 3; do
+              sudo dpkg --configure -a || true
+              sudo timeout 180 apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 update -qq \
+                && sudo timeout 300 apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 install -y -qq $PKGS > /dev/null \
+                && break
+              echo "apt не ответил, попытка $i"; sleep 5
+            done
+          fi
           command -v ffmpeg && command -v xvfb-run
 
       - name: Generate resources
@@ -85,7 +90,18 @@ jobs:
           MESA_GL_VERSION_OVERRIDE: '4.5'
         run: |
           set +e
-          timeout 40m xvfb-run -a -s "-screen 0 1280x720x24" gradle runClient --no-daemon -PjnDevLibs > client.log 2>&1
+          timeout 40m xvfb-run -a -s "-screen 0 1280x720x24" gradle runClient --no-daemon -PjnDevLibs > client.log 2>&1 &
+          GAME=$!
+          # если мод не загрузился, игра висит на экране ошибки до таймаута — выходим сразу
+          while kill -0 $GAME 2> /dev/null; do
+            if grep -aq "Mod Loading has failed" client.log 2> /dev/null; then
+              echo "мод не загрузился, останавливаю игру"
+              sleep 5; pkill java
+              break
+            fi
+            sleep 10
+          done
+          wait $GAME
           echo "exit=$?"
           grep -a "jn-capture\|Exception\|ERROR" client.log | head -60
           ls run/screenshots | wc -l
