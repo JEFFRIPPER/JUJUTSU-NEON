@@ -1,0 +1,143 @@
+{
+ "format": "jn_anim",
+ "description": "Взлёт: выстрел вверх с руками над головой, потом руки раскрываются.",
+ "time": "seconds",
+ "length": 1.2,
+ "loop": false,
+ "ease": "smooth",
+ "keys": [
+  {
+   "t": 0.0,
+   "pose": {
+    "body.y": 0,
+    "body.pitch": -7,
+    "torso.pitch": 18,
+    "rightLeg": [
+     -44,
+     0,
+     3,
+     84
+    ],
+    "leftLeg": [
+     -40,
+     0,
+     -3,
+     80
+    ],
+    "rightArm": [
+     30,
+     0,
+     7,
+     -18
+    ],
+    "leftArm": [
+     30,
+     0,
+     -7,
+     -18
+    ],
+    "head.pitch": 0
+   }
+  },
+  {
+   "t": 0.15,
+   "pose": {
+    "body.y": 0,
+    "body.pitch": -4,
+    "torso.pitch": -5,
+    "head.pitch": -12,
+    "rightLeg": [
+     8,
+     0,
+     2,
+     4
+    ],
+    "leftLeg": [
+     -2,
+     0,
+     -2,
+     6
+    ],
+    "rightArm": [
+     -164,
+     0,
+     18,
+     -10
+    ],
+    "leftArm": [
+     -164,
+     0,
+     -18,
+     -10
+    ]
+   },
+   "ease": "out"
+  },
+  {
+   "t": 0.55,
+   "pose": {
+    "body.y": 0,
+    "body.pitch": 3,
+    "torso.pitch": 1,
+    "head.pitch": 0,
+    "rightLeg": [
+     16,
+     0,
+     4,
+     32
+    ],
+    "leftLeg": [
+     -6,
+     0,
+     -3,
+     16
+    ],
+    "rightArm": [
+     -30,
+     0,
+     38,
+     -22
+    ],
+    "leftArm": [
+     -26,
+     0,
+     -40,
+     -20
+    ]
+   }
+  },
+  {
+   "t": 1.2,
+   "pose": {
+    "body.y": 0,
+    "body.pitch": 3,
+    "torso.pitch": 1,
+    "head.pitch": 0,
+    "rightLeg": [
+     16,
+     0,
+     4,
+     32
+    ],
+    "leftLeg": [
+     -6,
+     0,
+     -3,
+     16
+    ],
+    "rightArm": [
+     -30,
+     0,
+     38,
+     -22
+    ],
+    "leftArm": [
+     -26,
+     0,
+     -40,
+     -20
+    ]
+   }
+  }
+ ]
+}

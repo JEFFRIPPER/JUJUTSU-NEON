@@ -1,0 +1,64 @@
+{
+ "format": "jn_anim",
+ "description": "Покой: дыхание, руки чуть расходятся, вес переносится с ноги на ногу.",
+ "time": "seconds",
+ "length": 4.0,
+ "loop": true,
+ "ease": "smooth",
+ "keys": [
+  {
+   "t": 0.0,
+   "pose": {
+    "torso.pitch": 1.0,
+    "body.y": 0.0,
+    "body.roll": 0.5,
+    "head.pitch": 0.0,
+    "rightArm": [
+     1,
+     0,
+     3.5,
+     -4
+    ],
+    "leftArm": [
+     1,
+     0,
+     -3.5,
+     -4
+    ],
+    "rightLeg": [
+     0,
+     0,
+     1.5,
+     1
+    ],
+    "leftLeg": [
+     0,
+     0,
+     -1.5,
+     1
+    ]
+   }
+  },
+  {
+   "t": 2.0,
+   "pose": {
+    "torso.pitch": 2.2,
+    "body.y": -0.006,
+    "body.roll": -0.5,
+    "head.pitch": 1.2,
+    "rightArm": [
+     -1,
+     0,
+     5,
+     -6
+    ],
+    "leftArm": [
+     -1,
+     0,
+     -5,
+     -6
+    ]
+   }
+  }
+ ]
+}

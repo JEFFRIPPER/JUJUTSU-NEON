@@ -1,0 +1,106 @@
+{
+ "format": "jn_anim",
+ "description": "Присед перед заряженным прыжком: колени сгибаются, руки уходят назад для замаха.",
+ "time": "seconds",
+ "length": 1.2,
+ "loop": false,
+ "ease": "smooth",
+ "keys": [
+  {
+   "t": 0.0,
+   "pose": {
+    "body.y": 0,
+    "body.pitch": 0,
+    "torso.pitch": 2,
+    "rightLeg": [
+     0,
+     0,
+     1,
+     2
+    ],
+    "leftLeg": [
+     0,
+     0,
+     -1,
+     2
+    ],
+    "rightArm": [
+     0,
+     0,
+     4,
+     -6
+    ],
+    "leftArm": [
+     0,
+     0,
+     -4,
+     -6
+    ]
+   }
+  },
+  {
+   "t": 0.75,
+   "pose": {
+    "body.y": 0,
+    "body.pitch": -7,
+    "torso.pitch": 18,
+    "rightLeg": [
+     -44,
+     0,
+     3,
+     84
+    ],
+    "leftLeg": [
+     -40,
+     0,
+     -3,
+     80
+    ],
+    "rightArm": [
+     30,
+     0,
+     7,
+     -18
+    ],
+    "leftArm": [
+     30,
+     0,
+     -7,
+     -18
+    ]
+   }
+  },
+  {
+   "t": 1.2,
+   "pose": {
+    "body.y": 0,
+    "body.pitch": -7,
+    "torso.pitch": 18,
+    "rightLeg": [
+     -44,
+     0,
+     3,
+     84
+    ],
+    "leftLeg": [
+     -40,
+     0,
+     -3,
+     80
+    ],
+    "rightArm": [
+     32,
+     0,
+     8,
+     -20
+    ],
+    "leftArm": [
+     32,
+     0,
+     -8,
+     -20
+    ]
+   }
+  }
+ ]
+}

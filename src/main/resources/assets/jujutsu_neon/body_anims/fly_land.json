@@ -1,0 +1,41 @@
+{
+ "format": "jn_anim",
+ "description": "Посадка из полёта: ноги вниз, руки в стороны.",
+ "time": "seconds",
+ "length": 1.0,
+ "loop": true,
+ "ease": "smooth",
+ "keys": [
+  {
+   "t": 0.0,
+   "pose": {
+    "body.pitch": 6,
+    "torso.pitch": 3.6,
+    "rightLeg": [
+     -6,
+     0,
+     4,
+     10
+    ],
+    "leftLeg": [
+     4,
+     0,
+     -4,
+     8
+    ],
+    "rightArm": [
+     -28,
+     0,
+     36,
+     -18
+    ],
+    "leftArm": [
+     -24,
+     0,
+     -36,
+     -18
+    ]
+   }
+  }
+ ]
+}

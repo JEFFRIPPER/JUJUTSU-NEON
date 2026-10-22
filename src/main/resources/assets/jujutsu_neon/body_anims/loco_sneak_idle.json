@@ -1,0 +1,59 @@
+{
+ "format": "jn_anim",
+ "description": "Присед на месте: колени согнуты, корпус вперёд, руки перед собой.",
+ "time": "seconds",
+ "length": 3.0,
+ "loop": true,
+ "ease": "smooth",
+ "keys": [
+  {
+   "t": 0.0,
+   "pose": {
+    "torso.pitch": 24,
+    "head.pitch": 0,
+    "rightLeg": [
+     -36,
+     0,
+     4,
+     72
+    ],
+    "leftLeg": [
+     -30,
+     0,
+     -4,
+     62
+    ],
+    "rightArm": [
+     -20,
+     0,
+     7,
+     -30
+    ],
+    "leftArm": [
+     -20,
+     0,
+     -7,
+     -30
+    ]
+   }
+  },
+  {
+   "t": 1.5,
+   "pose": {
+    "torso.pitch": 25.5,
+    "rightArm": [
+     -22,
+     0,
+     8,
+     -33
+    ],
+    "leftArm": [
+     -22,
+     0,
+     -8,
+     -33
+    ]
+   }
+  }
+ ]
+}
