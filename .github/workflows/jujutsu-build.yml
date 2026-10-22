@@ -27,9 +27,17 @@ jobs:
           gradle-version: '8.1.1'
 
       - name: Install audio tools
+        timeout-minutes: 15
         run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq ffmpeg
+          # зеркала apt иногда зависают: ограничиваем время и пробуем ещё раз
+          for i in 1 2 3; do
+            sudo dpkg --configure -a || true
+            sudo timeout 180 apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 update -qq \
+              && sudo timeout 300 apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 install -y -qq ffmpeg \
+              && break
+            echo "apt не ответил, попытка $i"; sleep 5
+          done
+          command -v ffmpeg
 
       - name: Generate 4K resources and audio
         run: |
