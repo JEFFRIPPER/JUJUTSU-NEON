@@ -118,6 +118,64 @@ public final class Rig {
         p.bendAxis = pose.bendAxis[k];
     }
 
+    // ------------------------------------------------------------------ смесь с ванилью
+    //
+    // Player Animator спрашивает каждую часть по очереди: сначала точку вращения (с ванильной в v0),
+    // потом углы (с ванильными), потом сгиб. Кость с долей ванили берёт ванильный поворот как свой:
+    // рука с луком или щитом остаётся пристёгнутой к нашему корпусу. Если ванильный сам корпус —
+    // голова и руки встают на ванильные места.
+
+    private final double[] qv = new double[4], qa = new double[4], qb = new double[4];
+
+    /** Точка вращения части: наша, сдвинутая к ванильной на долю ванили. */
+    public void blendPivot(Pose pose, Output ours, Joint j, double[] vanPivot, double[] res) {
+        double k = pivotVanilla(pose, j);
+        double[] p = ours.parts[j.ordinal()].pivot;
+        for (int i = 0; i < 3; i++) res[i] = p[i] + (vanPivot[i] - p[i]) * k;
+    }
+
+    private static double pivotVanilla(Pose pose, Joint j) {
+        return switch (j) {
+            case RIGHT_LEG, LEFT_LEG -> AnimMath.clamp01(pose.vanilla[j.ordinal()]);
+            case HEAD, RIGHT_ARM, LEFT_ARM, WAIST -> AnimMath.clamp01(pose.vanilla[Joint.WAIST.ordinal()]);
+            default -> 1;
+        };
+    }
+
+    /** Углы ModelPart части (радианы) с учётом ванили; vanEuler — ванильные углы. */
+    public void blendRotation(Pose pose, Output ours, Joint j, double[] vanEuler, double[] res) {
+        int k = j.ordinal(), w = Joint.WAIST.ordinal();
+        double vj = AnimMath.clamp01(pose.vanilla[k]);
+        double vw = AnimMath.clamp01(pose.vanilla[w]);
+        AnimMath.fromEuler(vanEuler[0], vanEuler[1], vanEuler[2], qv);
+        switch (j) {
+            case WAIST -> AnimMath.slerp(ours.parts[k].rot, qv, vw, qa);
+            case RIGHT_LEG, LEFT_LEG -> AnimMath.slerp(pose.rot[k], qv, vj, qa);
+            case HEAD, RIGHT_ARM, LEFT_ARM -> {
+                // свой поворот кости (с ванильной долей) — в кадре нашего корпуса и в ванильном кадре
+                AnimMath.slerp(pose.rot[k], qv, vj, qb);
+                AnimMath.mul(pose.rot[w], qb, qa);
+                AnimMath.slerp(qa, qb, vw, qa);
+            }
+            default -> AnimMath.copy4(qv, qa);
+        }
+        AnimMath.toEuler(qa, res);
+    }
+
+    /** Сгиб части (радианы) с учётом ванили (у ванили сгиба нет). */
+    public static double blendBend(Pose pose, Output ours, Joint j) {
+        if (j == Joint.WAIST || j == Joint.HEAD || j == Joint.ROOT) return 0;
+        return ours.parts[j.ordinal()].bend * (1 - AnimMath.clamp01(pose.vanilla[j.ordinal()]));
+    }
+
+    /** Углы всего тела с учётом ванили (vanEuler — что пришло от нижних слоёв, обычно нули). */
+    public void blendRootRotation(Pose pose, Output ours, double[] vanEuler, double[] res) {
+        double vr = AnimMath.clamp01(pose.vanilla[Joint.ROOT.ordinal()]);
+        AnimMath.fromEuler(vanEuler[0], vanEuler[1], vanEuler[2], qv);
+        AnimMath.slerp(ours.rootRot, qv, vr, qa);
+        AnimMath.toEuler(qa, res);
+    }
+
     // ------------------------------------------------------------------ для превью и эффектов
 
     /**

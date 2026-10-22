@@ -32,6 +32,11 @@ public final class Animator {
         public Boolean loop;
         /** Стоп-кадр: время клипа, секунды (NaN — играет). */
         public double freezeAt = Double.NaN;
+        /** Вид от первого лица поверх настройки клипа (null — как в клипе). */
+        public Clip.FirstPerson firstPerson;
+        public boolean fpRightArm = true, fpLeftArm = true;
+        /** До какого времени клипа (с) держать вид от первого лица (−1 — весь клип). */
+        public double fpUntil = -1;
 
         public Play speed(double s) {
             speed = s;
@@ -67,6 +72,21 @@ public final class Animator {
             freezeAt = s;
             return this;
         }
+
+        /** От первого лица видны руки модели (как в третьем лице) до времени until (с; −1 — весь клип). */
+        public Play firstPerson(boolean rightArm, boolean leftArm, double until) {
+            firstPerson = Clip.FirstPerson.MODEL;
+            fpRightArm = rightArm;
+            fpLeftArm = leftArm;
+            fpUntil = until;
+            return this;
+        }
+    }
+
+    /** Вид от первого лица: что показать (см. {@link #firstPerson}). */
+    public static final class FirstPersonView {
+        public Clip.FirstPerson mode = Clip.FirstPerson.NONE;
+        public boolean rightArm, leftArm;
     }
 
     private static final class Layer {
@@ -77,6 +97,9 @@ public final class Animator {
         boolean loop;
         double fadeIn, fadeOut;
         double freezeAt = Double.NaN;
+        Clip.FirstPerson fpMode = Clip.FirstPerson.NONE;
+        boolean fpRight, fpLeft;
+        double fpUntil = -1;
         /** Вход: 0 — плавный набор веса поверх нижней позы, 1 — связка из снимка. */
         boolean fromSnapshot;
         final Pose from = new Pose();
@@ -136,6 +159,17 @@ public final class Animator {
         l.fadeIn = Double.isNaN(opts.fadeIn) ? clip.fadeIn : opts.fadeIn;
         l.fadeOut = Double.isNaN(opts.fadeOut) ? clip.fadeOut : opts.fadeOut;
         l.freezeAt = opts.freezeAt;
+        if (opts.firstPerson != null) {
+            l.fpMode = opts.firstPerson;
+            l.fpRight = opts.fpRightArm;
+            l.fpLeft = opts.fpLeftArm;
+            l.fpUntil = opts.fpUntil;
+        } else {
+            l.fpMode = clip.firstPerson;
+            l.fpRight = clip.fpRightArm;
+            l.fpLeft = clip.fpLeftArm;
+            l.fpUntil = clip.fpUntil;
+        }
         l.start = now - opts.startAt / l.speed;
         l.fadeOutStart = Double.NaN;
         l.active = true;
@@ -260,23 +294,22 @@ public final class Animator {
         followWeight = follow;
     }
 
-    /** Активный клип с видом от первого лица (верхний слой), или null. */
-    public Clip firstPersonClip(double now) {
+    /**
+     * Вид от первого лица верхнего слоя, который его просит. Руки — уже с учётом зеркала.
+     * Возвращает false, если такого слоя нет.
+     */
+    public boolean firstPerson(double now, FirstPersonView out) {
         for (int i = LAYERS - 1; i >= 0; i--) {
             Layer l = layers[i];
-            if (!l.active || l.clip.firstPerson == Clip.FirstPerson.NONE) continue;
-            if (l.clip.fpUntil >= 0 && l.clipTime(now) >= l.clip.fpUntil) continue;
+            if (!l.active || l.fpMode == Clip.FirstPerson.NONE) continue;
+            if (l.fpUntil >= 0 && l.clipTime(now) >= l.fpUntil) continue;
             if (layerWeightNow(l, now) <= 0.05) continue;
-            return l.clip;
+            out.mode = l.fpMode;
+            out.rightArm = l.mirror ? l.fpLeft : l.fpRight;
+            out.leftArm = l.mirror ? l.fpRight : l.fpLeft;
+            return true;
         }
-        return null;
-    }
-
-    public boolean firstPersonMirrored() {
-        for (int i = LAYERS - 1; i >= 0; i--) {
-            Layer l = layers[i];
-            if (l.active && l.clip.firstPerson != Clip.FirstPerson.NONE) return l.mirror;
-        }
+        out.mode = Clip.FirstPerson.NONE;
         return false;
     }
 

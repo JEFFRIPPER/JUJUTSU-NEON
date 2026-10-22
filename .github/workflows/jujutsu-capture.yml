@@ -1,9 +1,15 @@
 name: Capture cutscene frames
 
 # Служебная съёмка: Minecraft с модом в виртуальном экране (программный OpenGL),
-# катсцена Максимального Фиолетового, кадры — в артефакт. Релизы не трогает.
+# катсцена Максимального Фиолетового или сценарий анимаций тела (scenario=anim), кадры — в артефакт.
+# Релизы не трогает.
 on:
   workflow_dispatch:
+    inputs:
+      scenario:
+        description: 'Что снимать: purple (катсцена Максимального Фиолетового) или anim (анимации тела)'
+        required: false
+        default: 'purple'
   push:
     branches:
       - 'capture/**'
@@ -41,7 +47,7 @@ jobs:
       - name: Prepare game folder
         run: |
           mkdir -p run/config
-          echo on > run/jn_capture.txt
+          echo "${{ github.event.inputs.scenario || 'purple' }}" > run/jn_capture.txt
           cat > run/options.txt <<'EOF'
           version:3465
           onboardAccessibility:false

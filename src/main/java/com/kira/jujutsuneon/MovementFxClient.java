@@ -1,5 +1,6 @@
 package com.kira.jujutsuneon;
 
+import com.kira.jujutsuneon.anim.Locomotion;
 import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.blaze3d.vertex.BufferBuilder;
 import com.mojang.blaze3d.vertex.BufferUploader;
@@ -7,13 +8,8 @@ import com.mojang.blaze3d.vertex.DefaultVertexFormat;
 import com.mojang.blaze3d.vertex.PoseStack;
 import com.mojang.blaze3d.vertex.Tesselator;
 import com.mojang.blaze3d.vertex.VertexFormat;
-import dev.kosmx.playerAnim.api.TransformType;
-import dev.kosmx.playerAnim.api.layered.IAnimation;
-import dev.kosmx.playerAnim.core.util.Vec3f;
-import dev.kosmx.playerAnim.minecraftApi.PlayerAnimationAccess;
 import net.minecraft.client.Camera;
 import net.minecraft.client.Minecraft;
-import net.minecraft.client.player.AbstractClientPlayer;
 import net.minecraft.client.renderer.GameRenderer;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.particles.BlockParticleOption;
@@ -44,19 +40,17 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Random;
-import java.util.WeakHashMap;
 
 import static com.kira.jujutsuneon.MovementFx.*;
 
 /**
- * Клиент движения: анимации тела дэшей, взлёта и полёта (свой слой Player Animator — весь
- * корпус наклоняется целиком, руки и ноги остаются на месте, модель больше не «ломается»)
- * и эффекты по референсам:
- *  - дэш вперёд/назад: кольцо удара по земле, рывок с наклоном, белые полосы ветра, шлейф пыли
- *    из блоков под ногами, торможение с выбросом пыли;
- *  - дэш вбок: завал корпуса в сторону рывка, полосы-силуэты на старте, длинный низкий дым;
- *  - взлёт: полуприсед с руками у тела, прыжок, пыль, закрученные белые серпы ветра и искры;
- *  - полёт: спокойное зависание, наклон в движении, «супермен» в ускорении с вихрем и полосами;
+ * Клиент движения: состояние дэшей, взлёта и полёта (позы тела по нему строит движок анимаций —
+ * {@link BodyAnims} и {@link Locomotion}) и эффекты по референсам:
+ *  - дэш вперёд/назад: кольцо удара по земле, белые полосы ветра, шлейф пыли из блоков под ногами,
+ *    торможение с выбросом пыли;
+ *  - дэш вбок: полосы-силуэты на старте, длинный низкий дым;
+ *  - взлёт: пыль, закрученные белые серпы ветра и искры;
+ *  - полёт: вихрь и полосы в ускорении;
  *  - сверхбег: пыль из-под ног, полосы ветра, шлейф, шаги.
  */
 @Mod.EventBusSubscriber(modid = JujutsuNeonMod.MODID, bus = Mod.EventBusSubscriber.Bus.FORGE, value = Dist.CLIENT)
@@ -72,7 +66,6 @@ public final class MovementFxClient {
     private static final ResourceLocation TEX_STREAK = tex("move_streak");
     private static final ResourceLocation TEX_PUFF = tex("move_puff");
 
-    private static final int LAYER_PRIORITY = 1000;
     private static final int CROUCH_FULL_TICKS = 15;
 
     private MovementFxClient() {
@@ -116,7 +109,6 @@ public final class MovementFxClient {
     }
 
     private static final Map<Integer, PState> STATES = new HashMap<>();
-    private static final Map<AbstractClientPlayer, MoveAnim> ANIMS = new WeakHashMap<>();
     private static final Random RND = new Random();
 
     private static PState state(int id) {
@@ -275,25 +267,12 @@ public final class MovementFxClient {
         if (mc.isPaused()) return;
 
         for (Player p : mc.level.players()) {
-            if (!(p instanceof AbstractClientPlayer cp)) continue;
-            ensureAnim(cp);
             PState s = state(p.getId());
             tickState(mc, p, s);
         }
         STATES.values().removeIf(s -> mc.level.getEntity(s.entityId) == null);
 
         tickFx();
-    }
-
-    private static void ensureAnim(AbstractClientPlayer p) {
-        if (ANIMS.containsKey(p)) return;
-        MoveAnim anim = new MoveAnim(p.getId());
-        ANIMS.put(p, anim);
-        try {
-            PlayerAnimationAccess.getPlayerAnimLayer(p).addAnimLayer(LAYER_PRIORITY, anim);
-        } catch (RuntimeException | LinkageError ignored) {
-            // Библиотека анимаций недоступна — без анимации тела.
-        }
     }
 
     private static void tickState(Minecraft mc, Player p, PState s) {
@@ -551,7 +530,6 @@ public final class MovementFxClient {
     @SubscribeEvent
     public static void onLoggingOut(ClientPlayerNetworkEvent.LoggingOut event) {
         resetAll();
-        ANIMS.clear();
     }
 
     // ================================================================== эффекты
@@ -901,307 +879,52 @@ public final class MovementFxClient {
         BufferUploader.drawWithShader(buf.end());
     }
 
-    // ================================================================== анимация тела
+    // ================================================================== данные для анимации тела
 
-    /** Поза: значения в градусах (тело: y в блоках). NaN — не трогать. */
-    private static final class Pose {
-        float bodyY, bodyPitch, bodyYaw, bodyRoll;
-        float torsoBend;
-        float headPitch, headYaw, headRoll; // добавка к взгляду
-        final float[] rArm = new float[4], lArm = new float[4], rLeg = new float[4], lLeg = new float[4];
-        float w;
-
-        Pose set(float[] part, float pitch, float yaw, float roll, float bend) {
-            part[0] = pitch;
-            part[1] = yaw;
-            part[2] = roll;
-            part[3] = bend;
-            return this;
-        }
-
-        void lerpTo(Pose o, float k) {
-            bodyY += (o.bodyY - bodyY) * k;
-            bodyPitch += (o.bodyPitch - bodyPitch) * k;
-            bodyYaw += (o.bodyYaw - bodyYaw) * k;
-            bodyRoll += (o.bodyRoll - bodyRoll) * k;
-            torsoBend += (o.torsoBend - torsoBend) * k;
-            headPitch += (o.headPitch - headPitch) * k;
-            headYaw += (o.headYaw - headYaw) * k;
-            headRoll += (o.headRoll - headRoll) * k;
-            for (int i = 0; i < 4; i++) {
-                rArm[i] += (o.rArm[i] - rArm[i]) * k;
-                lArm[i] += (o.lArm[i] - lArm[i]) * k;
-                rLeg[i] += (o.rLeg[i] - rLeg[i]) * k;
-                lLeg[i] += (o.lLeg[i] - lLeg[i]) * k;
+    /**
+     * Состояние движения игрока для движка анимаций ({@link BodyAnims}): зарядка прыжка, взлёт,
+     * полёт и дэш — с долей тика, чтобы позы шли плавно в каждом кадре.
+     */
+    static void fillAnimInput(Entity e, float pt, Locomotion.Input in) {
+        in.chargeWeight = 0;
+        in.chargeAge = 0;
+        in.leapAge = -1;
+        in.flightW = 0;
+        in.boostW = 0;
+        in.landW = 0;
+        in.flightMove = 0;
+        in.elevation = 0;
+        in.bank = 0;
+        in.dashKind = -1;
+        PState s = STATES.get(e.getId());
+        if (s == null) return;
+        in.chargeWeight = Mth.lerp(pt, s.crouchWo, s.crouchW);
+        in.chargeAge = (s.crouchAge + (s.crouching ? pt : 0f)) / 20.0;
+        if (s.leapAge >= 0) in.leapAge = (s.leapAge + pt) / 20.0;
+        float fw = Mth.lerp(pt, s.flightWo, s.flightW);
+        if (fw > 0.001f) {
+            in.flightW = fw;
+            Vec3 v = s.velO.lerp(s.vel, pt);
+            double hs = Math.sqrt(v.x * v.x + v.z * v.z);
+            in.elevation = Math.toDegrees(Math.atan2(v.y, Math.max(1.0E-4, hs)));
+            in.flightMove = Mth.clamp(v.length() / 0.25, 0.0, 1.0);
+            in.boostW = Mth.lerp(pt, s.boostWo, s.boostW);
+            in.landW = Mth.lerp(pt, s.landWo, s.landW);
+            if (hs > 0.05) {
+                double yaw = Math.toRadians(e.getYRot());
+                Vec3 right = new Vec3(-Math.cos(yaw), 0.0, -Math.sin(yaw));
+                in.bank = Mth.clamp(v.dot(right) / Math.max(0.1, v.length()), -1.0, 1.0);
             }
+        }
+        if (s.dashKind >= 0) {
+            in.dashKind = s.dashKind; // DASH_FRONT/BACK/LEFT/RIGHT = 0/1/2/3, как в Locomotion
+            in.dashAge = s.dashAge + pt;
         }
     }
 
-    private static float crouchY(float deg) {
-        return (float) (-0.75 * 0.9375 * (1.0 - Math.cos(Math.toRadians(deg))));
-    }
-
-    /** Слой анимации движения: позы по состоянию, плавно смешанные с ванильной ходьбой. */
-    private static final class MoveAnim implements IAnimation {
-        final int entityId;
-        final List<Pose> layers = new ArrayList<>();
-        boolean active;
-
-        MoveAnim(int entityId) {
-            this.entityId = entityId;
-        }
-
-        @Override
-        public boolean isActive() {
-            PState s = STATES.get(entityId);
-            return s != null && s.animating();
-        }
-
-        @Override
-        public void setupAnim(float pt) {
-            layers.clear();
-            PState s = STATES.get(entityId);
-            if (s == null) return;
-            Minecraft mc = Minecraft.getInstance();
-            Entity e = mc.level != null ? mc.level.getEntity(entityId) : null;
-
-            float fw = Mth.lerp(pt, s.flightWo, s.flightW);
-            if (fw > 0.001f) layers.add(flightPose(s, pt, fw, e));
-            if (s.leapAge >= 0) {
-                Pose lp = leapPose(s, pt, fw);
-                if (lp.w > 0.001f) layers.add(lp);
-            }
-            float cw = Mth.lerp(pt, s.crouchWo, s.crouchW);
-            if (cw > 0.001f) layers.add(crouchPose(s, pt, cw));
-            if (s.dashKind >= 0) {
-                Pose dp = dashPose(s, pt);
-                if (dp.w > 0.001f) layers.add(dp);
-            }
-        }
-
-        @Override
-        public Vec3f get3DTransform(String part, TransformType type, float tickDelta, Vec3f v0) {
-            if (layers.isEmpty()) return v0;
-            float x = v0.getX(), y = v0.getY(), z = v0.getZ();
-            for (Pose p : layers) {
-                float k = Mth.clamp(p.w, 0f, 1f);
-                switch (part) {
-                    case "body" -> {
-                        if (type == TransformType.POSITION) {
-                            y = Mth.lerp(k, y, p.bodyY);
-                        } else if (type == TransformType.ROTATION) {
-                            x = Mth.lerp(k, x, rad(p.bodyPitch));
-                            y = Mth.lerp(k, y, rad(p.bodyYaw));
-                            z = Mth.lerp(k, z, rad(p.bodyRoll));
-                        }
-                    }
-                    case "torso" -> {
-                        if (type == TransformType.BEND) y = Mth.lerp(k, y, rad(p.torsoBend));
-                    }
-                    case "head" -> {
-                        if (type == TransformType.ROTATION) {
-                            x += rad(p.headPitch) * k;
-                            y += rad(p.headYaw) * k;
-                            z += rad(p.headRoll) * k;
-                        }
-                    }
-                    case "rightArm" -> {
-                        float[] q = limb(type, p.rArm, k, x, y, z);
-                        x = q[0]; y = q[1]; z = q[2];
-                    }
-                    case "leftArm" -> {
-                        float[] q = limb(type, p.lArm, k, x, y, z);
-                        x = q[0]; y = q[1]; z = q[2];
-                    }
-                    case "rightLeg" -> {
-                        float[] q = limb(type, p.rLeg, k, x, y, z);
-                        x = q[0]; y = q[1]; z = q[2];
-                    }
-                    case "leftLeg" -> {
-                        float[] q = limb(type, p.lLeg, k, x, y, z);
-                        x = q[0]; y = q[1]; z = q[2];
-                    }
-                    default -> {
-                        return v0;
-                    }
-                }
-            }
-            return new Vec3f(x, y, z);
-        }
-
-        private static float[] limb(TransformType type, float[] t, float k, float x, float y, float z) {
-            if (type == TransformType.ROTATION) {
-                return new float[]{Mth.lerp(k, x, rad(t[0])), Mth.lerp(k, y, rad(t[1])), Mth.lerp(k, z, rad(t[2]))};
-            }
-            if (type == TransformType.BEND) {
-                return new float[]{x, Mth.lerp(k, y, rad(t[3])), z};
-            }
-            return new float[]{x, y, z};
-        }
-
-        private static float rad(float deg) {
-            return deg * Mth.DEG_TO_RAD;
-        }
-    }
-
-    // ---- позы
-
-    private static Pose dashPose(PState s, float pt) {
-        double a = s.dashAge + pt;
-        Pose p = new Pose();
-        boolean side = s.dashKind == DASH_LEFT || s.dashKind == DASH_RIGHT;
-        if (side) {
-            float sg = s.dashKind == DASH_LEFT ? 1f : -1f;
-            p.w = (float) (smooth(a / 1.2) * (1.0 - smooth((a - SIDE_DASH_TICKS - 1) / 8.0)));
-            p.bodyRoll = 38f * sg;
-            p.bodyYaw = -6f * sg;
-            p.bodyPitch = -6f;
-            p.bodyY = -0.08f;
-            p.torsoBend = 8f;
-            p.headRoll = -26f * sg;
-            p.headPitch = -4f;
-            if (sg > 0) {
-                // Влево: правая нога отстаёт наружу, правая рука развевается.
-                p.set(p.rLeg, 6f, 0f, 30f, 14f).set(p.lLeg, -12f, 0f, -6f, 28f);
-                p.set(p.rArm, -24f, 0f, 62f, -16f).set(p.lArm, 18f, 0f, -14f, -22f);
-            } else {
-                p.set(p.lLeg, 6f, 0f, -30f, 14f).set(p.rLeg, -12f, 0f, 6f, 28f);
-                p.set(p.lArm, -24f, 0f, -62f, -16f).set(p.rArm, 18f, 0f, 14f, -22f);
-            }
-            return p;
-        }
-
-        p.w = (float) (smooth(a / 2.0) * (1.0 - smooth((a - FRONT_DASH_TICKS) / 4.0)));
-        double brake = smooth((a - (FRONT_DASH_TICKS - 5)) / 3.0);
-        Pose drive = new Pose();
-        if (s.dashKind == DASH_FRONT) {
-            // Рывок вперёд: корпус целиком наклонён, быстрый бег, руки работают.
-            double ph = a * 1.35 * Math.PI * 0.5;
-            float sn = (float) Math.sin(ph);
-            drive.bodyPitch = -34f;
-            drive.bodyY = -0.06f;
-            drive.torsoBend = 10f;
-            drive.headPitch = -27f;
-            drive.set(drive.rLeg, -12f + 52f * sn, 0f, 3f, 22f + 30f * Math.max(0f, -sn));
-            drive.set(drive.lLeg, -12f - 52f * sn, 0f, -3f, 22f + 30f * Math.max(0f, sn));
-            drive.set(drive.rArm, 34f - 44f * sn, 0f, 12f, -72f);
-            drive.set(drive.lArm, 34f + 44f * sn, 0f, -12f, -72f);
-        } else {
-            // Рывок назад: низкая стойка, скольжение спиной вперёд, руки вперёд для равновесия.
-            drive.bodyPitch = -14f;
-            drive.bodyY = -0.18f;
-            drive.torsoBend = 12f;
-            drive.headPitch = -10f;
-            drive.set(drive.rLeg, -34f, 0f, 6f, 54f).set(drive.lLeg, 24f, 0f, -6f, 34f);
-            drive.set(drive.rArm, -52f, 0f, 22f, -30f).set(drive.lArm, -46f, 0f, -22f, -30f);
-        }
-        Pose stop = new Pose();
-        // Торможение: корпус откидывается, передняя нога упирается, руки в стороны.
-        stop.bodyPitch = s.dashKind == DASH_FRONT ? 16f : -12f;
-        stop.bodyY = -0.18f;
-        stop.torsoBend = 4f;
-        stop.headPitch = s.dashKind == DASH_FRONT ? 10f : -6f;
-        stop.set(stop.rLeg, -46f, 0f, 4f, 12f).set(stop.lLeg, 22f, 0f, -4f, 60f);
-        stop.set(stop.rArm, -55f, 0f, 38f, -20f).set(stop.lArm, -42f, 0f, -42f, -20f);
-        drive.lerpTo(stop, (float) brake);
-        drive.w = p.w;
-        return drive;
-    }
-
-    private static Pose crouchPose(PState s, float pt, float w) {
-        Pose p = new Pose();
-        p.w = w;
-        double t = s.crouchAge + (s.crouching ? pt : 0f);
-        // Как перед настоящим прыжком: колени плавно сгибаются, таз уходит назад, корпус чуть
-        // наклоняется вперёд, руки отводятся назад для замаха, взгляд вперёд-вверх. Без тряски —
-        // набрав глубину, просто держит стойку и едва заметно дышит.
-        float d = (float) smooth(t / CROUCH_FULL_TICKS);
-        float breath = d >= 0.999f ? (float) Math.sin(t * 0.22) * 0.006f : 0f;
-        p.bodyY = crouchY(40f * d) + breath;
-        p.bodyPitch = -7f * d;
-        p.torsoBend = 14f * d;
-        p.headPitch = -5f * d;
-        p.set(p.rLeg, -44f * d, 0f, 3f * d, 84f * d).set(p.lLeg, -40f * d, 0f, -3f * d, 80f * d);
-        p.set(p.rArm, 30f * d, 0f, 7f, -6f - 12f * d).set(p.lArm, 30f * d, 0f, -7f, -6f - 12f * d);
-        return p;
-    }
-
-    private static Pose leapPose(PState s, float pt, float flightW) {
-        double a = s.leapAge + pt;
-        Pose up = new Pose();
-        // Толчок: тело вытянуто вверх, руки вскинуты.
-        up.bodyPitch = -4f;
-        up.torsoBend = -8f;
-        up.headPitch = -12f;
-        up.set(up.rLeg, 8f, 0f, 2f, 4f).set(up.lLeg, -2f, 0f, -2f, 6f);
-        up.set(up.rArm, -164f, 0f, 18f, -10f).set(up.lArm, -164f, 0f, -18f, -10f);
-        Pose rise = new Pose();
-        // Подъём: руки раскрываются в стороны, ноги чуть согнуты — переход к зависанию.
-        rise.bodyPitch = 3f;
-        rise.torsoBend = 2f;
-        rise.set(rise.rLeg, 16f, 0f, 4f, 32f).set(rise.lLeg, -6f, 0f, -3f, 16f);
-        rise.set(rise.rArm, -30f, 0f, 38f, -22f).set(rise.lArm, -26f, 0f, -40f, -20f);
-        up.lerpTo(rise, (float) smooth((a - 3.0) / 8.0));
-        double out = Math.max(smooth((a - 14.0) / 10.0), flightW > 0.5f ? smooth((a - 8.0) / 6.0) : 0.0);
-        up.w = (float) (smooth(a / 1.5) * (1.0 - out));
-        return up;
-    }
-
-    private static Pose flightPose(PState s, float pt, float w, Entity e) {
-        Vec3 v = s.velO.lerp(s.vel, pt);
-        double hs = Math.sqrt(v.x * v.x + v.z * v.z);
-        double elev = Math.toDegrees(Math.atan2(v.y, Math.max(1.0E-4, hs)));
-        float move = (float) Mth.clamp(v.length() / 0.25, 0.0, 1.0);
-        float boost = Mth.lerp(pt, s.boostWo, s.boostW) * move;
-        float land = Mth.lerp(pt, s.landWo, s.landW);
-        double t = s.age + pt;
-        float bob = (float) Math.sin(t * 0.16);
-
-        // Поворот вбок — небольшой крен.
-        float bank = 0f;
-        if (e != null && hs > 0.05) {
-            double yaw = Math.toRadians(e.getYRot());
-            Vec3 right = new Vec3(-Math.cos(yaw), 0.0, -Math.sin(yaw));
-            bank = (float) Mth.clamp(v.dot(right) / Math.max(0.1, v.length()), -1.0, 1.0);
-        }
-
-        Pose hover = new Pose();
-        hover.bodyPitch = 4f + bob;
-        hover.bodyY = 0.04f * bob;
-        hover.torsoBend = 2f;
-        hover.headPitch = -2f;
-        hover.set(hover.rLeg, 16f, 0f, 4f, 34f).set(hover.lLeg, -6f, 0f, -3f, 14f);
-        hover.set(hover.rArm, -22f, 0f, 24f + bob * 2f, -22f).set(hover.lArm, -18f, 0f, -26f - bob * 2f, -18f);
-
-        Pose glide = new Pose();
-        float glidePitch = (float) Mth.clamp((elev - 90.0) * 0.18, -26.0, 4.0);
-        glide.bodyPitch = glidePitch;
-        glide.bodyRoll = -bank * 14f;
-        glide.torsoBend = 4f;
-        glide.headPitch = glidePitch * 0.8f;
-        glide.set(glide.rLeg, 22f, 0f, 3f, 26f).set(glide.lLeg, 10f, 0f, -3f, 16f);
-        glide.set(glide.rArm, 22f, 0f, 20f, -16f).set(glide.lArm, 24f, 0f, -20f, -16f);
-
-        Pose dash = new Pose();
-        // Ускорение: «супермен» — тело вдоль полёта, правый кулак вперёд, левая рука вдоль тела.
-        float sp = (float) Mth.clamp(elev - 90.0, -165.0, -8.0);
-        dash.bodyPitch = sp;
-        dash.bodyRoll = -bank * 24f;
-        dash.torsoBend = -4f;
-        dash.headPitch = sp * 0.8f;
-        dash.set(dash.rArm, -172f, 0f, 6f, -4f).set(dash.lArm, 14f, 0f, -14f, -6f);
-        dash.set(dash.rLeg, 6f, 0f, 3f, 6f).set(dash.lLeg, 12f, 0f, -3f, 18f);
-
-        Pose landing = new Pose();
-        landing.bodyPitch = 6f;
-        landing.torsoBend = 6f;
-        landing.set(landing.rLeg, -6f, 0f, 4f, 10f).set(landing.lLeg, 4f, 0f, -4f, 8f);
-        landing.set(landing.rArm, -28f, 0f, 36f, -18f).set(landing.lArm, -24f, 0f, -36f, -18f);
-
-        hover.lerpTo(glide, move * (1f - boost));
-        hover.lerpTo(dash, boost);
-        hover.lerpTo(landing, land);
-        hover.w = w;
-        return hover;
+    /** Идёт ли у игрока что-то из движения, что требует позы тела (дэш, полёт, зарядка, взлёт). */
+    static boolean animating(Entity e) {
+        PState s = STATES.get(e.getId());
+        return s != null && s.animating();
     }
 }

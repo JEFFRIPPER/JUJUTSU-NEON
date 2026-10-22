@@ -1,5 +1,6 @@
 package com.kira.jujutsuneon;
 
+import com.kira.jujutsuneon.anim.Animator;
 import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.blaze3d.vertex.BufferBuilder;
 import com.mojang.blaze3d.vertex.BufferUploader;
@@ -176,8 +177,8 @@ public final class LapseBlueClient {
         COMBOS.put(caster, scene);
 
         if (mc.level.getEntity(casterId) instanceof AbstractClientPlayer p) {
-            if (localCaster) MaximumPurpleAnimation.playWithFirstPersonArm(p, "lapse_blue", FIRST_PERSON_ARM_TICKS);
-            else MaximumPurpleAnimation.play(p, "lapse_blue");
+            BodyAnims.play(p, "lapse_blue", new Animator.Play().fadeIn(0.1)
+                    .firstPerson(true, false, FIRST_PERSON_ARM_TICKS / 20.0));
         }
         if ((localCaster || localTarget) && !mc.player.isNoGravity()) {
             mc.player.setNoGravity(true);
@@ -197,7 +198,7 @@ public final class LapseBlueClient {
         endControl(mc, scene);
         if (aborted) {
             if (mc.level != null && mc.level.getEntity(scene.casterEntityId) instanceof AbstractClientPlayer p) {
-                MaximumPurpleAnimation.stop(p);
+                BodyAnims.stop(p, 0.4);
             }
             COMBOS.remove(caster);
         }
@@ -209,8 +210,8 @@ public final class LapseBlueClient {
         GRABS.put(caster, new GrabScene(caster, casterId, ids, origins));
         String name = variant == 0 ? "lapse_blue_grab_low" : (variant == 2 ? "lapse_blue_grab_high" : "lapse_blue_grab_mid");
         if (mc.level.getEntity(casterId) instanceof AbstractClientPlayer p) {
-            if (p == mc.player) MaximumPurpleAnimation.playWithFirstPersonArm(p, name, FIRST_PERSON_ARM_TICKS);
-            else MaximumPurpleAnimation.play(p, name);
+            BodyAnims.play(p, name, new Animator.Play().fadeIn(0.1)
+                    .firstPerson(true, false, FIRST_PERSON_ARM_TICKS / 20.0));
         }
     }
 
@@ -219,8 +220,8 @@ public final class LapseBlueClient {
         Minecraft mc = Minecraft.getInstance();
         if (g == null || mc.level == null) return;
         if (mc.level.getEntity(g.casterEntityId) instanceof AbstractClientPlayer p) {
-            if (thrown) MaximumPurpleAnimation.play(p, "lapse_blue_throw");
-            else if (g.ticks >= GRAB_ANIM_TICKS) MaximumPurpleAnimation.stop(p);
+            if (thrown) BodyAnims.play(p, "lapse_blue_throw", new Animator.Play().fadeIn(0.08));
+            else if (g.ticks >= GRAB_ANIM_TICKS) BodyAnims.stop(p, 0.4);
         }
     }
 
@@ -297,7 +298,7 @@ public final class LapseBlueClient {
             }
             // Блоки притянуты — персонаж «дышит», рука держит блоки (ноги и голова свободны).
             if (g.ticks == GRAB_ANIM_TICKS && owner instanceof AbstractClientPlayer p) {
-                MaximumPurpleAnimation.play(p, "lapse_blue_hold");
+                BodyAnims.play(p, "lapse_blue_hold", new Animator.Play().fadeIn(0.3));
             }
             applyGrab(mc, g, g.ticks, 1.0f);
         }

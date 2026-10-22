@@ -149,10 +149,10 @@ public final class Preview {
             in.dashKind = -1;
             String label;
             switch (scenario) {
-                case "walk" -> in.speed = ramp(t, 0.3, 1.0, 3.2, 3.8) * 2.0;
-                case "run" -> in.speed = ramp(t, 0.3, 1.0, 3.2, 3.8) * 6.0;
+                case "walk" -> in.speed = ramp(t, 0.3, 1.0, 3.2, 3.8) * 4.3;
+                case "run" -> in.speed = ramp(t, 0.3, 1.0, 3.2, 3.8) * 5.6;
                 case "sprint" -> in.speed = ramp(t, 0.3, 1.2, 3.2, 3.8) * 24.0;
-                case "speeds" -> in.speed = t < 1 ? 0 : (t < 2 ? 2 : (t < 3 ? 6 : 24));
+                case "speeds" -> in.speed = t < 1 ? 0 : (t < 2 ? 4.3 : (t < 3 ? 5.6 : 24));
                 case "sneak" -> {
                     in.sneaking = t > 0.2;
                     in.speed = ramp(t, 1.0, 1.4, 3.2, 3.6) * 1.3;
@@ -188,7 +188,7 @@ public final class Preview {
                     in.flightW = AnimMath.smooth(t / 0.6);
                     in.flightMove = ramp(t, 1.5, 2.2, 5.0, 5.6);
                     in.boostW = ramp(t, 3.0, 3.4, 4.4, 4.8);
-                    in.elevation = 90;
+                    in.elevation = t < 4.6 ? 0 : -40;
                     in.speed = in.flightMove * 10;
                 }
                 case "dash" -> {

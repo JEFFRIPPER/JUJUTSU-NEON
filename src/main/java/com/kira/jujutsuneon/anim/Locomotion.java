@@ -38,15 +38,15 @@ public final class Locomotion {
         /** Взлёт после заряженного прыжка: время, секунды (−1 — нет). */
         public double leapAge = -1;
 
-        /** Полёт: веса (0..1) полёта, ускорения, посадки и движения; угол скорости к вертикали (90 — горизонтально), крен (−1..1). */
-        public double flightW, boostW, landW, flightMove, elevation = 90, bank;
+        /** Полёт: веса (0..1) полёта, ускорения, посадки и движения; угол скорости над горизонтом (0 — горизонтально, 90 — вверх), крен (−1..1). */
+        public double flightW, boostW, landW, flightMove, elevation, bank;
 
         /** Дэш: вид (−1 нет, 0 вперёд, 1 назад, 2 влево, 3 вправо) и время с начала, тики (с долей тика). */
         public int dashKind = -1;
         public double dashAge;
 
-        /** Руки заняты ванилью (удар, щит, лук, еда): эта рука остаётся ванильной. */
-        public boolean rightArmVanilla, leftArmVanilla;
+        /** Руки заняты ванилью (щит, лук, еда, взмах): доля ванили в руке (0..1). */
+        public double rightArmVanilla, leftArmVanilla;
     }
 
     public static final int FRONT_DASH_TICKS = 14;
@@ -80,7 +80,7 @@ public final class Locomotion {
 
     /** Каденс: сколько полных циклов шагов в секунду при скорости v (блоки/с). */
     static double cadence(double v) {
-        return AnimMath.clamp(0.75 * Math.pow(Math.max(0, v), 0.45), 0.55, 3.1);
+        return AnimMath.clamp(0.95 * Math.pow(Math.max(0, v), 0.42), 0.55, 3.1);
     }
 
     private static double tri(double v, double a, double b, double c, double d) {
@@ -107,9 +107,10 @@ public final class Locomotion {
         // ---- веса состояний
         boolean air = !in.onGround && in.flightW < 0.5;
         double tIdle = 1 - AnimMath.smooth((v - 0.15) / 0.9);
-        double tWalk = tri(v, 0.15, 1.2, 2.4, 4.6);
-        double tRun = tri(v, 2.4, 4.6, 9.5, 15);
-        double tSprint = AnimMath.smooth((v - 9.5) / 6.5);
+        // ваниль: шаг 4,3 блока/с — ходьба, бег 5,6 — бег, сверхбег (10+) — спринт
+        double tWalk = tri(v, 0.15, 1.0, 4.6, 5.3);
+        double tRun = tri(v, 4.6, 5.3, 9.0, 14.0);
+        double tSprint = AnimMath.smooth((v - 9.0) / 6.0);
         double sum = tIdle + tWalk + tRun + tSprint;
         if (sum < 1.0E-6) {
             tIdle = 1;
@@ -260,8 +261,9 @@ public final class Locomotion {
             out.off[r][1] = lift - minY * gw;
         }
 
-        if (in.rightArmVanilla) out.vanilla[Joint.RIGHT_ARM.ordinal()] = 1;
-        if (in.leftArmVanilla) out.vanilla[Joint.LEFT_ARM.ordinal()] = 1;
+        int ra = Joint.RIGHT_ARM.ordinal(), la = Joint.LEFT_ARM.ordinal();
+        out.vanilla[ra] = Math.max(out.vanilla[ra], AnimMath.clamp01(in.rightArmVanilla));
+        out.vanilla[la] = Math.max(out.vanilla[la], AnimMath.clamp01(in.leftArmVanilla));
         for (int j = 0; j < Joint.COUNT; j++) out.weight[j] = 1;
 
         look = 1;
@@ -351,6 +353,8 @@ public final class Locomotion {
         AnimMath.fromEuler(pitch * AnimMath.DEG, 0, roll * AnimMath.DEG, tq);
         int r = Joint.ROOT.ordinal();
         AnimMath.mul(tq, p.rot[r], p.rot[r]);
+        p.weight[r] = 1;
+        p.vanilla[r] = 0;
     }
 
     // ------------------------------------------------------------------ дэши
