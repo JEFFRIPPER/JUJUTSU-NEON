@@ -27,17 +27,12 @@ jobs:
           gradle-version: '8.1.1'
 
       - name: Install audio tools
-        timeout-minutes: 15
+        timeout-minutes: 10
         run: |
-          # зеркала apt иногда зависают: ограничиваем время и пробуем ещё раз
-          for i in 1 2 3; do
-            sudo dpkg --configure -a || true
-            sudo timeout 180 apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 update -qq \
-              && sudo timeout 300 apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 install -y -qq ffmpeg \
-              && break
-            echo "apt не ответил, попытка $i"; sleep 5
-          done
-          command -v ffmpeg
+          # ffmpeg (статическая сборка с libvorbis) из PyPI: apt-зеркала GitHub иногда виснут на десятки минут
+          python3 -m pip install --quiet imageio-ffmpeg==0.6.0
+          sudo ln -sf "$(python3 -c 'import imageio_ffmpeg; print(imageio_ffmpeg.get_ffmpeg_exe())')" /usr/local/bin/ffmpeg
+          ffmpeg -hide_banner -encoders | grep -q libvorbis
 
       - name: Generate 4K resources and audio
         run: |
