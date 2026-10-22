@@ -32,13 +32,22 @@ minecraft {
     }
 }
 
-repositories {}
+repositories {
+    // libs/ как локальный репозиторий: нужен только для dev-запуска с -PjnDevLibs (см. ниже)
+    flatDir { dirs 'libs' }
+}
 
 dependencies {
     minecraft "net.minecraftforge:forge:${minecraft_version}-${forge_version}"
     // Player Animator (KosmX, MIT). Уже в продакшн-именах (SRG), поэтому только для компиляции
     // и вшивается внутрь нашего jar как есть (Forge Jar-in-Jar), см. jar { ... } ниже.
     compileOnly files('libs/player-animation-lib-forge-1.0.2-rc1+1.20.jar')
+    // Dev-запуск (gradle runClient -PjnDevLibs, служебная съёмка в CI): те же библиотеки,
+    // переведённые в dev-имена. В собранный .jar это не попадает.
+    if (project.hasProperty('jnDevLibs')) {
+        runtimeOnly fg.deobf('local:player-animation-lib-forge:1.0.2-rc1+1.20')
+        runtimeOnly fg.deobf('local:bendy-lib-forge:4.0.0')
+    }
 }
 
 tasks.named('processResources', ProcessResources).configure {

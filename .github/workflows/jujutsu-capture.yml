@@ -85,7 +85,7 @@ jobs:
           MESA_GL_VERSION_OVERRIDE: '4.5'
         run: |
           set +e
-          timeout 40m xvfb-run -a -s "-screen 0 1280x720x24" gradle runClient --no-daemon > client.log 2>&1
+          timeout 40m xvfb-run -a -s "-screen 0 1280x720x24" gradle runClient --no-daemon -PjnDevLibs > client.log 2>&1
           echo "exit=$?"
           grep -a "jn-capture\|Exception\|ERROR" client.log | head -60
           ls run/screenshots | wc -l
