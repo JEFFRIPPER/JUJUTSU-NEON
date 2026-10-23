@@ -19,7 +19,8 @@ import java.util.IdentityHashMap;
 import java.util.Map;
 
 /**
- * Full-body technique animation layer.
+ * Подмена модели на время каста Фиолетового (PURPLE_CAST / HOLLOW_PURPLE) — старая система,
+ * оставлена как есть до переделки Фиолетового. Всё остальное анимирует {@link com.kira.jujutsuneon.rbx.PlayerAnimations}.
  *
  * Design rules:
  * - vanilla locomotion stays the base pose;
@@ -27,7 +28,7 @@ import java.util.Map;
  * - the player renderer itself is not replaced permanently;
  * - the temporary model subclasses PlayerModel and calls super.setupAnim first,
  *   so armor/held-item layers keep following the same animated limbs;
- * - Blue and Hollow Purple are the first two reference-driven animations.
+ * - only Hollow Purple is left here.
  *
  * This class deliberately avoids a hard dependency on a third-party player-animation
  * library. The renderer model is swapped only for the duration of one render call and
@@ -42,15 +43,8 @@ public final class JujutsuNeonSkillAnimationClient {
 
     private enum Skill {
         NONE,
-        BLUE_CHARGE,
-        BLUE,
-        MAX_BLUE,
         PURPLE,
-        MAX_PURPLE,
-        FRONT_DASH,
-        BACK_DASH,
-        SIDE_DASH_LEFT,
-        SIDE_DASH_RIGHT
+        MAX_PURPLE
     }
 
     private record SkillFrame(Skill skill, float progress) {
@@ -61,8 +55,6 @@ public final class JujutsuNeonSkillAnimationClient {
     private static final Field ACTIVE_ANIM;
     private static final Field ACTIVE_ANIM_TICKS;
     private static final Field ACTIVE_ANIM_LENGTH;
-    private static final Field CHARGING_ANIM;
-    private static final Field CHARGING_PROGRESS;
     private static final Field HUD_BLINDFOLD;
 
     private static final Field RENDERER_MODEL_FIELD;
@@ -80,8 +72,6 @@ public final class JujutsuNeonSkillAnimationClient {
             ACTIVE_ANIM = staticField(CLIENT_EVENTS_CLASS, "activeAnim");
             ACTIVE_ANIM_TICKS = staticField(CLIENT_EVENTS_CLASS, "activeAnimTicks");
             ACTIVE_ANIM_LENGTH = staticField(CLIENT_EVENTS_CLASS, "activeAnimLength");
-            CHARGING_ANIM = staticField(CLIENT_EVENTS_CLASS, "chargingAnim");
-            CHARGING_PROGRESS = staticField(CLIENT_EVENTS_CLASS, "chargingProgress");
             HUD_BLINDFOLD = staticField(CLIENT_EVENTS_CLASS, "hudBlindfold");
 
             RENDERER_MODEL_FIELD = findRendererModelField();
@@ -140,14 +130,7 @@ public final class JujutsuNeonSkillAnimationClient {
 
     private static SkillFrame currentFrame() {
         try {
-            String charging = (String) CHARGING_ANIM.get(null);
-            float chargeProgress = CHARGING_PROGRESS.getFloat(null);
-
-            // First second of holding Z: reference preparation/hand-sign phase.
-            if ("CHARGE_BLUE".equals(charging)) {
-                return new SkillFrame(Skill.BLUE_CHARGE, clamp01(chargeProgress));
-            }
-
+            // Синий (зарядка и Максимальный) и дэши — в анимациях игрока (rbx.PlayerAnimations), здесь только Фиолетовый.
             String active = (String) ACTIVE_ANIM.get(null);
             int ticks = ACTIVE_ANIM_TICKS.getInt(null);
             int length = Math.max(1, ACTIVE_ANIM_LENGTH.getInt(null));
@@ -155,8 +138,6 @@ public final class JujutsuNeonSkillAnimationClient {
             float progress = clamp01(1.0f - ticks / (float) length);
 
             return switch (active) {
-                case "BLUE" -> new SkillFrame(Skill.BLUE, progress);
-                case "MAX_BLUE" -> new SkillFrame(Skill.MAX_BLUE, progress);
                 case "PURPLE_CAST", "HOLLOW_PURPLE" -> new SkillFrame(Skill.PURPLE, progress);
                 // MAX_PURPLE анимирует Player Animator (MaximumPurpleAnimation) — модель не подменяем.
                 // Дэши анимирует слой Player Animator (MovementFxClient): там корпус наклоняется
@@ -166,6 +147,18 @@ public final class JujutsuNeonSkillAnimationClient {
         } catch (IllegalAccessException ignored) {
             return SkillFrame.NONE;
         }
+    }
+
+    /**
+     * Идёт ли у игрока Фиолетовый (подмена модели здесь или Максимальный в Player Animator).
+     * Пока идёт, модель R15 не подставляется — Фиолетовый рисуется как раньше.
+     */
+    public static boolean purpleActive(AbstractClientPlayer player) {
+        if (player == null) return false;
+        if (MaximumPurpleAnimation.isPlaying(player)) return true;
+        Minecraft mc = Minecraft.getInstance();
+        if (player != mc.player || !hudBlindfold() || !hasBlindfold()) return false;
+        return currentFrame().skill != Skill.NONE;
     }
 
     @SuppressWarnings("unchecked")
@@ -292,128 +285,13 @@ public final class JujutsuNeonSkillAnimationClient {
             if (localFrame.skill == Skill.NONE) return;
 
             switch (localFrame.skill) {
-                case BLUE_CHARGE -> applyBlueCharge(localFrame.progress, ageInTicks);
-                case BLUE -> applyNormalBlue(localFrame.progress, ageInTicks);
-                case MAX_BLUE -> applyMaximumBlue(localFrame.progress, ageInTicks);
                 case PURPLE -> applyPurple(localFrame.progress, ageInTicks);
                 case MAX_PURPLE -> applyMaxPurple(localFrame.progress, ageInTicks);
-                case FRONT_DASH -> applyFrontDash(localFrame.progress);
-                case BACK_DASH -> applyBackDash(localFrame.progress);
-                case SIDE_DASH_LEFT -> applySideDash(localFrame.progress, -1.0f);
-                case SIDE_DASH_RIGHT -> applySideDash(localFrame.progress, 1.0f);
                 default -> {
                 }
             }
 
             syncWearLayers();
-        }
-
-        /**
-         * Z hold preparation: player compresses inward toward the forming Blue.
-         * This is intentionally subtle so the violent MAX_BLUE bloom has somewhere
-         * to escalate from.
-         */
-        private void applyBlueCharge(float progress, float age) {
-            float p = smooth(progress);
-            float pulse = (float) Math.sin(age * 0.32f) * 0.035f * p;
-
-            rotate(body,
-                    lerp(body.xRot, rad(7.0f), p),
-                    lerp(body.yRot, rad(-9.0f), p),
-                    lerp(body.zRot, rad(-2.0f), p));
-
-            // Right hand rises toward the upper torso/face where the seed is born.
-            rotate(rightArm,
-                    lerp(rightArm.xRot, rad(-61.0f) + pulse, p),
-                    lerp(rightArm.yRot, rad(-24.0f), p),
-                    lerp(rightArm.zRot, rad(31.0f), p));
-
-            // Left hand braces under/across the chest.
-            rotate(leftArm,
-                    lerp(leftArm.xRot, rad(-43.0f) - pulse, p),
-                    lerp(leftArm.yRot, rad(33.0f), p),
-                    lerp(leftArm.zRot, rad(-29.0f), p));
-
-            rotate(rightLeg,
-                    lerp(rightLeg.xRot, rad(8.0f), p),
-                    lerp(rightLeg.yRot, rad(-5.0f), p),
-                    lerp(rightLeg.zRot, rad(3.0f), p));
-            rotate(leftLeg,
-                    lerp(leftLeg.xRot, rad(-5.0f), p),
-                    lerp(leftLeg.yRot, rad(7.0f), p),
-                    lerp(leftLeg.zRot, rad(-4.0f), p));
-
-            head.xRot = lerp(head.xRot, head.xRot + rad(4.0f), p * 0.55f);
-        }
-
-        /** Short normal Blue: same visual language, compressed into a snap cast. */
-        private void applyNormalBlue(float progress, float age) {
-            float in = smooth(clamp01(progress / 0.28f));
-            float out = 1.0f - smooth(clamp01((progress - 0.72f) / 0.28f));
-            float w = Math.min(in, out);
-
-            rotate(body,
-                    lerp(body.xRot, rad(5.0f), w),
-                    lerp(body.yRot, rad(-12.0f), w),
-                    body.zRot);
-            rotate(rightArm,
-                    lerp(rightArm.xRot, rad(-88.0f), w),
-                    lerp(rightArm.yRot, rad(-13.0f), w),
-                    lerp(rightArm.zRot, rad(8.0f), w));
-            rotate(leftArm,
-                    lerp(leftArm.xRot, rad(-38.0f), w),
-                    lerp(leftArm.yRot, rad(28.0f), w),
-                    lerp(leftArm.zRot, rad(-24.0f), w));
-        }
-
-        /**
-         * Reference Maximum Blue body choreography.
-         * 0.00-0.18  seed posture, compact around the torso
-         * 0.18-0.52  violent bloom: stance opens and the casting arm follows it
-         * 0.52-0.88  sustained control pose
-         * 0.88-1.00  settle/release accent
-         */
-        private void applyMaximumBlue(float progress, float age) {
-            float seed = smooth(clamp01(progress / 0.18f));
-            float bloom = smooth(clamp01((progress - 0.18f) / 0.34f));
-            float control = smooth(clamp01((progress - 0.52f) / 0.26f));
-            float release = smooth(clamp01((progress - 0.88f) / 0.12f));
-            float pulse = (float) Math.sin(age * 0.43f) * (1.0f - release);
-
-            // Start from the compact charge pose.
-            float bodyX = mixDeg(7.0f, 2.0f, bloom);
-            float bodyY = mixDeg(-9.0f, -18.0f, bloom);
-            bodyY = mixDeg(bodyY, -12.0f, release);
-            rotate(body, rad(bodyX), rad(bodyY), rad(mixDeg(-2.0f, -5.0f, bloom)));
-
-            // Casting arm moves from chest to the outside/front of the anomaly.
-            float rightX = mixDeg(-61.0f, -82.0f, bloom);
-            float rightY = mixDeg(-24.0f, -19.0f, bloom);
-            float rightZ = mixDeg(31.0f, 10.0f, bloom);
-            rightX = mixDeg(rightX, -94.0f, control * 0.55f);
-            rightX = mixDeg(rightX, -76.0f, release);
-            rightZ += pulse * 2.2f;
-            rotate(rightArm, rad(rightX), rad(rightY), rad(rightZ));
-
-            // Support arm stays close to the torso, then opens slightly as Blue grows.
-            float leftX = mixDeg(-43.0f, -53.0f, bloom);
-            float leftY = mixDeg(33.0f, 39.0f, bloom);
-            float leftZ = mixDeg(-29.0f, -18.0f, bloom);
-            leftZ += pulse * 1.5f;
-            rotate(leftArm, rad(leftX), rad(leftY), rad(leftZ));
-
-            // Wide planted stance sells the mass/pull of the technique.
-            rotate(rightLeg,
-                    rad(mixDeg(8.0f, 12.0f, bloom)),
-                    rad(-8.0f),
-                    rad(5.0f));
-            rotate(leftLeg,
-                    rad(mixDeg(-5.0f, -9.0f, bloom)),
-                    rad(10.0f),
-                    rad(-6.0f));
-
-            // Preserve camera head tracking but add the slight reference dip.
-            head.xRot += rad(3.0f * Math.max(seed, bloom) * (1.0f - release));
         }
 
         /**
@@ -541,128 +419,6 @@ public final class JujutsuNeonSkillAnimationClient {
             rotate(leftArm, rad(p[7]), rad(p[8]), rad(p[9] - breath));
             rotate(rightLeg, rad(p[10]), 0.0f, rad(3.0f));
             rotate(leftLeg, rad(p[11]), 0.0f, rad(-3.0f));
-        }
-
-        /**
-         * Reference front dash.  This is a deliberate full-body burst pose, not a
-         * sped-up vanilla run: rapid compression -> long forward drive -> recovery.
-         */
-        private void applyFrontDash(float progress) {
-            float enter = smooth(clamp01(progress / 0.12f));
-            float exit = 1.0f - smooth(clamp01((progress - 0.75f) / 0.25f));
-            float w = Math.min(enter, exit);
-            if (w <= 0.001f) return;
-
-            // Strong forward commitment while the head remains readable instead of
-            // rotating down with the torso like a rigid mannequin.
-            rotate(body,
-                    lerp(body.xRot, rad(43.0f), w),
-                    lerp(body.yRot, rad(-2.0f), w),
-                    lerp(body.zRot, rad(0.0f), w));
-            head.xRot = lerp(head.xRot, head.xRot - rad(21.0f), w);
-            head.zRot = lerp(head.zRot, rad(0.0f), w);
-
-            // Compact aerodynamic arms; slight asymmetry keeps the silhouette alive.
-            rotate(rightArm,
-                    lerp(rightArm.xRot, rad(54.0f), w),
-                    lerp(rightArm.yRot, rad(-13.0f), w),
-                    lerp(rightArm.zRot, rad(12.0f), w));
-            rotate(leftArm,
-                    lerp(leftArm.xRot, rad(38.0f), w),
-                    lerp(leftArm.yRot, rad(15.0f), w),
-                    lerp(leftArm.zRot, rad(-14.0f), w));
-
-            // One leg drives backward while the other tucks under the body.
-            rotate(rightLeg,
-                    lerp(rightLeg.xRot, rad(39.0f), w),
-                    lerp(rightLeg.yRot, rad(-5.0f), w),
-                    lerp(rightLeg.zRot, rad(4.0f), w));
-            rotate(leftLeg,
-                    lerp(leftLeg.xRot, rad(-27.0f), w),
-                    lerp(leftLeg.yRot, rad(7.0f), w),
-                    lerp(leftLeg.zRot, rad(-4.0f), w));
-        }
-
-        /** Reverse longitudinal dash: opposite momentum, dedicated silhouette. */
-        private void applyBackDash(float progress) {
-            float enter = smooth(clamp01(progress / 0.12f));
-            float exit = 1.0f - smooth(clamp01((progress - 0.75f) / 0.25f));
-            float w = Math.min(enter, exit);
-            if (w <= 0.001f) return;
-
-            rotate(body,
-                    lerp(body.xRot, rad(-32.0f), w),
-                    lerp(body.yRot, rad(2.0f), w),
-                    lerp(body.zRot, rad(0.0f), w));
-            head.xRot = lerp(head.xRot, head.xRot + rad(16.0f), w);
-            head.zRot = lerp(head.zRot, rad(0.0f), w);
-
-            rotate(rightArm,
-                    lerp(rightArm.xRot, rad(-46.0f), w),
-                    lerp(rightArm.yRot, rad(-11.0f), w),
-                    lerp(rightArm.zRot, rad(10.0f), w));
-            rotate(leftArm,
-                    lerp(leftArm.xRot, rad(-34.0f), w),
-                    lerp(leftArm.yRot, rad(13.0f), w),
-                    lerp(leftArm.zRot, rad(-12.0f), w));
-
-            rotate(rightLeg,
-                    lerp(rightLeg.xRot, rad(-34.0f), w),
-                    lerp(rightLeg.yRot, rad(-5.0f), w),
-                    lerp(rightLeg.zRot, rad(4.0f), w));
-            rotate(leftLeg,
-                    lerp(leftLeg.xRot, rad(24.0f), w),
-                    lerp(leftLeg.yRot, rad(7.0f), w),
-                    lerp(leftLeg.zRot, rad(-4.0f), w));
-        }
-
-        /**
-         * Mirrored side-dash pose from the reference.  side=-1 is left, +1 is right.
-         * The body banks into the dash while the head counter-rotates toward control.
-         */
-        private void applySideDash(float progress, float side) {
-            float enter = smooth(clamp01(progress / 0.18f));
-            float exit = 1.0f - smooth(clamp01((progress - 0.66f) / 0.34f));
-            float w = Math.min(enter, exit);
-            if (w <= 0.001f) return;
-
-            rotate(body,
-                    lerp(body.xRot, rad(10.0f), w),
-                    lerp(body.yRot, rad(-6.0f * side), w),
-                    lerp(body.zRot, rad(-11.0f * side), w));
-
-            head.xRot = lerp(head.xRot, head.xRot - rad(4.0f), w);
-            head.yRot = lerp(head.yRot, head.yRot + rad(5.0f * side), w);
-            head.zRot = lerp(head.zRot, rad(6.0f * side), w);
-
-            if (side > 0.0f) {
-                rotate(rightArm,
-                        lerp(rightArm.xRot, rad(30.0f), w),
-                        lerp(rightArm.yRot, rad(-10.0f), w),
-                        lerp(rightArm.zRot, rad(16.0f), w));
-                rotate(leftArm,
-                        lerp(leftArm.xRot, rad(-18.0f), w),
-                        lerp(leftArm.yRot, rad(-18.0f), w),
-                        lerp(leftArm.zRot, rad(-20.0f), w));
-            } else {
-                rotate(rightArm,
-                        lerp(rightArm.xRot, rad(-18.0f), w),
-                        lerp(rightArm.yRot, rad(18.0f), w),
-                        lerp(rightArm.zRot, rad(20.0f), w));
-                rotate(leftArm,
-                        lerp(leftArm.xRot, rad(30.0f), w),
-                        lerp(leftArm.yRot, rad(10.0f), w),
-                        lerp(leftArm.zRot, rad(-16.0f), w));
-            }
-
-            rotate(rightLeg,
-                    lerp(rightLeg.xRot, rad(side > 0.0f ? 18.0f : -10.0f), w),
-                    lerp(rightLeg.yRot, rad(-4.0f * side), w),
-                    lerp(rightLeg.zRot, rad(5.0f * side), w));
-            rotate(leftLeg,
-                    lerp(leftLeg.xRot, rad(side > 0.0f ? -10.0f : 18.0f), w),
-                    lerp(leftLeg.yRot, rad(4.0f * side), w),
-                    lerp(leftLeg.zRot, rad(-5.0f * side), w));
         }
 
         private void syncWearLayers() {

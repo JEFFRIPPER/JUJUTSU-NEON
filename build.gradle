@@ -21,6 +21,9 @@ minecraft {
             workingDirectory project.file('run')
             property 'forge.logging.markers', 'REGISTRIES'
             property 'forge.logging.console.level', 'info'
+            // миксины библиотек (GeckoLib, Player Animator) ссылаются на SRG-имена: в dev-запуске их надо перевести
+            property 'mixin.env.remapRefMap', 'true'
+            property 'mixin.env.refMapRemappingFile', "${projectDir}/build/createSrgToMcp/output.srg"
             mods {
                 "${mod_id}" {
                     source sourceSets.main
@@ -32,13 +35,26 @@ minecraft {
     }
 }
 
-repositories {}
+repositories {
+    // libs/ как локальный репозиторий (GeckoLib, библиотеки для dev-запуска)
+    flatDir { dirs 'libs' }
+}
 
 dependencies {
     minecraft "net.minecraftforge:forge:${minecraft_version}-${forge_version}"
     // Player Animator (KosmX, MIT). Уже в продакшн-именах (SRG), поэтому только для компиляции
     // и вшивается внутрь нашего jar как есть (Forge Jar-in-Jar), см. jar { ... } ниже.
     compileOnly files('libs/player-animation-lib-forge-1.0.2-rc1+1.20.jar')
+    // GeckoLib 4.8.4 (MIT) — движок анимаций тела. Не изменяется, вшивается как есть (см. jar { ... }).
+    // mclib (MIT, вшит в сам GeckoLib) — его типы (IValue) есть в API GeckoLib, нужен для компиляции.
+    implementation fg.deobf('local:geckolib-forge-1.20.1:4.8.4')
+    compileOnly 'local:mclib:20'
+    // Dev-запуск (gradle runClient -PjnDevLibs, служебная съёмка в CI): те же библиотеки,
+    // переведённые в dev-имена. В собранный .jar это не попадает.
+    if (project.hasProperty('jnDevLibs')) {
+        runtimeOnly fg.deobf('local:player-animation-lib-forge:1.0.2-rc1+1.20')
+        runtimeOnly fg.deobf('local:bendy-lib-forge:4.0.0')
+    }
 }
 
 tasks.named('processResources', ProcessResources).configure {
@@ -53,6 +69,13 @@ tasks.named('processResources', ProcessResources).configure {
     filesMatching(['META-INF/mods.toml', 'pack.mcmeta']) {
         expand replaceProperties + [project: project]
     }
+}
+
+// Служебное: все библиотеки компиляции одним архивом (для быстрой проверки кода без полной сборки).
+tasks.register('jnExportClasspath', Zip) {
+    from(configurations.compileClasspath)
+    archiveFileName = 'jn-classpath.zip'
+    destinationDirectory = file("${buildDir}/jn")
 }
 
 tasks.withType(JavaCompile).configureEach {
@@ -74,6 +97,7 @@ jar {
     from('libs') {
         include 'player-animation-lib-forge-1.0.2-rc1+1.20.jar'
         include 'bendy-lib-forge-4.0.0.jar'
+        include 'geckolib-forge-1.20.1-4.8.4.jar'
         into 'META-INF/jarjar'
     }
     from('src/jarjar') {

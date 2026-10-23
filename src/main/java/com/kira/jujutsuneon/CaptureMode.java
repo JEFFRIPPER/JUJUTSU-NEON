@@ -36,6 +36,8 @@ public final class CaptureMode {
 
     private static final org.slf4j.Logger LOG = com.mojang.logging.LogUtils.getLogger();
     private static Boolean enabled;
+    /** Что снимать: "purple" (катсцена Максимального Фиолетового) или "anim" (анимации тела). */
+    private static String scenario = "purple";
     private static int state;
     private static int wait;
     private static int shots;
@@ -46,8 +48,16 @@ public final class CaptureMode {
 
     static boolean enabled() {
         if (enabled == null) {
-            enabled = new File(Minecraft.getInstance().gameDirectory, "jn_capture.txt").exists();
-            if (enabled) LOG.info("[jn-capture] режим съёмки включён");
+            File f = new File(Minecraft.getInstance().gameDirectory, "jn_capture.txt");
+            enabled = f.exists();
+            if (enabled) {
+                try {
+                    String s = java.nio.file.Files.readString(f.toPath()).trim().toLowerCase(Locale.ROOT);
+                    if (s.equals("anim")) scenario = "anim";
+                } catch (java.io.IOException ignored) {
+                }
+                LOG.info("[jn-capture] режим съёмки включён: " + scenario);
+            }
         }
         return enabled;
     }
@@ -79,7 +89,15 @@ public final class CaptureMode {
                             }
                         });
                     }
-                    if (wait > 160) {
+                    if (wait > 160 && scenario.equals("anim")) {
+                        LOG.info("[jn-capture] старт сценария анимаций");
+                        MinecraftServer server = mc.getSingleplayerServer();
+                        if (server != null) server.execute(() -> server.getCommands().performPrefixedCommand(
+                                server.createCommandSourceStack().withSuppressedOutput(), "gamemode spectator @a"));
+                        CaptureAnimScene.start(mc);
+                        state = 10;
+                        wait = 0;
+                    } else if (wait > 160) {
                         LOG.info("[jn-capture] старт катсцены");
                         MaximumPurpleClient.onStart(mc.player.getUUID(), mc.player.position(), 0.0f);
                         state = 2;
@@ -98,6 +116,13 @@ public final class CaptureMode {
             case 3 -> {
                 if (++wait > 60) mc.stop();
             }
+            case 10 -> {
+                if (CaptureAnimScene.tick(mc)) {
+                    LOG.info("[jn-capture] готово, кадров: " + shots);
+                    state = 3;
+                    wait = 0;
+                }
+            }
             default -> {
             }
         }
@@ -109,6 +134,18 @@ public final class CaptureMode {
 
     @SubscribeEvent
     public static void onRenderTick(TickEvent.RenderTickEvent event) {
+        if (event.phase == TickEvent.Phase.END && state == 10 && enabled()) {
+            // анимации тела: кадр каждые 2 тика (0,1 с), в имени — тик сценария и что идёт
+            double t = CaptureAnimScene.tick + event.renderTickTime;
+            if (t - lastShot < 2.0) return;
+            lastShot = t;
+            Minecraft mc = Minecraft.getInstance();
+            Screenshot.grab(mc.gameDirectory, String.format(Locale.ROOT, "a_%07.2f_%s.png", t, CaptureAnimScene.label),
+                    mc.getMainRenderTarget(), c -> {
+                    });
+            shots++;
+            return;
+        }
         if (event.phase != TickEvent.Phase.END || state != 2 || !enabled()) return;
         double t = MaximumPurpleClient.localClockForCapture();
         if (t < 0.0 || t - lastShot < 0.25) return;

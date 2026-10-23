@@ -281,7 +281,7 @@ public class JujutsuNeonMod {
         CursedFx.init();
         SimpleDomain.init();
         M1Combo.init();
-        FrameAnimNet.init();
+        com.kira.jujutsuneon.rbx.RbxNet.init();
         MovementFx.init();
         modBus.addListener(this::addToCreativeTab);
 
@@ -4801,6 +4801,8 @@ public class JujutsuNeonMod {
         private static int activeAnimLength = 1;
         private static String chargingAnim = "NONE";
         private static float chargingProgress = 0.0f;
+        /** Прогресс зарядки на прошлом тике — руки от первого лица двигаются плавно, с долей тика. */
+        private static float chargingProgressO = 0.0f;
 
         private static boolean hudVisible = true;
         private static double hudEnergy = CE_MAX;
@@ -5022,6 +5024,7 @@ public class JujutsuNeonMod {
                 if (!state.wasDown) {
                     state.ticks = 0;
                     state.holdTriggered = false;
+                    if (Minecraft.getInstance().player != null) com.kira.jujutsuneon.rbx.PlayerAnimations.play(Minecraft.getInstance().player, "blue_charge");
                 }
 
                 state.ticks++;
@@ -5037,6 +5040,7 @@ public class JujutsuNeonMod {
                     chargingProgress = 0.0f;
                     NETWORK.sendToServer(new MaxBlueControlPacket(MaxBlueControlAction.START));
                     startAnim("MAX_BLUE", 40);
+                    if (Minecraft.getInstance().player != null) com.kira.jujutsuneon.rbx.PlayerAnimations.play(Minecraft.getInstance().player, "max_blue");
                 }
             } else if (state.wasDown) {
                 chargingAnim = "NONE";
@@ -5660,6 +5664,11 @@ public class JujutsuNeonMod {
                     activeAnimLength = 1;
                 }
             }
+            // Зарядку Синего отпустили (или её сбросил экран/обездвиживание) — поза зарядки плавно уходит.
+            if (mc.player != null && !"CHARGE_BLUE".equals(chargingAnim) && com.kira.jujutsuneon.rbx.PlayerAnimations.isPlaying(mc.player, "blue_charge")) {
+                com.kira.jujutsuneon.rbx.PlayerAnimations.stop(mc.player, 0.2);
+            }
+            chargingProgressO = chargingProgress;
 
             if (mc.screen != null) {
                 if (lastSpeedHeld) {
@@ -6322,8 +6331,11 @@ public class JujutsuNeonMod {
             boolean main = event.getHand() == InteractionHand.MAIN_HAND;
             float side = main ? 1.0f : -1.0f;
 
+            float pt = event.getPartialTick();
             if (!"NONE".equals(chargingAnim)) {
-                float p = chargingProgress;
+                float p = "CHARGE_MAX_PURPLE".equals(chargingAnim)
+                        ? chargingProgress
+                        : Mth.lerp(pt, Math.min(chargingProgressO, chargingProgress), chargingProgress);
                 float pulse = 0.75f + 0.25f * (float) Math.sin(p * Math.PI * 6.0);
 
                 // Поза зарядки: руки сходятся к центру, напоминает ручные печати,
@@ -6338,6 +6350,11 @@ public class JujutsuNeonMod {
             if (activeAnimTicks <= 0) return;
 
             float t = 1.0f - activeAnimTicks / (float) activeAnimLength;
+
+            if (!"PURPLE_CAST".equals(activeAnim)) {
+                // до конца анимации осталось activeAnimTicks − доля тика: рука идёт плавно в каждом кадре
+                t = Mth.clamp(1.0f - (activeAnimTicks - pt) / (float) activeAnimLength, 0.0f, 1.0f);
+            }
 
             if ("PURPLE_CAST".equals(activeAnim)) {
                 float gather = Mth.clamp(t / 0.70f, 0.0f, 1.0f);

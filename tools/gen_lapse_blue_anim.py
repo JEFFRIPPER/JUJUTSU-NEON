@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Анимация тела для обычного Синего (Player Animator / Emotecraft v3).
 
-Результат (src/main/resources/assets/jujutsu_neon/player_animation/):
+Результат (tools/rig/legacy_pa/ — исходник для tools/rig/convert_pa.py → animations/player/techniques.animation.json):
   lapse_blue.json            — комбо по мобу/игроку (96 тиков, таймлайн LapseBlue.java)
   lapse_blue_grab_low.json   — захват блоков, когда игрок смотрит вниз (26 тиков, всё тело)
   lapse_blue_grab_mid.json   — ... прямо
@@ -31,7 +31,7 @@ import json
 import math
 from pathlib import Path
 
-OUT = Path(__file__).resolve().parent.parent / "src/main/resources/assets/jujutsu_neon/player_animation"
+OUT = Path(__file__).resolve().parent / "rig/legacy_pa"
 OUT.mkdir(parents=True, exist_ok=True)
 
 CHANNELS = {

@@ -5,6 +5,11 @@ on:
     branches:
       - main
   workflow_dispatch:
+    inputs:
+      classpath:
+        description: 'Выложить библиотеки компиляции (jn-classpath.zip) в релиз devlibs-cp'
+        required: false
+        default: 'false'
 
 jobs:
   build:
@@ -27,14 +32,30 @@ jobs:
           gradle-version: '8.1.1'
 
       - name: Install audio tools
+        timeout-minutes: 10
         run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq ffmpeg
+          # ffmpeg (статическая сборка с libvorbis) из PyPI: apt-зеркала GitHub иногда виснут на десятки минут
+          python3 -m pip install --quiet imageio-ffmpeg==0.6.0
+          sudo ln -sf "$(python3 -c 'import imageio_ffmpeg; print(imageio_ffmpeg.get_ffmpeg_exe())')" /usr/local/bin/ffmpeg
+          ffmpeg -hide_banner -encoders | grep -q libvorbis
 
       - name: Generate 4K resources and audio
         run: |
           python3 -m pip install --quiet pillow
           python3 generate_resources.py
+
+      - name: Export dev classpath
+        if: github.event_name == 'workflow_dispatch' && inputs.classpath == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gradle jnExportClasspath --no-daemon
+          ls -la build/jn
+          gh release delete devlibs-cp -y --cleanup-tag || true
+          gh release create devlibs-cp build/jn/jn-classpath.zip \
+            --target "$GITHUB_SHA" --prerelease \
+            --title "Служебное: библиотеки компиляции" \
+            --notes "Не мод. Архив библиотек для проверки кода без полной сборки."
 
       - name: Build Forge mod
         run: |
@@ -85,3 +106,17 @@ jobs:
             --title "Jujutsu Neon ${VERSION} (сборка ${GITHUB_RUN_NUMBER})" \
             --notes-file CHANGELOG.md \
             --latest
+
+      - name: Publish test pre-release (not main)
+        if: github.ref != 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION=$(grep '^mod_version=' gradle.properties | cut -d= -f2)
+          BRANCH=$(echo "${GITHUB_REF_NAME}" | tr '/' '-')
+          TAG="v${VERSION}-test-${BRANCH}-build${GITHUB_RUN_NUMBER}"
+          gh release create "$TAG" build/libs/*.jar \
+            --target "$GITHUB_SHA" \
+            --title "Jujutsu Neon ${VERSION} — тестовая сборка ${GITHUB_RUN_NUMBER}" \
+            --notes "Тестовая сборка ветки ${GITHUB_REF_NAME} (не основной релиз). Что нового — CHANGELOG.md." \
+            --prerelease

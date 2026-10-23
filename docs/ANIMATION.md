@@ -1,170 +1,140 @@
-# Покадровые анимации Jujutsu Neon
+# Анимации игрока Jujutsu Neon
 
-Система позволяет задать позу модели игрока на **каждый кадр** анимации (по умолчанию 24 кадра в секунду,
-можно 30, 60 — любое число) и проигрывает её с точностью до миллисекунды: поза пересчитывается в каждом
-кадре отрисовки игры, между кадрами файла — сглаживание Кэтмелла–Рома, сами кадры проходятся точно.
-Поэтому анимация из референса переносится кадр в кадр, без «урезанных» промежутков.
+Игрок рисуется моделью **R15** (15 костей, как персонаж Roblox), а все анимации — обычные анимации
+**Blockbench** (формат Bedrock / GeckoLib: `.geo.json` + `.animation.json`). Движок анимаций —
+**GeckoLib 4.8.4** (MIT, вшит в мод, сам не изменяется): он читает и запекает файлы Blockbench.
+Поверх него — система, устроенная как анимации в Roblox (пакет `com.kira.jujutsuneon.rbx`).
+
+Максимальный Фиолетовый не трогается: он играет по-старому через Player Animator (`MaximumPurpleAnimation`),
+и пока он идёт, игрок рисуется ванильной моделью.
+
+## Как в Roblox
+
+| Roblox | Здесь |
+|---|---|
+| R15-персонаж | `geo/player_r15.geo.json` (и `_slim` для тонких рук), броня — `geo/armor_r15_*.geo.json` |
+| Animation (ассет) | анимация в `.animation.json` (`Clip`) |
+| Animator, AnimationTrack | `Animator`, `AnimationTrack`: `play/stop(fade)`, `adjustSpeed`, `adjustWeight`, `timePosition`, `looped`, сигналы `stopped`, `ended`, `didLoop`, `markerReached` |
+| AnimationPriority | `Core < Idle < Movement < Action < Action2 < Action3 < Action4` |
+| KeyframeMarker | инструкция на дорожке эффектов Blockbench (`hit`, `fire=2`) |
+| Animate (LocalScript) | `AnimateScript`: стойка, шаг, бег, сверхбег, присед, прыжок, падение, плавание, лазание, сидение, полёт, дэши, предметы |
+| репликация анимаций | `RbxNet`: анимацию видят все рядом |
+
+Трек с более высоким приоритетом перекрывает нижние **только на тех костях, которые он анимирует**: анимация
+только рук не мешает ногам ходить. Треки одного приоритета смешиваются по весам. Переходы — плавные
+(повороты смешиваются кватернионами).
+
+## Кости R15
+
+`LowerTorso` (таз, корень) → `UpperTorso` → `Head`, `RightUpperArm` → `RightLowerArm` → `RightHand`
+(и левые); от таза — `RightUpperLeg` → `RightLowerLeg` → `RightFoot` (и левые).
+Кости `...Layer` — второй слой скина, их не анимируют (идут за своей костью).
+
+Значения — как в Blockbench: повороты в градусах, смещения в пикселях.
+
+* поворот X < 0 — рука/нога вперёд-вверх (`-90` — рука вперёд, `-180` — вверх);
+* у корпуса X > 0 — наклон вперёд, у головы — взгляд вниз;
+* предплечье X < 0 — сгиб в локте; голень X > 0 — сгиб колена;
+* Z > 0 — правая рука/нога наружу (левая — внутрь); у корпуса — наклон влево. У **поднятой** руки знак Z
+  разводит наоборот (рука вверх и наружу — Z < 0 для правой);
+* Y > 0 — поворот вправо;
+* смещение: X > 0 — влево, Y > 0 — вверх, Z > 0 — назад.
+
+## Свойства анимации
+
+Пишутся прямо в Blockbench инструкцией на дорожке эффектов (Timeline), в любом месте анимации:
+
+| Инструкция | Что делает |
+|---|---|
+| `@priority=action` | приоритет: `core`, `idle`, `movement`, `action`, `action2`…`action4` (по умолчанию `action`) |
+| `@fade_in=0.1`, `@fade_out=0.15` | плавный вход и выход, секунды |
+| `@look=0.3` | насколько голова следит за взглядом, 0..1 (по умолчанию 1 у Core/Idle, 0.25 у остальных) |
+| `@aim=1` | плечи следуют за взглядом (лук, щит, прицел) |
+| `@fp=arms` / `right` / `left` / `none` | что видно от первого лица: руки модели или ванильные (по умолчанию для Action — `arms`) |
+| `@blend=additive` | прибавляется к нижним слоям, а не заменяет их |
+| `@move_speed=4.3` | для цикла шага: скорость (блоки/с), под которую он нарисован — шаг не скользит |
+
+Остальные инструкции — маркеры (`hit`, `fire=2`). Звуки (Sound Effects) и частицы Blockbench тоже играют.
+Петля: в Blockbench `Loop` — по кругу, `Hold on last frame` — застыть на последнем кадре.
 
 ## Где лежат анимации
 
 | Откуда | Путь | Когда подхватывается |
 |---|---|---|
-| Мод | `assets/jujutsu_neon/frame_animations/**.json` | при загрузке ресурсов (вход в мир, F3+T) |
-| Папка игры | `config/jujutsu_neon/animations/**.json` | **сразу**: сохранили файл — через секунду новая версия в игре |
+| Мод | `assets/jujutsu_neon/animations/player/*.animation.json` | при загрузке ресурсов (F3+T) |
+| Папка игры | `config/jujutsu_neon/animations/**.json` | **сразу**: сохранили файл — через секунду в игре |
 
-Файл из папки с тем же именем заменяет встроенную анимацию — так можно править анимации мода без пересборки.
+Имя анимации — ключ в файле; ключ `animation.player.walk` доступен и как `walk`. Анимация из папки игры
+с тем же именем заменяет встроенную — так анимации мода правятся без пересборки.
 
-## Каналы позы
+Встроенные:
 
-Части: `body` (всё тело), `head`, `torso`, `rightArm`, `leftArm`, `rightLeg`, `leftLeg`.
+* `locomotion.animation.json` — Animate: `idle`, `idle_look`, `walk`, `run`, `sprint`, `crouch_idle`, `crouch_walk`,
+  `jump`, `fall`, `land`, `swim`, `swim_idle`, `climb`, `sit`, `glide`, `sleep`, `charge`, `leap`,
+  `fly_hover`, `fly_glide`, `fly_boost`, `fly_land`, `dash_front/back/left/right`, `hold_item`, `hold_crossbow`,
+  `swing`, `use_eat/drink/block/bow/spear/crossbow/spyglass/horn/brush`;
+* `techniques.animation.json` — техники: `red_cast`, `max_red`, `blue_charge`, `max_blue`, `lapse_blue`,
+  `lapse_blue_grab_low/mid/high`, `lapse_blue_hold`, `lapse_blue_throw`, `domain_cast`, `simple_domain`,
+  `m1_jab_l/r`, `m1_final`, `m1_knockdown`.
 
-| Канал | Единицы | Что делает |
-|---|---|---|
-| `<часть>.pitch` / `.yaw` / `.roll` | градусы | поворот части |
-| `<конечность>.bend`, `torso.bend` | градусы | сгиб посередине (локоть, колено, корпус) |
-| `<конечность>.bend_axis`, `torso.bend_axis` | градусы | направление сгиба (0 — вперёд/назад) |
-| `body.x` / `.y` / `.z` | блоки | смещение всего тела (`body.y = -0.56` — лежит на земле) |
-| `head/torso/рука/нога .x/.y/.z` | пиксели модели | смещение части от её места |
+## Работа в Blockbench
 
-Знаки (как в игре):
+1. В игре: `/jnanim export` — модели и анимации выкладываются в `config/jujutsu_neon/blockbench`.
+2. Blockbench: **File → Open Model** → `player_r15.geo.json`, вкладка **Animate** → **Import Animations** →
+   нужный `.animation.json`.
+3. Правите, сохраняете анимацию в `config/jujutsu_neon/animations/` — в игре она обновится сама.
+4. Готовую анимацию кладёте в `src/main/resources/assets/jujutsu_neon/animations/player/`.
 
-* рука/нога `pitch < 0` — вперёд-вверх (`-90` — рука вытянута вперёд, `-180` — вверх);
-* правая `roll > 0` и левая `roll < 0` — наружу; правая `yaw < 0` и левая `yaw > 0` — внутрь;
-* сгиб руки `< 0` — локоть сгибается, сгиб ноги `> 0` — колено;
-* `head.pitch > 0` — взгляд вниз; `torso.bend > 0` — наклон вперёд;
-* `body.pitch > 0` — отклониться назад, `body.yaw > 0` — повернуться влево, `body.roll > 0` — завалиться влево;
-  всё тело поворачивается вокруг таза (0,7 блока над ногами).
+Анимации передвижения собраны скриптом `tools/rig/gen_locomotion.py` (обёртка над форматом —
+`tools/rig/anim_dsl.py`), техники переведены из старых поз Player Animator скриптом `tools/rig/convert_pa.py`
+(исходники — `tools/rig/legacy_pa/`, тайминги сохранены до тика). Превью без игры:
 
-Не заданный канал — ванильная поза (или нижний слой анимаций), поэтому можно анимировать только руки,
-а ноги оставить ходить.
-
-## Формат 1 — покадровый (`jn_frames`)
-
-```json
-{
-  "format": "jn_frames",
-  "name": "my_punch",
-  "fps": 24,
-  "channels": ["rightArm.pitch", "rightArm.bend", "torso.yaw"],
-  "frames": [
-    [0, -6, 0],
-    [-8, -30, 4],
-    [-22, -70, 8]
-  ]
-}
+```
+python3 tools/rig/preview.py anim src/main/resources/assets/jujutsu_neon/animations/player/locomotion.animation.json animation.player.walk --views front,side
 ```
 
-Кадр может быть и объектом: `{"rightArm.pitch": -90}` — незаданный канал тогда держит значение прошлого кадра;
-`null` — «отпустить» канал в ваниль.
-
-## Формат 2 — ключи с кривыми (`jn_keys`)
-
-```json
-{
-  "format": "jn_keys",
-  "name": "wave",
-  "fps": 24,
-  "length": 36,
-  "keys": [
-    {"frame": 0, "pose": {"leftArm.pitch": 0}},
-    {"frame": 8, "ease": "outback", "pose": {"leftArm.pitch": -170}},
-    {"frame": 35, "ease": [0.4, 0, 0.2, 1], "pose": {"leftArm.pitch": 0}}
-  ],
-  "tracks": {"head.yaw": [[0, 0], [10, 12, "outquad"], [35, 0, "inoutsine"]]}
-}
-```
-
-Кривая ключа — переход **в** этот ключ. При загрузке всё запекается в каждый кадр.
-Кривые: `linear`, `step`, `smooth`, `smoother`, `in/out/inout` + `sine`, `quad`, `cubic`, `quart`, `quint`,
-`expo`, `circ`, `back`, `elastic`, `bounce`, или Безье `[x1, y1, x2, y2]` (как в CSS).
-
-## Формат 3 — Blockbench (Bedrock)
-
-Обычный экспорт анимаций Blockbench (`animation.json`). Кости: `head`, `body` (корпус), `rightArm`/`right_arm`,
-`leftArm`, `rightLeg`, `leftLeg`, `root`/`waist` (всё тело). Каждая анимация файла — отдельная анимация.
-Частота сэмплирования — поле `"jn_fps"` (по умолчанию 60). Знаки осей: `"jn_rotation_sign": [-1, -1, 1]`,
-`"jn_position_sign": [-1, 1, 1]` (по умолчанию как в GeckoLib — проверьте на `jn_calibration`).
-Общие поля (fade, first_person, events…) — в объекте `"jn"`.
-
-## Формат 4 — старые анимации мода (Player Animator)
-
-`player_animation/*.json` читаются как есть и переводятся в кадры точно так же, как их играет Player Animator
-(`/jnanim emote <имя>`, `/jnanim bake <имя>` — записать в покадровый файл для правки).
-
-## Общие поля
-
-| Поле | По умолчанию | Смысл |
-|---|---|---|
-| `fps` | 24 | кадров в секунду |
-| `loop`, `loop_from` | false, 0 | петля и с какого кадра она повторяется |
-| `hold_last` | false | после конца держать последний кадр, пока не остановят |
-| `interpolation` | `catmull` | между кадрами: `catmull`, `linear`, `step` |
-| `fade_in`, `fade_out` | 0.1, 0.15 | плавный вход/выход: секунды, или `"6f"` (кадры), `"120ms"` |
-| `speed` | 1 | скорость |
-| `head` | `absolute` | `additive` — повороты головы прибавляются к взгляду игрока |
-| `clock` | `game` | `real` — по реальным часам (не замедляется при лагах сервера) |
-| `first_person` | нет | `{"mode": "model", "right_arm": true, "left_arm": true, "until": 30}` — руки модели видны от первого лица |
-| `events` | — | `[{"frame": 13, "name": "fire", "data": "..."}]` — событие ровно на кадре (для эффектов/звуков) |
-| `secondary` | выкл | живой слой (ниже) |
-
-## Живой слой (`secondary`)
-
-```json
-"secondary": {"enabled": true, "amount": 1, "stiffness": 140, "damping": 13,
-              "arms": 1, "legs": 0.4, "torso": 0.6, "head": 0.7, "body": 0.3,
-              "breathing": 1, "breath_period": 3.6, "micro": 1, "inertia": 1}
-```
-
-* пружины: каждый угол догоняет позу кадра — запаздывание, захлёст на остановке, отдача
-  (меньше `damping` — сильнее захлёст);
-* `inertia` — рывки и торможения игрока отклоняют руки и корпус;
-* `breathing` — дыхание; `micro` — едва заметные живые колебания головы и рук.
-
-Считается в каждом кадре отрисовки по реальному времени. Для анимаций «один в один с референсом»
-обычно не нужен (или с маленькой силой) — он для живости поверх.
-
-## Запуск из кода
-
-```java
-// на клиенте
-FrameAnimations.play(player, "my_punch");
-FrameAnimations.play(player, "my_punch", new FrameAnimations.PlayOptions().speed(1.2f).mirror(true));
-FrameAnimations.stop(player, 0.2f);
-FrameAnimations.addEventListener((entity, anim, ev) -> { if (ev.name.equals("fire")) { /* эффект */ } });
-
-// с сервера (увидят все рядом и сам игрок)
-FrameAnimNet.play(serverPlayer, "my_punch");
-```
-
-Слой покадровых анимаций — приоритет 3000: выше техник (2000) и движения (1000), но только на тех частях тела,
-что анимация задаёт.
-
-## Команды в игре (`/jnanim`)
+## Команда `/jnanim` (в игре, на себе; F5 — смотреть со стороны)
 
 | Команда | Что делает |
 |---|---|
 | `list` | все анимации |
-| `play <имя> [скорость]`, `loop <имя>`, `mirror <имя>` | проиграть на себе (F5 — посмотреть со стороны) |
-| `frame <имя> <кадр>` | стоп-кадр (можно дробный: `12.5`) |
-| `step <±кадры>` | листать стоп-кадр |
-| `speed <x>` | замедлить/ускорить все покадровые (0.1 — в 10 раз медленнее) |
-| `stop` | остановить |
-| `info <имя>` | fps, кадры, каналы, события |
-| `export <имя>` | записать в покадровый формат (`config/jujutsu_neon/animations/export`) |
-| `emote <имя>` / `bake <имя>` | старая анимация мода через покадровый проигрыватель / в покадровый файл |
-| `reload`, `errors` | перечитать / ошибки загрузки |
+| `play <имя> [скорость]`, `loop <имя>`, `mirror <имя>` | проиграть один раз / по кругу / зеркально |
+| `pose <имя> <секунда>`, `step <±секунды>` | стоп-кадр в любой момент и сдвиг стоп-кадра |
+| `speed <x>` | замедлить или ускорить все анимации (0.1 — в 10 раз медленнее) |
+| `stop` | плавно остановить |
+| `tracks` | что сейчас играет: треки, приоритеты, веса |
+| `info <имя>` | длина, петля, приоритет, переходы, маркеры, кости |
+| `reload`, `errors` | перечитать папку / показать ошибки загрузки |
+| `export` | выложить модели и анимации для Blockbench |
+| `model r15` / `model vanilla` | модель игрока: R15 или ванильная (настройка клиента) |
 
-## Инструменты (`tools/jnanim`)
+## Из кода
 
-* `jnanim.py` — библиотека: ключи и кривые → каждый кадр, правка отдельных кадров, зеркало, смена fps
-  без потери формы, склейка, запечённые пружины, чтение всех форматов, запись `jn_frames`.
-* `preview.py anim.json` — модель игрока в позе каждого кадра: лист кадров с номерами (спереди, сбоку, 3/4),
-  GIF в реальной скорости, `--frame 12` — один кадр крупно.
-* `compare.py anim.json --video ref.mp4 --start 1.2 --crop x:y:w:h` — референс и модель кадр в кадр
-  (рядом или наложением `--overlay 0.45`).
-* `make_examples.py` — служебные `jn_calibration` (проверка знаков осей, по секунде на ось),
-  `jn_example_frames`, `jn_example_keys`.
-* `refmetrics.py кадры/ --out metrics.csv` — замеры каждого кадра видео: яркость, склейки, сдвиг камеры,
-  где на экране и какого размера синие/красные/фиолетовые/белые пятна эффектов. Для катсцен:
-  `gen_max_purple_tracks.py` переводит замеры в треки (`MaxPurpleRefTracks.java`) — шары и камера в моде
-  повторяют положение на экране и повороты камеры из видео кадр в кадр.
+Клиент:
+
+```java
+AnimationTrack t = PlayerAnimations.play(player, "red_cast", new PlayerAnimations.Play()
+        .fade(0.1)                       // вход, секунды
+        .speed(1.0).weight(1.0)
+        .startAt(0.3)                    // начать с 0,3 с (догнать по времени)
+        .firstPerson(true, false, 0.9)   // от первого лица — правая рука модели, первые 0,9 с
+        .replicate(true));               // показать всем рядом
+t.getMarkerReachedSignal("fire").connect(param -> { /* ... */ });
+PlayerAnimations.stop(player, 0.2);
+```
+
+Сервер (увидят все рядом и сам игрок):
+
+```java
+RbxNet.play(serverPlayer, "red_cast");
+RbxNet.play(serverPlayer, new RbxNet.Anim("red_cast").speed(1.2f).startAt(0.3f));
+RbxNet.stop(serverPlayer, 0.2f);
+```
+
+## Как устроен рендер
+
+Ванильный рендер игрока не заменяется: на время одной отрисовки у `PlayerRenderer` подменяется только модель
+(`R15PlayerModel`). Она рисует сетку R15 в позе из анимаций, а ванильные части ставит по костям R15 —
+поэтому работают повороты тела (плавание, элитры, сон), ник, тень, невидимость, свечение и слои других модов.
+Броня рисуется по сегментам R15, предмет — в кисти, плащ и элитры идут за корпусом.
+От первого лица во время анимаций с `@fp` видны руки самой модели (`R15FirstPerson`).
