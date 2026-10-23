@@ -24,8 +24,11 @@ import java.util.Random;
  */
 public final class AnimateScript {
 
-    /** Наклоны всего тела поверх анимаций, градусы: вперёд (+) и вправо (+); тело наклоняется вокруг ступней. */
-    public double leanPitch, leanRoll;
+    /**
+     * Наклоны всего тела поверх анимаций, градусы: вперёд (+) и вправо (+). На земле тело наклоняется вокруг ступней,
+     * в полёте — вокруг таза ({@link #leanPivot}, пиксели над ступнями).
+     */
+    public double leanPitch, leanRoll, leanPivot;
 
     private final Animator animator;
     private final Map<String, Slot> slots = new HashMap<>();
@@ -269,8 +272,19 @@ public final class AnimateScript {
         // в поворот наклоняются (поворот вправо — крен вправо), при разгоне — вперёд
         double tRoll = clamp(in.turnRate / 220.0, -1, 1) * 8.0 * moving * groundish;
         double tPitch = clamp(in.accel / 40.0, -1, 1) * 5.0 * groundish;
-        leanRoll = approach(leanRoll, tRoll, 7, dt);
-        leanPitch = approach(leanPitch, tPitch, 7, dt);
+        // ---------------- полёт: корпус ложится по ходу (сильнее на ускорении), вверх — откидывается,
+        // вниз — клонится; в сторону и в поворот — крен, как у самолёта
+        double fw = clamp(in.flightW, 0, 1) * (1 - clamp(in.landW, 0, 1));
+        if (fw > 1.0E-3) {
+            double move = clamp(in.flightMove, 0, 1);
+            double fp = clamp(14 + 16 * in.boostW - 0.35 * in.elevation, -25, 45) * move;
+            double fr = clamp(in.bank * 18 + clamp(in.turnRate / 220.0, -1, 1) * 14 * move, -30, 30);
+            tPitch += fp * fw;
+            tRoll += fr * fw;
+        }
+        leanRoll = approach(leanRoll, tRoll, fw > 1.0E-3 ? 5 : 7, dt);
+        leanPitch = approach(leanPitch, tPitch, fw > 1.0E-3 ? 5 : 7, dt);
+        leanPivot = approach(leanPivot, 12 * clamp(in.flightW, 0, 1), 6, dt);
 
         applySlots(dt);
     }

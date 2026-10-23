@@ -37,6 +37,12 @@ final class R15ArmorModel extends HumanoidArmorModel<AbstractClientPlayer> {
         visible[R15Rig.Part.RIGHT_LEG.ordinal()] = rightLeg.visible;
         visible[R15Rig.Part.LEFT_LEG.ordinal()] = leftLeg.visible;
         overlays[R15Rig.Part.HEAD.ordinal()] = hat.visible;
+        if (c.firstPerson) {
+            for (R15Rig.Part part : R15Rig.Part.values()) {
+                visible[part.ordinal()] &= c.partShown(part);
+                overlays[part.ordinal()] &= c.partShown(part);
+            }
+        }
         m.apply(c.state.finalPose);
         ps.pushPose();
         R15Render.toGeo(ps, c);

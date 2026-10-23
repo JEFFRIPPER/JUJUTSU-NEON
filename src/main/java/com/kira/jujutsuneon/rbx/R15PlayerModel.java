@@ -104,6 +104,12 @@ public final class R15PlayerModel extends PlayerModel<AbstractClientPlayer> {
         overlays[R15Rig.Part.LEFT_ARM.ordinal()] = leftSleeve.visible;
         overlays[R15Rig.Part.RIGHT_LEG.ordinal()] = rightPants.visible;
         overlays[R15Rig.Part.LEFT_LEG.ordinal()] = leftPants.visible;
+        if (c.firstPerson) {
+            for (R15Rig.Part part : R15Rig.Part.values()) {
+                visible[part.ordinal()] &= c.partShown(part);
+                overlays[part.ordinal()] &= c.partShown(part);
+            }
+        }
         ps.pushPose();
         R15Render.toGeo(ps, c);
         c.skin.render(ps, c.state.finalPose, vc, light, overlay, r, g, b, a, visible, overlays);
@@ -119,6 +125,11 @@ public final class R15PlayerModel extends PlayerModel<AbstractClientPlayer> {
             return;
         }
         boolean right = arm == HumanoidArm.RIGHT;
+        if (!c.partShown(right ? R15Rig.Part.RIGHT_ARM : R15Rig.Part.LEFT_ARM)) {
+            // от первого лица эта рука ванильная: её предмет рисует ванильный вид руки, здесь — схлопнуть
+            ps.scale(0, 0, 0);
+            return;
+        }
         float armY = slim ? 2.5f : 2.0f;
         // у тонких рук ванилла сдвигает предмет на полпикселя к телу
         float x = (right ? -5 : 5) + (slim ? (right ? 0.5f : -0.5f) : 0);

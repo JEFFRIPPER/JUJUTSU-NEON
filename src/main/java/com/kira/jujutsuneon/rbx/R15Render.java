@@ -15,6 +15,7 @@ import net.minecraft.client.renderer.entity.LivingEntityRenderer;
 import net.minecraft.client.renderer.entity.RenderLayerParent;
 import net.minecraft.client.renderer.entity.layers.ElytraLayer;
 import net.minecraft.client.renderer.entity.layers.HumanoidArmorLayer;
+import net.minecraft.client.renderer.entity.layers.ItemInHandLayer;
 import net.minecraft.client.renderer.entity.layers.RenderLayer;
 import net.minecraft.client.renderer.entity.player.PlayerRenderer;
 import net.minecraft.world.entity.EquipmentSlot;
@@ -35,6 +36,7 @@ import java.lang.reflect.Method;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Map;
@@ -70,11 +72,21 @@ public final class R15Render {
         Matrix4f layerPose;
         /** Поворот корпуса: ванильный → R15 (в пространстве ванильной модели) — для плаща и элитр. */
         final Matrix4f bodyDelta = new Matrix4f();
+        /** Свои руки от первого лица ({@link R15FirstPerson}): видны только эти руки. */
+        boolean firstPerson, fpRight, fpLeft;
+
+        /** Видна ли часть тела в этой отрисовке (от первого лица — только показанные руки). */
+        boolean partShown(R15Rig.Part part) {
+            if (!firstPerson) return true;
+            return (part == R15Rig.Part.RIGHT_ARM && fpRight) || (part == R15Rig.Part.LEFT_ARM && fpLeft);
+        }
     }
 
     private static Context current;
     private static final Map<Object, PlayerModel<AbstractClientPlayer>> ORIGINALS = new IdentityHashMap<>();
     private static final Map<Object, Boolean> PREPARED = new WeakHashMap<>();
+    /** Слои, убранные на время отрисовки рук от первого лица. */
+    private static final Map<Object, List<Object>> SAVED_LAYERS = new IdentityHashMap<>();
     private static R15PlayerModel wideModel, slimModel;
     private static R15ArmorModel innerArmor, outerArmor;
     private static R15ElytraModel elytra;
@@ -153,12 +165,41 @@ public final class R15Render {
         c.armorInner = R15Rig.model(R15Rig.ARMOR_INNER);
         c.slim = slim;
         c.lift = p.isCrouching() ? CROUCH_OFFSET : 0;
+        if (R15FirstPerson.pass && p == Minecraft.getInstance().player) {
+            c.firstPerson = true;
+            c.fpRight = R15FirstPerson.showRight;
+            c.fpLeft = R15FirstPerson.showLeft;
+            keepFirstPersonLayers(renderer);
+        }
         current = c;
+    }
+
+    /** От первого лица из слоёв остаются только броня и предметы в руках (плащ, головной предмет, стрелы — нет). */
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    private static void keepFirstPersonLayers(PlayerRenderer renderer) {
+        try {
+            List<Object> layers = (List) rendererLayers.get(renderer);
+            SAVED_LAYERS.put(renderer, new ArrayList<>(layers));
+            layers.removeIf(l -> !(l instanceof CaptureLayer || l instanceof HumanoidArmorLayer<?, ?, ?>
+                    || l instanceof ItemInHandLayer<?, ?>));
+        } catch (ReflectiveOperationException | RuntimeException e) {
+            RbxLog.LOGGER.warn("R15 first person: layer filter failed", e);
+        }
+    }
+
+    /** Конец отрисовки рук от первого лица: вернуть модель и слои, даже если отрисовка упала. */
+    static void endPass(PlayerRenderer renderer) {
+        restore(renderer);
+        current = null;
     }
 
     /** Если отрисовку отменил кто-то после нас — сразу вернуть всё как было. */
     @SubscribeEvent(priority = EventPriority.LOWEST, receiveCanceled = true)
     public static void onPreCancelled(RenderPlayerEvent.Pre event) {
+        // свои руки от первого лица рисуются только моделью R15: если подменить не вышло — не рисовать ничего
+        if (!event.isCanceled() && R15FirstPerson.pass && (current == null || current.player != event.getEntity())) {
+            event.setCanceled(true);
+        }
         if (event.isCanceled()) {
             restore(event.getRenderer());
             current = null;
@@ -171,9 +212,20 @@ public final class R15Render {
         current = null;
     }
 
+    @SuppressWarnings({"unchecked", "rawtypes"})
     private static void restore(Object renderer) {
         PlayerModel<AbstractClientPlayer> original = ORIGINALS.remove(renderer);
         if (original != null) setModel(renderer, original);
+        List<Object> saved = SAVED_LAYERS.remove(renderer);
+        if (saved != null) {
+            try {
+                List<Object> layers = (List) rendererLayers.get(renderer);
+                layers.clear();
+                layers.addAll(saved);
+            } catch (ReflectiveOperationException | RuntimeException e) {
+                RbxLog.LOGGER.error("R15 first person: layer restore failed", e);
+            }
+        }
     }
 
     /** Контекст текущей отрисовки, если модель m сейчас рисует игрока p (p == null — любого). */

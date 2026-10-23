@@ -18,7 +18,9 @@ import java.util.UUID;
  */
 final class CaptureAnimScene {
 
-    static final int END = 1240;
+    static final int END = 1440;
+    /** С этого тика — свой игрок от первого лица: руки модели во время техник. */
+    static final int FIRST_PERSON = 1240;
 
     private static RemotePlayer actor;
     private static Vec3 origin;
@@ -94,10 +96,13 @@ final class CaptureAnimScene {
             label = "flight";
             view = 2;
             target = flight(t);
-        } else {
+        } else if (t < FIRST_PERSON) {
             target = 0;
             view = 1;
             techniques(t);
+        } else {
+            target = 0;
+            firstPerson(mc, t);
         }
 
         // движение актёра: разгон/торможение как у игрока, вперёд — +X
@@ -120,7 +125,7 @@ final class CaptureAnimScene {
         actor.setYRot(-90f);
         actor.setYHeadRot(-90f);
 
-        camera(mc, view);
+        if (t < FIRST_PERSON) camera(mc, view);
         return t >= END;
     }
 
@@ -182,6 +187,42 @@ final class CaptureAnimScene {
         if (t == 1040) play("simple_domain", "simple_domain", new PlayerAnimations.Play().fade(0.15));
         if (t == 1100) play("domain_cast", "domain_cast", new PlayerAnimations.Play().fade(0.2));
         if (t == 1200) PlayerAnimations.stop(actor, 0.4);
+    }
+
+    /** Свой игрок (творческий режим, вид из глаз): техники с руками модели от первого лица. */
+    private static void firstPerson(Minecraft mc, int t) {
+        var p = mc.player;
+        if (t == FIRST_PERSON) {
+            var server = mc.getSingleplayerServer();
+            if (server != null) server.execute(() -> server.getCommands().performPrefixedCommand(
+                    server.createCommandSourceStack().withSuppressedOutput(), "gamemode creative @a"));
+            mc.options.hideGui = false;
+            mc.options.setCameraType(net.minecraft.client.CameraType.FIRST_PERSON);
+        }
+        p.getAbilities().flying = false;
+        p.setDeltaMovement(Vec3.ZERO);
+        p.setPos(origin.x - 3, origin.y, origin.z);
+        p.setYRot(-90f);
+        p.setXRot(8f);
+        p.setYHeadRot(-90f);
+        p.yBodyRot = -90f;
+        int a = t - FIRST_PERSON;
+        if (a == 15) fp("fp_red", "red_cast", new PlayerAnimations.Play().fade(0.1).firstPerson(true, false, 0.9));
+        if (a == 50) fp("fp_blue", "blue_charge", new PlayerAnimations.Play());
+        if (a == 70) fp("fp_blue", "max_blue", new PlayerAnimations.Play());
+        if (a == 115) fp("fp_m1", "m1_jab_r", new PlayerAnimations.Play().fade(0.07).firstPerson(true, true, 0.45));
+        if (a == 122) fp("fp_m1", "m1_jab_l", new PlayerAnimations.Play().fade(0.07).firstPerson(true, true, 0.45));
+        if (a == 129) fp("fp_m1", "m1_final", new PlayerAnimations.Play().fade(0.07).firstPerson(true, true, 0.7));
+        if (a == 160) fp("fp_grab", "lapse_blue_grab_mid", new PlayerAnimations.Play().fade(0.1).firstPerson(true, false, 1.2));
+        if (a == 190) {
+            fp("fp_f5", "red_cast", new PlayerAnimations.Play().fade(0.1));
+            mc.options.setCameraType(net.minecraft.client.CameraType.THIRD_PERSON_BACK);
+        }
+    }
+
+    private static void fp(String lbl, String clip, PlayerAnimations.Play opts) {
+        label = lbl;
+        PlayerAnimations.play(Minecraft.getInstance().player, clip, opts);
     }
 
     private static void play(String lbl, String clip, PlayerAnimations.Play opts) {

@@ -498,6 +498,16 @@ public final class PlayerAnimations {
             }
             // наклоны всего тела вокруг ступней (GeoBone: X со знаком минус; крен вправо — поворот вокруг Z на минус)
             QMath.fromEulerZYX(-Math.toRadians(animate.leanPitch), 0, -Math.toRadians(animate.leanRoll), out.rootRot);
+            // точка наклона: у ступней на земле, у таза в полёте — сдвиг, чтобы поворот шёл вокруг (0, h, 0)
+            double h = animate.leanPivot / 16.0;
+            if (h > 1.0E-4) {
+                double[] r = out.rootRot, pv = {0, h, 0, 0}, t1 = new double[4], t2 = new double[4];
+                QMath.mul(r, pv, t1);
+                QMath.mul(t1, new double[]{-r[0], -r[1], -r[2], r[3]}, t2);
+                out.rootPos[0] = -t2[0];
+                out.rootPos[1] = h - t2[1];
+                out.rootPos[2] = -t2[2];
+            }
         }
 
         private static void aim(double[][] q, int arm, double[] parent, double[] parentInv, double[] look, double w,
