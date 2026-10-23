@@ -1,6 +1,6 @@
 package com.kira.jujutsuneon;
 
-import com.kira.jujutsuneon.anim.Animator;
+import com.kira.jujutsuneon.rbx.PlayerAnimations;
 import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.blaze3d.vertex.BufferBuilder;
 import com.mojang.blaze3d.vertex.BufferUploader;
@@ -144,7 +144,7 @@ public final class SimpleDomainClient {
         if (mc.level == null) return;
         SCENES.put(owner, new Scene(owner, entityId, center, inDomain));
         if (mc.level.getEntity(entityId) instanceof AbstractClientPlayer p) {
-            BodyAnims.play(p, "simple_domain", new Animator.Play().fadeIn(0.15));
+            PlayerAnimations.play(p, "simple_domain", new PlayerAnimations.Play().fade(0.15));
         }
     }
 

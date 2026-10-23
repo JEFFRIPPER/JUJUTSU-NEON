@@ -20,7 +20,7 @@ import java.util.Map;
 
 /**
  * Подмена модели на время каста Фиолетового (PURPLE_CAST / HOLLOW_PURPLE) — старая система,
- * оставлена как есть до переделки Фиолетового. Всё остальное анимирует движок {@link BodyAnims}.
+ * оставлена как есть до переделки Фиолетового. Всё остальное анимирует {@link com.kira.jujutsuneon.rbx.PlayerAnimations}.
  *
  * Design rules:
  * - vanilla locomotion stays the base pose;
@@ -130,7 +130,7 @@ public final class JujutsuNeonSkillAnimationClient {
 
     private static SkillFrame currentFrame() {
         try {
-            // Синий (зарядка и Максимальный) и дэши теперь в движке анимаций тела (BodyAnims) — здесь только Фиолетовый.
+            // Синий (зарядка и Максимальный) и дэши — в анимациях игрока (rbx.PlayerAnimations), здесь только Фиолетовый.
             String active = (String) ACTIVE_ANIM.get(null);
             int ticks = ACTIVE_ANIM_TICKS.getInt(null);
             int length = Math.max(1, ACTIVE_ANIM_LENGTH.getInt(null));
@@ -147,6 +147,18 @@ public final class JujutsuNeonSkillAnimationClient {
         } catch (IllegalAccessException ignored) {
             return SkillFrame.NONE;
         }
+    }
+
+    /**
+     * Идёт ли у игрока Фиолетовый (подмена модели здесь или Максимальный в Player Animator).
+     * Пока идёт, модель R15 не подставляется — Фиолетовый рисуется как раньше.
+     */
+    public static boolean purpleActive(AbstractClientPlayer player) {
+        if (player == null) return false;
+        if (MaximumPurpleAnimation.isPlaying(player)) return true;
+        Minecraft mc = Minecraft.getInstance();
+        if (player != mc.player || !hudBlindfold() || !hasBlindfold()) return false;
+        return currentFrame().skill != Skill.NONE;
     }
 
     @SuppressWarnings("unchecked")

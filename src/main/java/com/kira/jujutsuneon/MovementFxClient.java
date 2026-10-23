@@ -1,6 +1,6 @@
 package com.kira.jujutsuneon;
 
-import com.kira.jujutsuneon.anim.Locomotion;
+import com.kira.jujutsuneon.rbx.AnimateInput;
 import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.blaze3d.vertex.BufferBuilder;
 import com.mojang.blaze3d.vertex.BufferUploader;
@@ -44,8 +44,8 @@ import java.util.Random;
 import static com.kira.jujutsuneon.MovementFx.*;
 
 /**
- * Клиент движения: состояние дэшей, взлёта и полёта (позы тела по нему строит движок анимаций —
- * {@link BodyAnims} и {@link Locomotion}) и эффекты по референсам:
+ * Клиент движения: состояние дэшей, взлёта и полёта (позы тела по нему строит скрипт анимаций —
+ * {@link com.kira.jujutsuneon.rbx.AnimateScript}) и эффекты по референсам:
  *  - дэш вперёд/назад: кольцо удара по земле, белые полосы ветра, шлейф пыли из блоков под ногами,
  *    торможение с выбросом пыли;
  *  - дэш вбок: полосы-силуэты на старте, длинный низкий дым;
@@ -882,10 +882,10 @@ public final class MovementFxClient {
     // ================================================================== данные для анимации тела
 
     /**
-     * Состояние движения игрока для движка анимаций ({@link BodyAnims}): зарядка прыжка, взлёт,
+     * Состояние движения игрока для скрипта анимаций ({@link com.kira.jujutsuneon.rbx.AnimateScript}): зарядка прыжка, взлёт,
      * полёт и дэш — с долей тика, чтобы позы шли плавно в каждом кадре.
      */
-    static void fillAnimInput(Entity e, float pt, Locomotion.Input in) {
+    public static void fillAnimInput(Entity e, float pt, AnimateInput in) {
         in.chargeWeight = 0;
         in.chargeAge = 0;
         in.leapAge = -1;
@@ -917,13 +917,13 @@ public final class MovementFxClient {
             }
         }
         if (s.dashKind >= 0) {
-            in.dashKind = s.dashKind; // DASH_FRONT/BACK/LEFT/RIGHT = 0/1/2/3, как в Locomotion
+            in.dashKind = s.dashKind; // DASH_FRONT/BACK/LEFT/RIGHT = 0/1/2/3, как в AnimateInput
             in.dashAge = s.dashAge + pt;
         }
     }
 
     /** Идёт ли у игрока что-то из движения, что требует позы тела (дэш, полёт, зарядка, взлёт). */
-    static boolean animating(Entity e) {
+    public static boolean animating(Entity e) {
         PState s = STATES.get(e.getId());
         return s != null && s.animating();
     }

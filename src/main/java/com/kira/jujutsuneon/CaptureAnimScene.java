@@ -1,6 +1,6 @@
 package com.kira.jujutsuneon;
 
-import com.kira.jujutsuneon.anim.Animator;
+import com.kira.jujutsuneon.rbx.PlayerAnimations;
 import com.mojang.authlib.GameProfile;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.player.RemotePlayer;
@@ -171,22 +171,22 @@ final class CaptureAnimScene {
     }
 
     private static void techniques(int t) {
-        if (t == 770) play("red_cast", "red_cast", new Animator.Play().fadeIn(0.1));
-        if (t == 830) play("lapse_blue", "lapse_blue", new Animator.Play().fadeIn(0.1));
-        if (t == 900) play("m1", "m1_jab_r", new Animator.Play().fadeIn(0.07));
-        if (t == 907) play("m1", "m1_jab_l", new Animator.Play().fadeIn(0.07));
-        if (t == 914) play("m1", "m1_jab_r", new Animator.Play().fadeIn(0.07));
-        if (t == 921) play("m1", "m1_final", new Animator.Play().fadeIn(0.07));
-        if (t == 960) play("blue_charge", "blue_charge", new Animator.Play());
-        if (t == 980) play("max_blue", "max_blue", new Animator.Play());
-        if (t == 1040) play("simple_domain", "simple_domain", new Animator.Play().fadeIn(0.15));
-        if (t == 1100) play("domain_cast", "domain_cast", new Animator.Play().fadeIn(0.2));
-        if (t == 1200) BodyAnims.stop(actor, 0.4);
+        if (t == 770) play("red_cast", "red_cast", new PlayerAnimations.Play().fade(0.1));
+        if (t == 830) play("lapse_blue", "lapse_blue", new PlayerAnimations.Play().fade(0.1));
+        if (t == 900) play("m1", "m1_jab_r", new PlayerAnimations.Play().fade(0.07));
+        if (t == 907) play("m1", "m1_jab_l", new PlayerAnimations.Play().fade(0.07));
+        if (t == 914) play("m1", "m1_jab_r", new PlayerAnimations.Play().fade(0.07));
+        if (t == 921) play("m1", "m1_final", new PlayerAnimations.Play().fade(0.07));
+        if (t == 960) play("blue_charge", "blue_charge", new PlayerAnimations.Play());
+        if (t == 980) play("max_blue", "max_blue", new PlayerAnimations.Play());
+        if (t == 1040) play("simple_domain", "simple_domain", new PlayerAnimations.Play().fade(0.15));
+        if (t == 1100) play("domain_cast", "domain_cast", new PlayerAnimations.Play().fade(0.2));
+        if (t == 1200) PlayerAnimations.stop(actor, 0.4);
     }
 
-    private static void play(String lbl, String clip, Animator.Play opts) {
+    private static void play(String lbl, String clip, PlayerAnimations.Play opts) {
         label = lbl;
-        BodyAnims.play(actor, clip, opts);
+        PlayerAnimations.play(actor, clip, opts);
     }
 
     /** Оператор-наблюдатель: сбоку (справа от актёра), спереди на три четверти или издали. */

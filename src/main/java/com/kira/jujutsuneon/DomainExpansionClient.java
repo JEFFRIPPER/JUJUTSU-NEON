@@ -1,6 +1,6 @@
 package com.kira.jujutsuneon;
 
-import com.kira.jujutsuneon.anim.Animator;
+import com.kira.jujutsuneon.rbx.PlayerAnimations;
 import com.mojang.blaze3d.platform.InputConstants;
 import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.blaze3d.vertex.BufferBuilder;
@@ -237,7 +237,7 @@ public final class DomainExpansionClient {
         if (age < T_CAST_END && !collapsing) {
             if (mc.level.getPlayerByUUID(ownerId) instanceof AbstractClientPlayer p) {
                 // кто подключился посреди каста — видит анимацию с того же места
-                BodyAnims.play(p, "domain_cast", new Animator.Play().fadeIn(0.2).startAt(age / 20.0));
+                PlayerAnimations.play(p, "domain_cast", new PlayerAnimations.Play().fade(0.2).startAt(age / 20.0));
             }
             // Свою кат-сцену Максимального Фиолетового сервер к этому моменту уже оборвал;
             // если сигнал ещё не дошёл — камеру не перехватываем.
@@ -322,7 +322,7 @@ public final class DomainExpansionClient {
     private static void stopOwnerAnimation(Scene s) {
         Minecraft mc = Minecraft.getInstance();
         if (mc.level != null && mc.level.getPlayerByUUID(s.ownerId) instanceof AbstractClientPlayer p) {
-            BodyAnims.stop(p, 0.4);
+            PlayerAnimations.stop(p, 0.4);
         }
     }
 

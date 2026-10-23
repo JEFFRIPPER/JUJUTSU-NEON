@@ -281,7 +281,7 @@ public class JujutsuNeonMod {
         CursedFx.init();
         SimpleDomain.init();
         M1Combo.init();
-        BodyAnimNet.init();
+        com.kira.jujutsuneon.rbx.RbxNet.init();
         MovementFx.init();
         modBus.addListener(this::addToCreativeTab);
 
@@ -5024,7 +5024,7 @@ public class JujutsuNeonMod {
                 if (!state.wasDown) {
                     state.ticks = 0;
                     state.holdTriggered = false;
-                    if (Minecraft.getInstance().player != null) BodyAnims.play(Minecraft.getInstance().player, "blue_charge");
+                    if (Minecraft.getInstance().player != null) com.kira.jujutsuneon.rbx.PlayerAnimations.play(Minecraft.getInstance().player, "blue_charge");
                 }
 
                 state.ticks++;
@@ -5040,7 +5040,7 @@ public class JujutsuNeonMod {
                     chargingProgress = 0.0f;
                     NETWORK.sendToServer(new MaxBlueControlPacket(MaxBlueControlAction.START));
                     startAnim("MAX_BLUE", 40);
-                    if (Minecraft.getInstance().player != null) BodyAnims.play(Minecraft.getInstance().player, "max_blue");
+                    if (Minecraft.getInstance().player != null) com.kira.jujutsuneon.rbx.PlayerAnimations.play(Minecraft.getInstance().player, "max_blue");
                 }
             } else if (state.wasDown) {
                 chargingAnim = "NONE";
@@ -5665,8 +5665,8 @@ public class JujutsuNeonMod {
                 }
             }
             // Зарядку Синего отпустили (или её сбросил экран/обездвиживание) — поза зарядки плавно уходит.
-            if (mc.player != null && !"CHARGE_BLUE".equals(chargingAnim) && BodyAnims.isPlaying(mc.player, "blue_charge")) {
-                BodyAnims.stop(mc.player, 0.2);
+            if (mc.player != null && !"CHARGE_BLUE".equals(chargingAnim) && com.kira.jujutsuneon.rbx.PlayerAnimations.isPlaying(mc.player, "blue_charge")) {
+                com.kira.jujutsuneon.rbx.PlayerAnimations.stop(mc.player, 0.2);
             }
             chargingProgressO = chargingProgress;
 

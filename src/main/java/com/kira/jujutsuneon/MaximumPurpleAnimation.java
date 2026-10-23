@@ -16,8 +16,8 @@ import java.util.WeakHashMap;
 
 /**
  * Живая анимация тела в кат-сцене Максимального Фиолетового через встроенный Player Animator
- * (+ bendy-lib для сгибов локтей, коленей и корпуса). Остальные анимации тела — {@link BodyAnims};
- * этот слой выше них и на время кат-сцены перекрывает их.
+ * (+ bendy-lib для сгибов локтей, коленей и корпуса). Остальные анимации тела — {@link com.kira.jujutsuneon.rbx.PlayerAnimations};
+ * на время кат-сцены игрок рисуется ванильной моделью с этим слоем.
  * Ключевые кадры: assets/jujutsu_neon/player_animation/max_purple.json (генератор tools/gen_max_purple_anim.py).
  * Только клиент.
  */

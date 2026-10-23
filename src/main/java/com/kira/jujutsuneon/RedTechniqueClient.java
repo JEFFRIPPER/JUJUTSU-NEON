@@ -1,6 +1,6 @@
 package com.kira.jujutsuneon;
 
-import com.kira.jujutsuneon.anim.Animator;
+import com.kira.jujutsuneon.rbx.PlayerAnimations;
 import com.mojang.blaze3d.platform.GlStateManager;
 import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.blaze3d.vertex.BufferBuilder;
@@ -218,7 +218,7 @@ public final class RedTechniqueClient {
         CASTS.put(caster, c);
         if (mc.level.getEntity(entityId) instanceof AbstractClientPlayer p) {
             String anim = max ? "max_red" : "red_cast";
-            BodyAnims.play(p, anim, new Animator.Play().fadeIn(0.1)
+            PlayerAnimations.play(p, anim, new PlayerAnimations.Play().fade(0.1)
                     .firstPerson(true, false, (max ? ARM_TICKS_MAX : ARM_TICKS_RED) / 20.0));
         }
         if (max && mc.player != null && mc.player.getId() == entityId) {

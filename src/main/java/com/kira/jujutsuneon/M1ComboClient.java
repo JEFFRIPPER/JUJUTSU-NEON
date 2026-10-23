@@ -1,6 +1,6 @@
 package com.kira.jujutsuneon;
 
-import com.kira.jujutsuneon.anim.Animator;
+import com.kira.jujutsuneon.rbx.PlayerAnimations;
 import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.blaze3d.vertex.BufferBuilder;
 import com.mojang.blaze3d.vertex.BufferUploader;
@@ -216,7 +216,7 @@ public final class M1ComboClient {
         String anim = s == 3 ? "m1_final" : (left ? "m1_jab_l" : "m1_jab_r");
         if (p instanceof AbstractClientPlayer cp) {
             // удар за ударом: каждый следующий начинается из позы прошлого, без рывка
-            BodyAnims.play(cp, anim, new Animator.Play().fadeIn(0.07)
+            PlayerAnimations.play(cp, anim, new PlayerAnimations.Play().fade(0.07)
                     .firstPerson(true, true, (s == 3 ? 14 : 9) / 20.0));
         }
         sound(p.position().add(0, 1.3, 0), JujutsuNeonMod.SFX_M1_SWING, s == 3 ? 0.9f : 0.6f,
@@ -269,7 +269,7 @@ public final class M1ComboClient {
             if (knockdown) stunTicks = ticks;
         }
         if (!knockdown) return;
-        if (e instanceof AbstractClientPlayer p) BodyAnims.play(p, "m1_knockdown", new Animator.Play().fadeIn(0.06));
+        if (e instanceof AbstractClientPlayer p) PlayerAnimations.play(p, "m1_knockdown", new PlayerAnimations.Play().fade(0.06));
         else if (e instanceof LivingEntity) KNOCKED.put(entityId, new int[]{ticks, ticks});
     }
 
