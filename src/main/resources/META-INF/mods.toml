@@ -22,3 +22,10 @@ mandatory=true
 versionRange="[1.20.1,1.21)"
 ordering="NONE"
 side="BOTH"
+
+[[dependencies.jujutsu_neon]]
+modId="geckolib"
+mandatory=true
+versionRange="[4.8.4,)"
+ordering="NONE"
+side="BOTH"

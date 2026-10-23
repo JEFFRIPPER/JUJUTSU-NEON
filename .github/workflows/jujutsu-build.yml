@@ -5,6 +5,11 @@ on:
     branches:
       - main
   workflow_dispatch:
+    inputs:
+      classpath:
+        description: 'Выложить библиотеки компиляции (jn-classpath.zip) в релиз devlibs-cp'
+        required: false
+        default: 'false'
 
 jobs:
   build:
@@ -38,6 +43,19 @@ jobs:
         run: |
           python3 -m pip install --quiet pillow
           python3 generate_resources.py
+
+      - name: Export dev classpath
+        if: github.event_name == 'workflow_dispatch' && inputs.classpath == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gradle jnExportClasspath --no-daemon
+          ls -la build/jn
+          gh release delete devlibs-cp -y --cleanup-tag || true
+          gh release create devlibs-cp build/jn/jn-classpath.zip \
+            --target "$GITHUB_SHA" --prerelease \
+            --title "Служебное: библиотеки компиляции" \
+            --notes "Не мод. Архив библиотек для проверки кода без полной сборки."
 
       - name: Build Forge mod
         run: |
