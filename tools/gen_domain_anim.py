@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Анимация тела для каста Расширения территории (Player Animator / Emotecraft v3).
 
-Результат: src/main/resources/assets/jujutsu_neon/player_animation/domain_cast.json
+Результат: tools/rig/legacy_pa/domain_cast.json (исходник для tools/rig/convert_pa.py → animations/player/techniques.animation.json)
 Тики совпадают с таймлайном DomainExpansion (катсцена 216 тиков = 10,8 с).
 
 Знаки те же, что в gen_max_purple_anim.py:
@@ -12,7 +12,7 @@
 import json
 from pathlib import Path
 
-OUT = Path(__file__).resolve().parent.parent / "src/main/resources/assets/jujutsu_neon/player_animation/domain_cast.json"
+OUT = Path(__file__).resolve().parent / "rig/legacy_pa/domain_cast.json"
 OUT.parent.mkdir(parents=True, exist_ok=True)
 
 CHANNELS = {

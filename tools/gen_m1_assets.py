@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """M1-комбо: анимации тела и звуки.
 
-Анимации (player_animation/):
+Анимации (tools/rig/legacy_pa/ — исходник для tools/rig/convert_pa.py → animations/player/techniques.animation.json):
   m1_jab_r.json / m1_jab_l.json — быстрый удар правой / левой: короткий замах от стойки, выпрямление
                                   руки с поворотом корпуса, возврат в стойку (только руки, корпус, голова —
                                   ноги ванильные, можно идти)
@@ -22,7 +22,7 @@ from pathlib import Path
 import numpy as np
 
 ROOT = Path(__file__).resolve().parent.parent / "src/main/resources/assets/jujutsu_neon"
-ANIM = ROOT / "player_animation"
+ANIM = Path(__file__).resolve().parent / "rig/legacy_pa"
 SND = ROOT / "sounds/m1"
 ANIM.mkdir(parents=True, exist_ok=True)
 SND.mkdir(parents=True, exist_ok=True)
