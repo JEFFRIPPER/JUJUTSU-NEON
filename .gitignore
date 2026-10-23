@@ -17,3 +17,5 @@ __pycache__/
 
 tools/anim-preview/build/
 tools/anim-preview/out/
+tools/rig/out/
+__pycache__/
