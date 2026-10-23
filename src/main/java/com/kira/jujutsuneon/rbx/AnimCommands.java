@@ -228,7 +228,8 @@ public final class AnimCommands {
         Minecraft mc = Minecraft.getInstance();
         Path dir = FMLPaths.CONFIGDIR.get().resolve("jujutsu_neon").resolve("blockbench");
         String[] files = {"geo/player_r15.geo.json", "geo/player_r15_slim.geo.json", "geo/armor_r15_outer.geo.json",
-                "geo/armor_r15_inner.geo.json", "animations/player/locomotion.animation.json"};
+                "geo/armor_r15_inner.geo.json", "animations/player/locomotion.animation.json",
+                "animations/player/techniques.animation.json"};
         int n = 0;
         try {
             Files.createDirectories(dir);
