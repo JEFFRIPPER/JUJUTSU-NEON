@@ -42,7 +42,8 @@ import java.util.Map;
  *
  * Команды: join, hold &lt;клавиша&gt; &lt;тики&gt;, tap &lt;клавиша&gt;, release, wait &lt;тики&gt;, look &lt;yaw&gt; &lt;pitch&gt;,
  * turn &lt;dyaw&gt; &lt;dpitch&gt; &lt;тики&gt;, cam first|back|front, shot [имя], burst &lt;имя&gt; &lt;кол-во&gt; &lt;каждые_тиков&gt;,
- * cmd &lt;команда без /&gt;, close, status, keys, stop. Клавиша — имя KeyMapping (key.jump) или его хвост (jump, blue).
+ * cmd &lt;команда без /&gt;, close, status, keys, stop. Клавиша — имя KeyMapping (key.jump), его хвост (jump)
+ * или короткое имя клавиши мода: dash, superspeed, blue, red, purple, infinity, rct, hud, domain, doublejump, teleport.
  */
 @Mod.EventBusSubscriber(modid = JujutsuNeonMod.MODID, bus = Mod.EventBusSubscriber.Bus.FORGE, value = Dist.CLIENT)
 public final class PilotMode {
@@ -134,7 +135,8 @@ public final class PilotMode {
             waitTicks--;
             return;
         }
-        while (!QUEUE.isEmpty() && waitTicks == 0 && !joining) {
+        // shot ждёт, пока кадр снят: следующая команда (например, cam) не попадёт на снимок
+        while (!QUEUE.isEmpty() && waitTicks == 0 && !joining && (PENDING_SHOTS.isEmpty() || burstLeft > 0)) {
             String line = QUEUE.poll();
             try {
                 run(mc, line);
@@ -265,6 +267,22 @@ public final class PilotMode {
     }
 
     private static KeyMapping key(Minecraft mc, String name) {
+        // клавиши мода названы по-русски и с пробелами — для пульта короткие имена
+        KeyMapping alias = switch (name.toLowerCase(Locale.ROOT)) {
+            case "dash" -> JujutsuNeonMod.ClientModEvents.DASH_KEY;
+            case "superspeed", "superrun" -> JujutsuNeonMod.ClientModEvents.SUPER_SPEED_KEY;
+            case "blue" -> JujutsuNeonMod.ClientModEvents.BLUE_KEY;
+            case "red" -> JujutsuNeonMod.ClientModEvents.RED_KEY;
+            case "purple" -> JujutsuNeonMod.ClientModEvents.PURPLE_KEY;
+            case "infinity" -> JujutsuNeonMod.ClientModEvents.DOMAIN_KEY;
+            case "rct" -> JujutsuNeonMod.ClientModEvents.UTILITY_KEY;
+            case "hud" -> JujutsuNeonMod.ClientModEvents.HUD_KEY;
+            case "domain" -> JujutsuNeonMod.ClientModEvents.DOMAIN_EXPANSION_KEY;
+            case "doublejump" -> JujutsuNeonMod.ClientModEvents.DOUBLE_JUMP_KEY;
+            case "teleport" -> JujutsuNeonMod.ClientModEvents.TELEPORT_KEY;
+            default -> null;
+        };
+        if (alias != null) return alias;
         KeyMapping tail = null;
         for (KeyMapping k : mc.options.keyMappings) {
             if (k.getName().equalsIgnoreCase(name)) return k;
