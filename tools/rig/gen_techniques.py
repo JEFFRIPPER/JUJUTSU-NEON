@@ -180,7 +180,7 @@ def red_charge():
             legs(0.55 + 0.1 * f, 0.45 + 0.4 * f),
             body(16 + 4 * f, (10 + 7 * f + s * amp * 0.4, 20 + 6 * f + s * amp, -2 + s * amp * 0.5),
                  (-6 - 3 * f, -24 - 4 * f - s * amp * 0.6, 0)),
-            arms((-28 - 4 * f + s * amp, -30, 18), -90 - 4 * f, (-24 - 4 * f - s * amp, 34, -12), -86,
+            arms((-28 - 4 * f, -30, 18), -90 - 4 * f, (-24 - 4 * f, 34, -12), -86,
                  (0, 0, -30), (0, 0, 30))), overlap=False)
         t += 0.1
         i += 1
@@ -287,13 +287,13 @@ def max_blue_hold():
         ph = i / n
         import math
         br = math.sin(2 * math.pi * ph)
-        tr = math.sin(2 * math.pi * ph * 4)  # мелкая дрожь
+        tr = math.sin(2 * math.pi * ph * 4)  # мелкая дрожь корпуса (руки идут вместе с ним, а не навстречу друг другу)
         lag = math.sin(2 * math.pi * (ph - 0.12))
         k.key(round(t, 3), 'catmullrom', M(
             legs(-0.2, 0.5 + 0.06 * br),
             body(2 * br, (8 + 2 * br, 2 + 1.2 * tr, -1), (-3 - br, 0, 0)),
-            arms((-100 - 4 * lag + tr, -22, 12 + 2 * lag), -26 - 4 * lag, (-100 - 4 * lag - tr, 22, -12 - 2 * lag),
-                 -26 - 4 * lag, (0, 0, -16 - 3 * tr), (0, 0, 16 + 3 * tr))), overlap=False)
+            arms((-100 - 4 * lag, -22, 12 + 2 * lag), -26 - 4 * lag, (-100 - 4 * lag, 22, -12 - 2 * lag),
+                 -26 - 4 * lag, (0, 0, -16), (0, 0, 16))), overlap=False)
     return a
 
 
@@ -330,8 +330,8 @@ def hollow_purple():
     while t <= 4.95:
         s_ = 1 if i % 2 == 0 else -1
         f = (t - 3.9) / 1.05
-        k.key(round(t, 2), 'easeInOutSine', M(legs(-0.2, 0.5 + 0.15 * f), body(0, (6 + 3 * f, s_ * 1.5, 0), (-3, 0, 0)),
-                                             arms((-100 - 3 * f + s_ * 1.5, -22, 14), -22, (-100 - 3 * f - s_ * 1.5, 22, -14),
+        k.key(round(t, 2), 'easeInOutSine', M(legs(-0.2, 0.5 + 0.15 * f), body(0, (6 + 3 * f, 0, 0), (-3, 0, 0)),
+                                             arms((-100 - 3 * f, -22, 14), -22, (-100 - 3 * f, 22, -14),
                                                   -22)), overlap=False)
         t += 0.15
         i += 1
@@ -560,7 +560,7 @@ def domain_cast():
         tr = 0.6 if i % 2 == 0 else -0.6
         k.key(round(t, 2), 'catmullrom', M(
             legs(0.1, 0.15 + 0.03 * br), body(-10, (3 + 1.2 * br, -10, 2), (8 + 0.8 * br, 12, -4)),
-            arms((-80 - 1.0 * br + tr, -40, 10), -70 - br, (6 - 2 * br, 6, -12), -14, (0, -30 + 2 * tr, 0))),
+            arms((-80 - 1.0 * br, -40, 10), -70 - br, (6 - 2 * br, 6, -12), -14, (0, -30, 0))),
             overlap=False)
         t += 0.4
         i += 1
