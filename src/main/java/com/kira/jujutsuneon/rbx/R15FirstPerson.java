@@ -45,20 +45,37 @@ public final class R15FirstPerson {
         return mix.firstPerson == Clip.FirstPerson.NONE ? null : mix.firstPerson;
     }
 
+    /** Что сейчас показывается от первого лица (для отладки: режим тестера, /jnanim). */
+    public static String debugState(Minecraft mc) {
+        Clip.FirstPerson m = mode(mc);
+        return "fp=" + (m == null ? "vanilla" : m) + " hand=" + lastHand;
+    }
+
+    /** Чем кончилась последняя отрисовка ванильной руки (для {@link #debugState}). */
+    private static String lastHand = "never";
+
     static boolean shows(Clip.FirstPerson m, HumanoidArm arm) {
         return m == Clip.FirstPerson.ARMS
                 || (m == Clip.FirstPerson.RIGHT && arm == HumanoidArm.RIGHT)
                 || (m == Clip.FirstPerson.LEFT && arm == HumanoidArm.LEFT);
     }
 
-    @SubscribeEvent
+    @SubscribeEvent(priority = net.minecraftforge.eventbus.api.EventPriority.LOWEST, receiveCanceled = true)
     public static void onRenderHand(RenderHandEvent event) {
         Minecraft mc = Minecraft.getInstance();
+        if (event.isCanceled()) {
+            lastHand = event.getHand() + " cancelled-by-other";
+            return;
+        }
         Clip.FirstPerson m = mode(mc);
-        if (m == null) return;
+        if (m == null) {
+            lastHand = event.getHand() + " vanilla";
+            return;
+        }
         HumanoidArm main = mc.player.getMainArm();
         HumanoidArm arm = event.getHand() == InteractionHand.MAIN_HAND ? main : main.getOpposite();
         if (shows(m, arm)) event.setCanceled(true);
+        lastHand = event.getHand() + " r15=" + m;
     }
 
     @SubscribeEvent

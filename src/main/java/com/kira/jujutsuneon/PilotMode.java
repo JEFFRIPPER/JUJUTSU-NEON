@@ -329,7 +329,7 @@ public final class PilotMode {
         return s + String.format(Locale.ROOT, " pos=%.1f,%.1f,%.1f yaw=%.0f pitch=%.0f hp=%.0f mode=%s skin=%s",
                 p.getX(), p.getY(), p.getZ(), p.getYRot(), p.getXRot(), p.getHealth(),
                 mc.gameMode == null ? "?" : mc.gameMode.getPlayerMode(), p.getModelName())
-                + " r15[" + R15Render.debugState(p) + "]";
+                + " r15[" + R15Render.debugState(p) + "] " + com.kira.jujutsuneon.rbx.R15FirstPerson.debugState(mc);
     }
 
     private static void out(String msg) {
