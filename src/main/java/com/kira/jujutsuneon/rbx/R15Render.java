@@ -91,6 +91,8 @@ public final class R15Render {
     private static R15ArmorModel innerArmor, outerArmor;
     private static R15ElytraModel elytra;
     private static Boolean enabled;
+    /** Чем кончилась последняя попытка подмены модели у игрока (для {@link #debugState}). */
+    private static final Map<Object, String> LAST_RESULT = new WeakHashMap<>();
 
     private static Field rendererModel, rendererLayers, elytraField;
     private static boolean reflectionFailed;
@@ -133,6 +135,16 @@ public final class R15Render {
                 && R15Rig.model(isSlim(p) ? R15Rig.PLAYER_SLIM : R15Rig.PLAYER_WIDE) != null;
     }
 
+    /** Почему игрок рисуется (или не рисуется) моделью R15 — для отладки (/jnanim, режим тестера). */
+    public static String debugState(AbstractClientPlayer p) {
+        boolean slim = isSlim(p);
+        return "enabled=" + enabled() + " reflectionFailed=" + reflectionFailed
+                + " purple=" + JujutsuNeonSkillAnimationClient.purpleActive(p)
+                + " slim=" + slim + " skinModel=" + (R15Rig.model(slim ? R15Rig.PLAYER_SLIM : R15Rig.PLAYER_WIDE) != null)
+                + " active=" + activeFor(p) + " prepared=" + PREPARED.size()
+                + " lastRender=" + LAST_RESULT.getOrDefault(p, "never");
+    }
+
     static boolean isSlim(AbstractClientPlayer p) {
         return "slim".equals(p.getModelName());
     }
@@ -144,16 +156,33 @@ public final class R15Render {
         PlayerRenderer renderer = event.getRenderer();
         restore(renderer);
         current = null;
-        if (!(event.getEntity() instanceof AbstractClientPlayer p) || reflectionFailed) return;
-        if (!activeFor(p)) return;
+        if (!(event.getEntity() instanceof AbstractClientPlayer p)) return;
+        if (reflectionFailed) {
+            LAST_RESULT.put(p, "reflectionFailed");
+            return;
+        }
+        if (!activeFor(p)) {
+            LAST_RESULT.put(p, "inactive");
+            return;
+        }
         boolean slim = isSlim(p);
         R15Rig.Model skin = R15Rig.model(slim ? R15Rig.PLAYER_SLIM : R15Rig.PLAYER_WIDE);
-        if (skin == null || !prepare(renderer)) return;
+        if (skin == null || !prepare(renderer)) {
+            LAST_RESULT.put(p, skin == null ? "noSkinModel" : "prepareFailed");
+            return;
+        }
         PlayerModel<AbstractClientPlayer> original = renderer.getModel();
-        if (original instanceof R15PlayerModel) return;
+        if (original instanceof R15PlayerModel) {
+            LAST_RESULT.put(p, "alreadyR15");
+            return;
+        }
         R15PlayerModel model = model(slim);
         model.copyState(original);
-        if (!setModel(renderer, model)) return;
+        if (!setModel(renderer, model)) {
+            LAST_RESULT.put(p, "setModelFailed");
+            return;
+        }
+        LAST_RESULT.put(p, "r15 model=" + original.getClass().getName());
         ORIGINALS.put(renderer, original);
 
         Context c = new Context();
