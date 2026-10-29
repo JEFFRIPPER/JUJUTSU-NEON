@@ -138,7 +138,9 @@ public final class JujutsuNeonSkillAnimationClient {
             float progress = clamp01(1.0f - ticks / (float) length);
 
             return switch (active) {
-                case "PURPLE_CAST", "HOLLOW_PURPLE" -> new SkillFrame(Skill.PURPLE, progress);
+                // Есть клип hollow_purple (модель R15, gen_techniques.py) — старую подмену модели не включаем.
+                case "PURPLE_CAST", "HOLLOW_PURPLE" -> com.kira.jujutsuneon.rbx.ClipLibrary.get("hollow_purple") != null
+                        ? SkillFrame.NONE : new SkillFrame(Skill.PURPLE, progress);
                 // MAX_PURPLE анимирует Player Animator (MaximumPurpleAnimation) — модель не подменяем.
                 // Дэши анимирует слой Player Animator (MovementFxClient): там корпус наклоняется
                 // целиком, а здесь наклонялся только торс — руки и ноги отрывались от тела.

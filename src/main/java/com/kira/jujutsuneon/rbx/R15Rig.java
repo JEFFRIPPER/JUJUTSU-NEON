@@ -191,12 +191,17 @@ public final class R15Rig {
          * Корневой поворот/сдвиг позы учитывается.
          */
         public void matrices(FinalPose p, Matrix4f[] out) {
-            PoseStack ps = new PoseStack();
-            root(ps, p);
-            walk(ps, baked.topLevelBones(), out);
+            matrices(p, out, null);
         }
 
-        private void walk(PoseStack ps, List<GeoBone> bones, Matrix4f[] out) {
+        /** То же и точки суставов (точка вращения кости) в пространстве модели, блоки. */
+        public void matrices(FinalPose p, Matrix4f[] out, org.joml.Vector3f[] joints) {
+            PoseStack ps = new PoseStack();
+            root(ps, p);
+            walk(ps, baked.topLevelBones(), out, joints);
+        }
+
+        private void walk(PoseStack ps, List<GeoBone> bones, Matrix4f[] out, org.joml.Vector3f[] joints) {
             for (GeoBone b : bones) {
                 ps.pushPose();
                 RenderUtils.prepMatrixForBone(ps, b);
@@ -207,8 +212,12 @@ public final class R15Rig {
                         if (out[k] == null) out[k] = new Matrix4f();
                         out[k].set(ps.last().pose());
                     }
+                    if (joints != null && k < joints.length) {
+                        if (joints[k] == null) joints[k] = new org.joml.Vector3f();
+                        ps.last().pose().transformPosition(b.getPivotX() / 16f, b.getPivotY() / 16f, b.getPivotZ() / 16f, joints[k]);
+                    }
                 }
-                walk(ps, b.getChildBones(), out);
+                walk(ps, b.getChildBones(), out, joints);
                 ps.popPose();
             }
         }

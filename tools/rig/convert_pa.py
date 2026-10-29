@@ -405,16 +405,21 @@ OLD_JN = {
 
 
 def all_techniques():
+    from gen_techniques import MADE_HERE  # эти клипы теперь нарисованы позами заново (gojo.animation.json)
     out = []
     for name, props, markers in TECHNIQUES:
+        if name in MADE_HERE:
+            continue
         pa = PAAnim(os.path.join(PA_DIR, name + '.json'))
         p = {'priority': 'action', 'fade_out': fade_out(pa)}
         p.update(props)
         out.append(convert(pa, p, markers))
-    out.append(convert_jn('blue_charge', OLD_JN['blue_charge'],
-                          {'priority': 'action', 'fade_in': 0.15, 'fade_out': 0.25, 'look': 1}))
-    out.append(convert_jn('max_blue', OLD_JN['max_blue'],
-                          {'priority': 'action', 'fade_in': 0.15, 'fade_out': 0.4, 'look': 1}))
+    if 'blue_charge' not in MADE_HERE:
+        out.append(convert_jn('blue_charge', OLD_JN['blue_charge'],
+                              {'priority': 'action', 'fade_in': 0.15, 'fade_out': 0.25, 'look': 1}))
+    if 'max_blue' not in MADE_HERE:
+        out.append(convert_jn('max_blue', OLD_JN['max_blue'],
+                              {'priority': 'action', 'fade_in': 0.15, 'fade_out': 0.4, 'look': 1}))
     return out
 
 

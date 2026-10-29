@@ -3349,6 +3349,26 @@ public class JujutsuNeonMod {
         );
     }
 
+    /** Бесконечность: ничто не подходит к Годжо вплотную — мобы и игроки вязнут у границы и не входят в него. */
+    private static void infinityRepel(ServerPlayer player, ServerLevel level) {
+        final double edge = 1.15;
+        Vec3 c = player.position();
+        for (LivingEntity e : level.getEntitiesOfClass(LivingEntity.class, player.getBoundingBox().inflate(edge + 0.6),
+                e -> e != player && e.isAlive() && !e.isSpectator() && !(e instanceof ArmorStand))) {
+            Vec3 d = e.position().subtract(c);
+            Vec3 flat = new Vec3(d.x, 0.0, d.z);
+            double dist = flat.length();
+            if (dist >= edge || Math.abs(d.y) > 2.2) continue;
+            Vec3 away = dist < 1.0E-3 ? player.getLookAngle().multiply(1, 0, 1).normalize() : flat.scale(1.0 / dist);
+            Vec3 v = e.getDeltaMovement();
+            double toward = v.dot(away);
+            // скорость к Годжо гасится полностью, плюс мягкий выталкивающий толчок тем глубже, чем ближе
+            Vec3 out = v.subtract(away.scale(Math.min(0.0, toward))).add(away.scale(0.08 + 0.22 * (1.0 - dist / edge)));
+            e.setDeltaMovement(out.x, v.y, out.z);
+            e.hurtMarked = true;
+        }
+    }
+
     private static void castInfinityToggle(ServerPlayer player) {
         ServerLevel level = player.serverLevel();
         boolean enabled = !player.getPersistentData().getBoolean("jn_infinity");
@@ -3367,6 +3387,7 @@ public class JujutsuNeonMod {
     private static void castRCT(ServerPlayer player) {
         ServerLevel level = player.serverLevel();
         handSign(player);
+        com.kira.jujutsuneon.rbx.RbxNet.play(player, "rct");
         player.heal(10.0F);
         player.addEffect(new MobEffectInstance(MobEffects.REGENERATION, 100, 1, false, false, true));
         // Свои звук и эффекты (CursedFxClient): кольцо у ног, спирали света, удары сердца, искры.
@@ -3752,6 +3773,8 @@ public class JujutsuNeonMod {
         player.fallDistance = 0.0F;
         player.hurtMarked = true;
         player.getPersistentData().putLong("jn_r_tp_cd", now + 80); // 4 секунды
+        // перенос мгновенный: тело сразу в фазе приземления (жест до рывка уже не нужен)
+        com.kira.jujutsuneon.rbx.RbxNet.play(player, new com.kira.jujutsuneon.rbx.RbxNet.Anim("teleport").startAt(0.16f));
         spawnTeleportBurst(level, destination.add(0.0, 0.9, 0.0));
 
         level.playSound(
@@ -4231,6 +4254,7 @@ public class JujutsuNeonMod {
 
                 // Бесконечность включена — клиенты рисуют едва заметную оболочку (напоминание раз в секунду).
                 if (infinity && now % 20 == 0) CursedFx.send(player, CursedFx.EV_INFINITY_HOLD);
+                if (infinity) infinityRepel(player, level);
 
             }
 
@@ -5040,7 +5064,6 @@ public class JujutsuNeonMod {
                     chargingProgress = 0.0f;
                     NETWORK.sendToServer(new MaxBlueControlPacket(MaxBlueControlAction.START));
                     startAnim("MAX_BLUE", 40);
-                    if (Minecraft.getInstance().player != null) com.kira.jujutsuneon.rbx.PlayerAnimations.play(Minecraft.getInstance().player, "max_blue");
                 }
             } else if (state.wasDown) {
                 chargingAnim = "NONE";

@@ -253,6 +253,31 @@ public final class PlayerAnimations {
         debugSpeed = Mth.clamp(s, 0.01, 10.0);
     }
 
+    /**
+     * Сустав кости в мире по последней отрисовке модели R15 (например, "RightHand" — запястье), с поправкой
+     * along блоков вдоль кости вниз (к кончикам пальцев). null — модель не рисовалась в последние кадры
+     * (тогда эффекты берут свою запасную точку).
+     */
+    public static net.minecraft.world.phys.Vec3 jointWorld(AbstractClientPlayer p, String bone, float pt, double along) {
+        State s = p == null ? null : STATES.get(p);
+        if (s == null || frame - s.drawnFrame > 2) return null;
+        int i = Bones.find(bone);
+        if (i < 0 || i >= s.joints.length || s.joints[i] == null || i >= s.boneMatrices.length || s.boneMatrices[i] == null) return null;
+        org.joml.Vector3f j = new org.joml.Vector3f(s.joints[i]);
+        if (along != 0) {
+            // ось кости «вниз» в пространстве модели
+            org.joml.Vector3f d = s.boneMatrices[i].transformDirection(new org.joml.Vector3f(0, -1, 0));
+            if (d.lengthSquared() > 1.0E-6f) j.add(d.normalize().mul((float) along));
+        }
+        // модель GeckoLib: лицом к −Z; в мире тело повёрнуто на 180 − yBodyRot и уменьшено до 0.9375
+        double yr = Math.toRadians(180 - Mth.rotLerp(pt, p.yBodyRotO, p.yBodyRot));
+        double sc = 0.9375, cx = j.x * sc, cz = j.z * sc;
+        double wx = cx * Math.cos(yr) + cz * Math.sin(yr);
+        double wz = -cx * Math.sin(yr) + cz * Math.cos(yr);
+        return new net.minecraft.world.phys.Vec3(Mth.lerp(pt, p.xo, p.getX()) + wx, Mth.lerp(pt, p.yo, p.getY()) + j.y * sc,
+                Mth.lerp(pt, p.zo, p.getZ()) + wz);
+    }
+
     /** Номер текущего кадра (меняется один раз за кадр). */
     static long frame() {
         return frame;
@@ -317,6 +342,9 @@ public final class PlayerAnimations {
         /** Итоговая поза костей для отрисовки и матрицы костей (пространство модели GeckoLib). */
         final R15Rig.FinalPose finalPose = new R15Rig.FinalPose();
         Matrix4f[] boneMatrices = new Matrix4f[0];
+        /** Суставы последней отрисовки (пространство модели, блоки) и номер того кадра. */
+        org.joml.Vector3f[] joints = new org.joml.Vector3f[0];
+        long drawnFrame = -100;
         long evaluated = -1;
 
         // скорость (блоки/с) по тикам и её сглаживание
@@ -359,6 +387,7 @@ public final class PlayerAnimations {
             hasPos = true;
             turnO = turn;
             accelO = accel;
+            faceLook(p);
             float by = p.yBodyRot;
             if (hasYaw) turn += (Mth.wrapDegrees(by - lastBodyYaw) * 20 - turn) * 0.4;
             lastBodyYaw = by;
@@ -374,6 +403,20 @@ public final class PlayerAnimations {
             }
             wasSwinging = p.swinging;
             lastSwingTime = p.swingTime;
+        }
+
+        /**
+         * Пока идёт техника, тело доворачивается к взгляду: иначе ванильное тело отстаёт от головы до 50–75°,
+         * и сзади кажется, что персонаж бьёт вбок.
+         */
+        private void faceLook(AbstractClientPlayer p) {
+            double w = 0;
+            for (AnimationTrack t : actions) {
+                if (t.isPlaying()) w = Math.max(w, t.clip.face * Math.min(1, t.getWeightCurrent()));
+            }
+            if (w <= 1.0E-3) return;
+            float diff = Mth.wrapDegrees(p.yHeadRot - p.yBodyRot);
+            p.yBodyRot += diff * (float) (0.6 * w);
         }
 
         void frame(AbstractClientPlayer p, float pt, double dt) {

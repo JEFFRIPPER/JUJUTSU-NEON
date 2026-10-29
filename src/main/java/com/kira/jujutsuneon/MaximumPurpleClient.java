@@ -280,7 +280,12 @@ public final class MaximumPurpleClient {
         SCENES.put(ownerId, scene);
         // Живая анимация тела (Player Animator + сгибы bendy-lib) — у владельца, видят все.
         if (mc.level.getPlayerByUUID(ownerId) instanceof AbstractClientPlayer owner) {
-            MaximumPurpleAnimation.play(owner);
+            // Новый клип R15 (gen_techniques.py: max_purple); без него — старый слой Player Animator.
+            if (com.kira.jujutsuneon.rbx.ClipLibrary.get("max_purple") != null) {
+                com.kira.jujutsuneon.rbx.PlayerAnimations.play(owner, "max_purple");
+            } else {
+                MaximumPurpleAnimation.play(owner);
+            }
         }
 
         if (ownerId.equals(mc.player.getUUID())) {
@@ -319,8 +324,7 @@ public final class MaximumPurpleClient {
             local = null;
             if (!completed) stopTheme(mc);
             restoreLocal(mc);
-            // Игрок остаётся там, куда поднялся, — в режиме полёта.
-            if (completed && mc.player != null) JujutsuNeonFlightClient.beginFlightForTechnique();
+            // После удара игрок плавно опускается (медленное падение с сервера), а не висит в воздухе.
         }
     }
 
@@ -416,6 +420,7 @@ public final class MaximumPurpleClient {
         Minecraft mc = Minecraft.getInstance();
         if (mc.level != null && mc.level.getPlayerByUUID(scene.ownerId) instanceof AbstractClientPlayer owner) {
             MaximumPurpleAnimation.stop(owner);
+            com.kira.jujutsuneon.rbx.PlayerAnimations.stop(owner, "max_purple", 0.6);
         }
     }
 

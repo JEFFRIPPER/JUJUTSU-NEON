@@ -139,8 +139,10 @@ public final class MaximumPurple {
         if (t >= T_RISE_END) return RISE_HEIGHT;
         double x = (t - T_RISE_START) / (double) (T_RISE_END - T_RISE_START);
         // референс: игрок быстро взлетает (вне кадра), входит в кадр снизу ~12,3 с и медленно подходит под кольцо
+        // плавно: разгон и торможение (раньше 85 % высоты набиралось за первые полсекунды — выглядело как телепорт)
         double k = x * x * (3.0 - 2.0 * x);
-        return RISE_HEIGHT * (1.0 - Math.pow(1.0 - Math.min(1.0, x * 1.15), 4.0)) * 0.85 + RISE_HEIGHT * 0.15 * k;
+        double e = 1.0 - Math.pow(1.0 - x, 3.0);
+        return RISE_HEIGHT * (0.55 * k + 0.45 * e);
     }
 
     // ------------------------------------------------------------------ packets
@@ -579,9 +581,13 @@ public final class MaximumPurple {
             owner.getAbilities().mayfly = cast.origMayfly;
             owner.getAbilities().flying = cast.origMayfly && cast.origFlying;
             owner.onUpdateAbilities();
+            if (completed && owner.isAlive()) {
+                // После удара не висит в воздухе: медленно опускается в кратер (без урона от падения).
+                // Полёт мода можно включить самому, как обычно.
+                owner.addEffect(new net.minecraft.world.effect.MobEffectInstance(
+                        net.minecraft.world.effect.MobEffects.SLOW_FALLING, 20 * 25, 0, false, false, true));
+            }
             if (completed) {
-                // Игрок остаётся там, куда поднялся, — в режиме полёта.
-                if (owner.isAlive()) JujutsuNeonFlightPatch.startForTechnique(owner);
                 // Откат 60 секунд отсчитывается от окончания техники.
                 owner.getPersistentData().putLong("jn_cd_max_purple", cast.level.getGameTime() + COOLDOWN_TICKS);
             }

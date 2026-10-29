@@ -208,6 +208,12 @@ public final class RedTechniqueClient {
     static void onCharge(UUID caster, int entityId, boolean on) {
         if (on) CHARGES.put(caster, new Charge(entityId));
         else CHARGES.remove(caster);
+        // удержание X: поза сжатия с нарастанием (каст её сменит сам; отмена — плавно отпустить)
+        Minecraft mc = Minecraft.getInstance();
+        if (mc.level != null && mc.level.getEntity(entityId) instanceof AbstractClientPlayer p) {
+            if (on) PlayerAnimations.play(p, "red_charge");
+            else PlayerAnimations.stop(p, "red_charge", Double.NaN);
+        }
     }
 
     static void onCast(UUID caster, int entityId, boolean max, float yaw) {
@@ -219,7 +225,7 @@ public final class RedTechniqueClient {
         if (mc.level.getEntity(entityId) instanceof AbstractClientPlayer p) {
             String anim = max ? "max_red" : "red_cast";
             PlayerAnimations.play(p, anim, new PlayerAnimations.Play().fade(0.1)
-                    .firstPerson(true, false, (max ? ARM_TICKS_MAX : ARM_TICKS_RED) / 20.0));
+                    .firstPerson(true, true, (max ? ARM_TICKS_MAX : ARM_TICKS_RED) / 20.0));
         }
         if (max && mc.player != null && mc.player.getId() == entityId) {
             mc.player.setSprinting(false);
@@ -514,9 +520,16 @@ public final class RedTechniqueClient {
             {18, 0.20, 0.36, 0.80},
     };
 
+    /** Ладонь правой руки по самой модели R15 (null — модель не рисуется, тогда точка из таблицы). */
+    private static Vec3 palm(Entity e, float pt) {
+        return e instanceof AbstractClientPlayer p ? PlayerAnimations.jointWorld(p, "RightHand", pt, 0.14) : null;
+    }
+
     private static Vec3 redHand(Minecraft mc, Cast c, double t, float pt) {
         Entity e = mc.level.getEntity(c.entityId);
         if (e == null) return Vec3.ZERO;
+        Vec3 live = palm(e, pt);
+        if (live != null) return live;
         float yaw = e instanceof LivingEntity le ? Mth.rotLerp(pt, le.yBodyRotO, le.yBodyRot) : c.yaw;
         double[] k = keyed(RED_HAND, t);
         return point(feet(e, pt), basis(yaw), k[1], k[2], k[3]);
@@ -549,6 +562,8 @@ public final class RedTechniqueClient {
     private static Vec3 maxHand(Minecraft mc, Cast c, double t, float pt) {
         Entity e = mc.level.getEntity(c.entityId);
         if (e == null) return Vec3.ZERO;
+        Vec3 live = palm(e, pt);
+        if (live != null) return live;
         float yaw = e instanceof LivingEntity le ? Mth.rotLerp(pt, le.yBodyRotO, le.yBodyRot) : c.yaw;
         double[] k = keyed(MAX_HAND, t);
         return point(feet(e, pt), basis(yaw), k[1], k[2], k[3]);
@@ -598,7 +613,8 @@ public final class RedTechniqueClient {
         double t = ch.ticks + pt;
         float k = (float) Mth.clamp(t / CHARGE_MAX_TICKS, 0.0, 1.0);
         float yaw = Mth.rotLerp(pt, le.yBodyRotO, le.yBodyRot);
-        Vec3 hand = point(feet(e, pt), basis(yaw), 0.14, 0.38, 0.72);
+        Vec3 hand = palm(e, pt);
+        if (hand == null) hand = point(feet(e, pt), basis(yaw), 0.14, 0.38, 0.72);
         float a = (float) smooth(t / 4.0);
         billboard(pose, cam, camera, hand, 0.5f + 0.9f * k, 0f, TEX_GLOW, 1f, 0.18f, 0.12f, a * (0.35f + 0.45f * k), true);
         colorSphere(pose, camera, hand, 0.025f + 0.035f * k, 1f, 0.75f, 0.65f, a, 8, 12);
@@ -867,15 +883,17 @@ public final class RedTechniqueClient {
         Vec3 dir = s.velocity.normalize();
         float r = RED_ORB_RADIUS * scale;
 
-        // След: светящаяся лента позади шара (длиной ~2 тика полёта), сужается к хвосту.
+        // Издали шарик в 0,16 блока теряется за пару тиков: свечение и след держат видимый размер на экране.
+        float far = (float) Math.max(1.0, p.distanceTo(camera) * 0.07);
+        // След: светящаяся лента позади шара (длиной ~3 тика полёта), сужается к хвосту.
         if (s.endPos == null) {
-            double len = Math.min(7.5, t * s.velocity.length());
+            double len = Math.min(11.0, t * s.velocity.length());
             Vec3 prev = p;
-            int n = 10;
+            int n = 12;
             for (int i = 1; i <= n; i++) {
                 double u = i / (double) n;
                 Vec3 q = p.subtract(dir.scale(len * u));
-                float w = (float) (r * 1.6 * (1.0 - u) + 0.01);
+                float w = (float) (r * 1.6 * (1.0 - u) + 0.01) * far;
                 float a = (float) (1.0 - u);
                 streak(pose, camera, prev, q, w * 2.4f, TEX_STREAK, 1f, 0.12f, 0.08f, a * 0.55f, true);
                 streak(pose, camera, prev, q, w, TEX_STREAK, 1f, 0.75f, 0.65f, a * 0.9f, true);
@@ -884,6 +902,8 @@ public final class RedTechniqueClient {
             // Волны жара — воздух дрожит вокруг шара.
             billboard(pose, cam, camera, p, r * 14.0f, (float) (t * 0.4), TEX_HEAT, 1f, 0.55f, 0.45f, 0.18f, true);
         }
+        billboard(pose, cam, camera, p, r * 9.0f * far, (float) (t * 0.3), TEX_GLOW, 1f, 0.16f, 0.1f, 0.85f * alpha, true);
+        billboard(pose, cam, camera, p, r * 3.5f * far, 0f, TEX_GLOW, 1f, 0.85f, 0.75f, 0.9f * alpha, true);
         redOrb(pose, cam, camera, p, r, t, alpha, s.seed);
     }
 
@@ -999,9 +1019,12 @@ public final class RedTechniqueClient {
             // Ударная волна — розовый свет.
             float haze = env(t, M_SHOCK - 0.5, M_FLASH + 0.2, 0.3, 0.4) * 0.55f;
             if (haze > 0.01f) fill(event, w, h, haze, 0xFFC8C8);
-            // Три кадра негатива перед выстрелом: красно-чёрный, чёрно-белый, бело-чёрный.
+            // Перед выстрелом — один красно-чёрный кадр-импакт (как в аниме), дальше яркая вспышка, а не
+            // полный негатив экрана: три кадра инверсии вместе с HUD выглядели как глюк.
             int frame = (int) Math.floor(t) - M_FLASH;
-            if (frame >= 0 && frame < 3) negative(event, w, h, frame);
+            if (frame == 0) negative(event, w, h, 0);
+            float glare = env(t, M_FLASH + 1, M_FLASH + 3, 0.2, 1.5) * 0.6f;
+            if (glare > 0.01f) fill(event, w, h, glare, 0xFFF0E8);
             // Выстрел — красная вспышка.
             float shot = env(t, M_FIRE, M_FIRE + 5, 0.1, 4) * 0.45f;
             if (shot > 0.01f) fill(event, w, h, shot, 0xFF2010);

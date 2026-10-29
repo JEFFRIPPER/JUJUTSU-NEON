@@ -57,7 +57,9 @@ public final class R15PlayerModel extends PlayerModel<AbstractClientPlayer> {
         c.skin.apply(s.finalPose);
         int n = Bones.count();
         if (s.boneMatrices.length < n) s.boneMatrices = java.util.Arrays.copyOf(s.boneMatrices, n);
-        c.skin.matrices(s.finalPose, s.boneMatrices);
+        if (s.joints.length < n) s.joints = java.util.Arrays.copyOf(s.joints, n);
+        c.skin.matrices(s.finalPose, s.boneMatrices, s.joints);
+        s.drawnFrame = PlayerAnimations.frame();
 
         float armY = slim ? 2.5f : 2.0f;
         sync(c, head, Bones.HEAD, 0, 0, 0);

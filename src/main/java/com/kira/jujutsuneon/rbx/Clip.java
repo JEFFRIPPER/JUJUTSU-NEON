@@ -22,6 +22,7 @@ import java.util.Locale;
  *   @fade_out=0.15     — плавный выход по окончании
  *   @look=0.3          — насколько голова следит за взглядом (0..1; по умолчанию 1 для Core/Idle, 0.25 для остальных)
  *   @aim=1             — плечи анимации поворачиваются за взглядом (лук, щит, прицел)
+ *   @face=1            — тело разворачивается туда, куда смотрит игрок (0..1; по умолчанию 1 для Action и выше)
  *   @fp=arms           — от первого лица видны руки модели: arms / right / left (по умолчанию для Action — arms)
  *   @fp=none           — от первого лица — ванильные руки
  *   @blend=additive    — анимация прибавляется к нижним слоям, а не заменяет их
@@ -55,6 +56,8 @@ public final class Clip {
     public final AnimationPriority priority;
     public final double fadeIn, fadeOut;
     public final double look, aim;
+    /** Насколько быстро тело доворачивается к взгляду, пока играет анимация (0 — не трогать). */
+    public final double face;
     public final FirstPerson firstPerson;
     public final boolean additive;
     /** Скорость, под которую нарисован цикл шага, блоки/с (0 — не цикл шага). */
@@ -77,7 +80,7 @@ public final class Clip {
         this.holdLastFrame = "hold_on_last_frame".equals(loop);
 
         AnimationPriority pr = AnimationPriority.ACTION;
-        double fi = 0.1, fo = 0.15, lk = Double.NaN, am = 0;
+        double fi = 0.1, fo = 0.15, lk = Double.NaN, am = 0, fc = Double.NaN;
         FirstPerson fp = null;
         boolean add = false;
         double ms = 0;
@@ -95,6 +98,7 @@ public final class Clip {
                         case "fade_out", "fadeout" -> fo = num(v, fo);
                         case "look" -> lk = num(v, 1);
                         case "aim" -> am = v.isEmpty() ? 1 : num(v, 1);
+                        case "face" -> fc = v.isEmpty() ? 1 : num(v, 1);
                         case "fp", "first_person" -> fp = parseFp(v);
                         case "blend" -> add = v.equalsIgnoreCase("additive") || v.equalsIgnoreCase("add");
                         case "move_speed", "movespeed" -> ms = num(v, 0);
@@ -115,6 +119,7 @@ public final class Clip {
         boolean base = pr == AnimationPriority.CORE || pr == AnimationPriority.IDLE;
         this.look = Double.isNaN(lk) ? (base ? 1 : 0.25) : clamp01(lk);
         this.aim = clamp01(am);
+        this.face = Double.isNaN(fc) ? (pr.ordinal() >= AnimationPriority.ACTION.ordinal() ? 1 : 0) : clamp01(fc);
         this.firstPerson = fp != null ? fp : (pr.ordinal() >= AnimationPriority.ACTION.ordinal() ? FirstPerson.ARMS : FirstPerson.NONE);
         this.additive = add;
         this.moveSpeed = Math.max(0, ms);

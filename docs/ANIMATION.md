@@ -73,9 +73,13 @@
   `jump`, `fall`, `land`, `swim`, `swim_idle`, `climb`, `sit`, `glide`, `sleep`, `charge`, `leap`,
   `fly_hover`, `fly_glide`, `fly_boost`, `fly_land`, `dash_front/back/left/right`, `hold_item`, `hold_crossbow`,
   `swing`, `use_eat/drink/block/bow/spear/crossbow/spyglass/horn/brush`;
-* `techniques.animation.json` — техники: `red_cast`, `max_red`, `blue_charge`, `max_blue`, `lapse_blue`,
-  `lapse_blue_grab_low/mid/high`, `lapse_blue_hold`, `lapse_blue_throw`, `domain_cast`, `simple_domain`,
-  `m1_jab_l/r`, `m1_final`, `m1_knockdown`.
+* `gojo.animation.json` — техники Годжо, нарисованные позами заново (`tools/rig/gen_techniques.py`):
+  `red_cast`, `red_charge`, `max_red`, `blue_charge`, `max_blue`, `max_blue_hold`, `hollow_purple`,
+  `hollow_purple_fire`, `simple_domain`, `simple_domain_hold`, `rct`, `teleport`, `max_purple`, `domain_cast`;
+* `techniques.animation.json` — остальное из старых поз: `lapse_blue`, `lapse_blue_grab_low/mid/high`,
+  `lapse_blue_hold`, `lapse_blue_throw`, `m1_jab_l/r`, `m1_final`, `m1_knockdown`.
+
+Свойство `@face=1` (по умолчанию у Action и выше) — пока играет анимация, тело доворачивается к взгляду.
 
 ## Работа в Blockbench
 
@@ -86,8 +90,11 @@
 4. Готовую анимацию кладёте в `src/main/resources/assets/jujutsu_neon/animations/player/`.
 
 Анимации передвижения собраны скриптом `tools/rig/gen_locomotion.py` (обёртка над форматом —
-`tools/rig/anim_dsl.py`), техники переведены из старых поз Player Animator скриптом `tools/rig/convert_pa.py`
-(исходники — `tools/rig/legacy_pa/`, тайминги сохранены до тика). Превью без игры:
+`tools/rig/anim_dsl.py`). Техники Годжо рисует `tools/rig/gen_techniques.py` по принципам Roblox-аниматоров:
+замах, запаздывание частей тела, дуги, микро-стоп на ударе, крайние позы всем телом; он же проверяет, что кисть
+не проходит сквозь голову (вид от первого лица). Остальные техники переведены из старых поз Player Animator
+скриптом `tools/rig/convert_pa.py` (исходники — `tools/rig/legacy_pa/`). Ключевые позы крупно —
+`tools/rig/keys.py <файл> <анимация> 0.2,0.65`, где окажется кисть при углах — `tools/rig/where.py`. Превью без игры:
 
 ```
 python3 tools/rig/preview.py anim src/main/resources/assets/jujutsu_neon/animations/player/locomotion.animation.json animation.player.walk --views front,side
