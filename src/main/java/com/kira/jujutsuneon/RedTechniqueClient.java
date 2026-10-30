@@ -639,11 +639,10 @@ public final class RedTechniqueClient {
             flat(pose, camera, g, (float) (1.6 + 5.0 * k), 0f, TEX_GLOW, 1f, 0.12f, 0.08f, aura * 0.55f, true);
         }
 
-        // Искра над головой (R_SPARK) опускается в ладонь к груди (R_CHEST) и растёт.
+        // Искра зажигается прямо в ладони (R_SPARK) и растёт к броску. Раньше она рождалась
+        // над головой и летела в руку — это было под старую анимацию с поднятой рукой.
         if (t >= R_SPARK - 0.5 && t < R_FIRE) {
-            Vec3 above = point(ft, b, 0.26, 0.14, 2.42);
-            double k = win(t, R_CHEST - 1, R_CHEST + 1.5);
-            Vec3 p = above.lerp(hand, smooth(k));
+            Vec3 p = hand;
             float r = (float) (0.018 + 0.03 * win(t, R_SPARK, R_CHEST) + 0.11 * win(t, R_CHEST, R_FIRE));
             float a = (float) smooth((t - R_SPARK + 0.5) / 1.5);
             redOrb(pose, cam, camera, p, r, t, a, c.seed);
