@@ -558,7 +558,7 @@ def max_purple():
              arms((-160, -20, 24), -30, (-160, 20, -24), -30, (0, 0, -20), (0, 0, 20)))
     k.key(17.6, 'easeInOutCubic', OVER)
 
-    def lying(tilt=-78, chest=-6, head=-8):
+    def lying(tilt=-78, chest=-6, head=20):
         legs_bent = {'LowerTorso.pos': ZERO, 'RightUpperLeg': (-26, 0, 6), 'RightLowerLeg': (40, 0, 0),
                      'RightFoot': (20, 0, 0), 'LeftUpperLeg': (-12, 0, -6), 'LeftLowerLeg': (30, 0, 0),
                      'LeftFoot': (20, 0, 0)}
@@ -569,11 +569,11 @@ def max_purple():
                  arc=lambda u: {'RightLowerArm': (-40 * math.sin(math.pi * u), 0, 0),
                                 'LeftLowerArm': (-40 * math.sin(math.pi * u), 0, 0)})
     # удар: руки рывком распрямляются и раскидываются в стороны, корпус чуть прогибается
-    k.key(18.08, 'easeOutQuint', M(lying(-84, -10, -12), arms((-26, 0, 90), 0, (-26, 0, -90), 0)), overlap=False)
+    k.key(18.08, 'easeOutQuint', M(lying(-84, -10, 16), arms((-26, 0, 90), 0, (-26, 0, -90), 0)), overlap=False)
     k.hold(0.2)
     # белый экран и после: висит в этой позе, лёгкое покачивание
-    k.key(19.4, 'easeInOutSine', M(lying(-80, -8, -10), arms((-30, 0, 86), -4, (-30, 0, -86), -4)), overlap=False)
-    k.key(20.4, 'easeInOutSine', M(lying(-82, -9, -11), arms((-29, 0, 88), -2, (-29, 0, -88), -2)), overlap=False)
+    k.key(19.4, 'easeInOutSine', M(lying(-80, -8, 20), arms((-30, 0, 86), -4, (-30, 0, -86), -4)), overlap=False)
+    k.key(20.4, 'easeInOutSine', M(lying(-82, -9, 19), arms((-29, 0, 88), -2, (-29, 0, -88), -2)), overlap=False)
     for t_, m in ((0.7, 'blue'), (2.05, 'throw'), (3.3, 'red'), (3.47, 'red_fire'), (18.0, 'pose')):
         a.marker(t_, m)
     return a
