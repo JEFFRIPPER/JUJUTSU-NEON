@@ -459,7 +459,7 @@ public final class RedTechniqueClient {
         Cast c = CASTS.get(mc.player.getUUID());
         if (c != null && c.max) {
             double t = c.ticks + pt;
-            if (t >= M_AURA && t < M_SHOCK) shake = Math.max(shake, 0.35f);
+            if (t >= M_CONDENSE && t < M_FLASH) shake = Math.max(shake, 0.12f + 0.3f * (float) win(t, M_CONDENSE, M_FLASH));
             if (t >= M_FIRE && t < M_FIRE + 9) shake = Math.max(shake, 2.6f * (float) (1.0 - (t - M_FIRE) / 9.0));
         }
         Vec3 cam = event.getCamera().getPosition();
@@ -535,28 +535,15 @@ public final class RedTechniqueClient {
         return point(feet(e, pt), basis(yaw), k[1], k[2], k[3]);
     }
 
-    // Ладонь правой руки в Максимальном Красном (вперёд, вправо, вверх от ног; лицом к цели, без разворота).
-    // Посчитано по позам max_red.json (tools/gen_red_anim.py); на выстреле — кончики пальцев вытянутой руки.
+    // Ладонь правой руки в Максимальном Красном (вперёд, вправо, вверх от ног), если модель не рисуется.
+    // Примерно по позам max_red из tools/rig/gen_techniques.py (tools/rig/where.py).
     private static final double[][] MAX_HAND = {
             {0, 0.03, 0.33, 0.76},
-            {1, 0.51, 0.31, 1.25},
-            {3, 0.10, 0.28, 1.62},
-            {5, 0.10, 0.30, 1.60},
-            {7, -0.10, 0.20, 1.70},
-            {9, -0.15, 0.12, 1.66},
-            {10, -0.14, 0.12, 1.66},
-            {12, 0.30, 0.08, 1.42},
-            {14, 0.32, 0.08, 1.40},
-            {16, 0.34, 0.26, 1.36},
-            {18, 0.33, 0.26, 1.36},
-            {20, 0.34, 0.26, 1.36},
-            {22, 0.34, 0.26, 1.31},
-            {25, 0.26, 0.33, 1.28},
-            {26, 0.66, 0.20, 1.27},
-            {28, 0.50, 0.22, 1.56},
-            {30, 0.52, 0.22, 1.50},
-            {33, 0.41, 0.30, 1.01},
-            {36, 0.03, 0.33, 0.76},
+            {5, -0.10, 0.40, 0.70},
+            {10, 0.55, 0.45, 1.15},
+            {15, 0.74, 0.36, 1.35},
+            {48, 0.74, 0.36, 1.35},
+            {56, 0.03, 0.33, 0.76},
     };
 
     private static Vec3 maxHand(Minecraft mc, Cast c, double t, float pt) {
@@ -661,79 +648,81 @@ public final class RedTechniqueClient {
         Entity e = mc.level.getEntity(c.entityId);
         if (e == null) return;
         Vec3 ft = feet(e, pt);
-        Vec3[] b = basis(c.yaw);
-        Vec3 chest = ft.add(0.0, 1.2, 0.0);
         Vec3 hand = maxHand(mc, c, t, pt);
+        Vec3 d = e.getViewVector(pt).normalize();
+        Vec3 u = Math.abs(d.y) > 0.95 ? new Vec3(1, 0, 0) : d.cross(new Vec3(0, 1, 0)).normalize();
+        Vec3 v = u.cross(d).normalize();
+        Vec3 orb = hand.add(d.scale(0.22));
 
-        // Свечение пальцев у лба (печать).
-        float sign = env(t, 1, M_CONDENSE, 2, 3);
-        if (sign > 0.01f) {
-            billboard(pose, cam, camera, hand, 0.8f, 0f, TEX_GLOW, 1f, 0.35f, 0.25f, sign * 0.8f, true);
+        // Пальцы теплеют, пока рука поднимается.
+        float sign = env(t, M_ORB - 7, M_ORB + 2, 4, 2);
+        if (sign > 0.01f) billboard(pose, cam, camera, hand, 0.5f, 0f, TEX_GLOW, 1f, 0.3f, 0.2f, sign * 0.6f, true);
+
+        // Шар перед ладонью: рождается на M_ORB размером с ладонь и дальше почти не растёт (как в референсе).
+        if (t >= M_ORB - 0.5 && t < M_FIRE + 0.5) {
+            double pop = 1.0 - Math.pow(1.0 - win(t, M_ORB - 0.5, M_ORB + 2.5), 3.0);
+            float r = (float) (0.2 * pop + 0.03 * win(t, M_ORB, M_FIRE) + 0.012 * Math.sin(t * 2.7));
+            redOrb(pose, cam, camera, orb, r, t, (float) pop, c.seed);
+            billboard(pose, cam, camera, orb, 1.4f + 0.6f * (float) win(t, M_ORB, M_FIRE), 0f, TEX_GLOW, 1f, 0.08f, 0.06f, (float) pop * 0.55f, true);
         }
 
-        // Огромное красное кольцо-аура: вспыхивает на M_AURA, пульсирует, стягивается к шару.
-        float aura = env(t, M_AURA - 0.5, M_ORB + 3, 0.8, 6);
-        if (aura > 0.01f) {
-            double grow = 1.0 - Math.pow(1.0 - win(t, M_AURA, M_AURA + 3), 3.0);
-            double shrink = win(t, M_CONDENSE, M_ORB + 3);
-            float size = (float) ((9.5 * grow) * (1.0 - 0.75 * smooth(shrink)) + 0.6 * Math.sin(t * 1.3));
-            billboard(pose, cam, camera, chest, size, (float) (t * 0.06), TEX_AURA, 1f, 0.16f, 0.12f, aura * 0.95f, true);
-            billboard(pose, cam, camera, chest, size * 0.8f, (float) (-t * 0.09 + 1.0), TEX_AURA, 1f, 0.35f, 0.28f, aura * 0.55f, true);
-            billboard(pose, cam, camera, chest, size * 1.2f, 0f, TEX_GLOW, 1f, 0.12f, 0.08f, aura * 0.45f, true);
-        }
-        // Красный свет по земле.
-        float ground = env(t, M_AURA, M_END, 2, 8);
-        if (ground > 0.01f) {
-            flat(pose, camera, ft.add(0.0, 0.04, 0.0), (float) (6.0 + 3.0 * win(t, M_AURA, M_FIRE)), 0f, TEX_GLOW, 1f, 0.12f, 0.08f, ground * 0.75f, true);
+        // Красный свет на земле и на персонаже.
+        float glow = env(t, M_ORB, M_END, 3, 8);
+        if (glow > 0.01f) {
+            flat(pose, camera, ft.add(0.0, 0.04, 0.0), (float) (3.0 + 4.0 * win(t, M_ORB, M_FIRE)), 0f, TEX_GLOW, 1f, 0.1f, 0.06f, glow * 0.6f, true);
+            billboard(pose, cam, camera, ft.add(0.0, 1.0, 0.0), 2.4f, 0f, TEX_GLOW, 1f, 0.15f, 0.1f, glow * 0.25f, true);
         }
 
-        // Белые закрученные ленты энергии сходятся в шар.
-        float rib = env(t, M_AURA, M_ORB + 1, 0.6, 3);
+        // Спиральные ленты вокруг шара и руки: закручиваются в плоскости поперёк руки и разрастаются,
+        // обвивая руку и корпус (шар при этом не растёт).
+        float rib = env(t, M_CONDENSE - 1, M_SHOCK + 3, 2, 4);
         if (rib > 0.01f) {
-            double conv = smooth(win(t, M_AURA + 4, M_ORB));
-            Vec3 target = maxHand(mc, c, Math.max(t, M_CONDENSE), pt);
+            double grow = smooth(win(t, M_CONDENSE - 1, M_SHOCK));
             Random rnd = new Random(c.seed * 13L);
-            for (int i = 0; i < 9; i++) {
-                double a0 = rnd.nextDouble() * Math.PI * 2.0;
-                double tilt = (rnd.nextDouble() - 0.5) * 1.6;
-                double speed = (0.32 + rnd.nextDouble() * 0.25) * (rnd.nextBoolean() ? 1 : -1);
-                double r0 = 2.2 + rnd.nextDouble() * 1.8;
-                double r = r0 * (1.0 - conv) + 0.25;
-                Vec3 center = chest.lerp(target, conv);
+            for (int i = 0; i < 5; i++) {
+                double a0 = i / 5.0 * Math.PI * 2.0 + rnd.nextDouble() * 0.6;
+                double spin = (0.38 + rnd.nextDouble() * 0.2) * (i % 2 == 0 ? 1 : -1);
+                double rad = (0.35 + 2.2 * grow) * (0.75 + rnd.nextDouble() * 0.5);
+                double len = 0.3 + 2.6 * grow;
                 Vec3 prev = null;
-                for (int s = 0; s <= 16; s++) {
-                    double u = s / 16.0;
-                    double a = a0 + t * speed + u * 2.6;
-                    double rr = r * (0.55 + 0.45 * Math.sin(u * Math.PI));
-                    Vec3 p = center.add(b[1].scale(Math.cos(a) * rr)).add(b[0].scale(Math.sin(a) * rr * Math.cos(tilt)))
-                            .add(0.0, Math.sin(a) * rr * Math.sin(tilt) + (u - 0.5) * r * 0.6, 0.0);
+                for (int s2 = 0; s2 <= 22; s2++) {
+                    double q = s2 / 22.0;
+                    double a = a0 + t * spin + q * Math.PI * 1.7;
+                    double rr = rad * (0.35 + 0.65 * Math.sin(q * Math.PI));
+                    Vec3 p = orb.subtract(d.scale(q * len)).add(u.scale(Math.cos(a) * rr)).add(v.scale(Math.sin(a) * rr));
                     if (prev != null) {
-                        float w = (float) (0.06 + 0.08 * Math.sin(u * Math.PI)) * (float) (1.0 - conv * 0.6);
-                        float aa = rib * (float) Math.sin(u * Math.PI);
-                        streak(pose, camera, prev, p, w * 2.2f, TEX_STREAK, 1f, 0.35f, 0.32f, aa * 0.55f, true);
-                        streak(pose, camera, prev, p, w, TEX_STREAK, 1f, 0.95f, 0.95f, aa, true);
+                        float w = (float) (0.05 + 0.09 * Math.sin(q * Math.PI));
+                        float aa = rib * (float) Math.sin(q * Math.PI);
+                        streak(pose, camera, prev, p, w * 2.6f, TEX_STREAK, 1f, 0.12f, 0.1f, aa * 0.6f, true);
+                        streak(pose, camera, prev, p, w, TEX_STREAK, 1f, 0.82f, 0.85f, aa, true);
                     }
                     prev = p;
                 }
             }
         }
 
-        // Шар у ладони: рождается из лент, растёт, пульсирует.
-        if (t >= M_CONDENSE - 1 && t < M_FIRE + 0.5) {
-            float r = (float) (0.05 + 0.27 * smooth(win(t, M_CONDENSE - 1, M_ORB + 2)) + 0.02 * Math.sin(t * 2.1));
-            float a = (float) smooth((t - M_CONDENSE + 1) / 2.0);
-            redOrb(pose, cam, camera, hand, r, t, a, c.seed);
+        // Поток перед выстрелом: прямые линии летят от шара назад вдоль руки и за спину.
+        float flow = env(t, M_SHOCK, M_FIRE + 1, 1, 1.5);
+        if (flow > 0.01f) {
+            Random rnd = new Random(c.seed * 31L + 7);
+            for (int i = 0; i < 26; i++) {
+                double a = rnd.nextDouble() * Math.PI * 2.0;
+                double off = 0.15 + rnd.nextDouble() * 1.8;
+                double sp = 0.9 + rnd.nextDouble() * 0.7;
+                double ph = rnd.nextDouble();
+                double travel = ((t - M_SHOCK) * sp * 0.22 + ph) % 1.0;
+                double back = travel * 6.0;
+                double l = 1.2 + rnd.nextDouble() * 2.0;
+                Vec3 side = u.scale(Math.cos(a) * off).add(v.scale(Math.sin(a) * off * 0.8));
+                Vec3 p0 = orb.add(side).subtract(d.scale(back));
+                Vec3 p1 = p0.subtract(d.scale(l));
+                float aa = flow * (float) Math.sin(travel * Math.PI);
+                streak(pose, camera, p0, p1, 0.12f, TEX_STREAK, 1f, 0.2f, 0.16f, aa * 0.6f, true);
+                streak(pose, camera, p0, p1, 0.045f, TEX_STREAK, 1f, 0.9f, 0.9f, aa, true);
+            }
         }
 
-        // Ударная волна перед выстрелом.
-        float shock = env(t, M_SHOCK, M_SHOCK + 6, 0.3, 4);
-        if (shock > 0.01f) {
-            double k = 1.0 - Math.pow(1.0 - win(t, M_SHOCK, M_SHOCK + 6), 2.0);
-            billboard(pose, cam, camera, chest, (float) (1.0 + 13.0 * k), 0f, TEX_SHOCK, 1f, 0.35f, 0.3f, shock, true);
-            billboard(pose, cam, camera, chest, (float) (2.0 + 16.0 * k), 0f, TEX_GLOW, 1f, 0.6f, 0.55f, shock * 0.5f, true);
-            flat(pose, camera, ft.add(0.0, 0.06, 0.0), (float) (1.0 + 14.0 * k), 0f, TEX_SHOCK, 1f, 0.3f, 0.25f, shock * 0.8f, true);
-        }
-        // Пыль под ногами от отдачи.
+        // Пыль под ногами от выстрела.
         float dust = env(t, M_FIRE, M_END + 10, 0.5, 8);
         if (dust > 0.01f) {
             double k = win(t, M_FIRE, M_FIRE + 16);
@@ -1015,17 +1004,15 @@ public final class RedTechniqueClient {
             Entity e = mc.level.getEntity(c.entityId);
             if (e == null || e.position().distanceTo(eye) > 48.0) continue;
             double t = c.ticks + pt;
-            // Ударная волна — розовый свет.
-            float haze = env(t, M_SHOCK - 0.5, M_FLASH + 0.2, 0.3, 0.4) * 0.55f;
-            if (haze > 0.01f) fill(event, w, h, haze, 0xFFC8C8);
-            // Перед выстрелом — один красно-чёрный кадр-импакт (как в аниме), дальше яркая вспышка, а не
-            // полный негатив экрана: три кадра инверсии вместе с HUD выглядели как глюк.
+            // Пока заряжается шар, весь кадр уходит в тёмно-красный (как в референсе).
+            float tint = env(t, M_ORB, M_FLASH, 6, 0.5) * (0.12f + 0.16f * (float) win(t, M_ORB, M_FLASH));
+            if (tint > 0.01f) fill(event, w, h, tint, 0x6A0008);
+            // Выстрел: один кадр негатива (чёрный силуэт на белом), потом белая вспышка ≤ 0,25 с.
             int frame = (int) Math.floor(t) - M_FLASH;
-            if (frame == 0) negative(event, w, h, 0);
-            float glare = env(t, M_FLASH + 1, M_FLASH + 3, 0.2, 1.5) * 0.6f;
-            if (glare > 0.01f) fill(event, w, h, glare, 0xFFF0E8);
-            // Выстрел — красная вспышка.
-            float shot = env(t, M_FIRE, M_FIRE + 5, 0.1, 4) * 0.45f;
+            if (frame == 0) negative(event, w, h, 1);
+            float glare = env(t, M_FLASH + 1, M_FLASH + 5, 0.1, 3) * 0.85f;
+            if (glare > 0.01f) fill(event, w, h, glare, 0xFFF4EE);
+            float shot = env(t, M_FIRE + 3, M_FIRE + 8, 0.5, 4) * 0.3f;
             if (shot > 0.01f) fill(event, w, h, shot, 0xFF2010);
         }
         for (Boom b : BOOMS) {
