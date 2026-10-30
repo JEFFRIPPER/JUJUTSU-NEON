@@ -1008,9 +1008,11 @@ public final class MaximumPurpleClient {
             // камера опускается к груди (руки над головой), потом снова сверху — игрок откидывается назад
             ck(1048 / 3.0, A_PLAYER, 0.95, 0.0, 3.2, A_PLAYER, -0.2, 0.0, 1.45, 70f, 0f, true),
             ck(355.3, A_PLAYER, 1.05, 0.1, 2.65, A_PLAYER, -0.1, 0.0, 1.55, 70f, 0f, false),
-            ck(359.3, A_PLAYER, 1.35, 0.0, 1.75, A_PLAYER, 0.0, 0.0, 1.6, 70f, 0f, false),
-            ck(361.8, A_PLAYER, 1.25, -0.2, 2.55, A_PLAYER, -0.25, 0.0, 1.05, 72f, 0f, false),
-            ck(366.0, A_PLAYER, 1.35, -0.3, 2.8, A_PLAYER, -0.3, 0.0, 0.95, 74f, 0f, false),
+            // 17,85–18,3 с: игрок откидывается на спину — камера уходит вниз и вперёд, снимает его сбоку-спереди
+            // на уровне тела, сфера за ним (референс #2150–2186)
+            ck(359.3, A_PLAYER, 1.5, 0.5, 1.0, A_PLAYER, -0.3, 0.0, 1.0, 72f, 0f, false),
+            ck(361.8, A_PLAYER, 1.8, 0.7, 0.65, A_PLAYER, -0.45, 0.0, 0.9, 72f, 0f, false),
+            ck(366.0, A_PLAYER, 1.95, 0.8, 0.55, A_PLAYER, -0.45, 0.0, 0.9, 74f, 0f, false),
     };
 
     private static Vec3 anchor(Scene s, int a, double f, double r, double u, double t) {
@@ -2318,11 +2320,18 @@ public final class MaximumPurpleClient {
             drawCracks(g, w, h, t);
         }
         // референс 120 к/с #2187–2190: штриховка и кисть «пистолетом»; #2191–2201: белый «X» и контур кисти; #2202 — белый
-        // Кадры держатся ~0,15 с каждый, чтобы рисунок кисти успевал читаться.
+        // Манга-кадры удара: сам игрок, зависший на спине в воздухе (его модель в текущей позе, сбоку).
+        // Сначала белый силуэт со штриховкой на чёрно-белых линиях, потом белый контур рядом с «X»;
+        // держатся ~0,15 с каждый с лёгким наездом.
         if (t >= 362.5 && t < 365.5) {
-            drawFrame(g, w, h, MANGA_D1, (t - 362.5) * 0.3);
+            double k = t - 362.5;
+            drawFrame(g, w, h, MANGA_D1, k * 0.3);
+            drawSilhouetteAt(g, w, h, WHITE_TINT, WHITE_TINT, WHITE_TINT, 1.0f + 0.02f * (float) k, 0.0f, -h * 0.3f, 90.0f);
+            drawFrame(g, w, h, TEX_HATCH, 0.0);
         } else if (t >= 365.5 && t < 368.7) {
-            drawFrame(g, w, h, MANGA_D2, (t - 365.5) * 0.3);
+            double k = t - 365.5;
+            drawFrame(g, w, h, MANGA_D2, k * 0.3);
+            drawOutlineAt(g, w, h, 1.04f + 0.02f * (float) k, w * 0.06f, -h * 0.3f, 90.0f);
         }
 
         // 18,43 с (кадр 1106): сразу белый экран, пока дорезается кратер
@@ -2455,6 +2464,17 @@ public final class MaximumPurpleClient {
         p.xRotO = xRotO;
         p.yHeadRot = head;
         p.yHeadRotO = headO;
+    }
+
+    /** Контур игрока «мелом»: белый силуэт со сдвигами по кругу, сверху тот же силуэт чёрным. */
+    private static void drawOutlineAt(GuiGraphics g, int w, int h, float zoom, float dx, float dy, float bodyYaw) {
+        float o = Math.max(2.0f, h / 270.0f);
+        for (int i = 0; i < 8; i++) {
+            double a = i * Math.PI / 4.0;
+            drawSilhouetteAt(g, w, h, WHITE_TINT, WHITE_TINT, WHITE_TINT, zoom,
+                    dx + (float) Math.cos(a) * o, dy + (float) Math.sin(a) * o, bodyYaw);
+        }
+        drawSilhouetteAt(g, w, h, 0.0f, 0.0f, 0.0f, zoom, dx, dy, bodyYaw);
     }
 
     private static void fillColor(GuiGraphics g, int w, int h, float alpha, int rgb) {

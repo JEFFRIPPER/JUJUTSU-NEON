@@ -554,30 +554,29 @@ def max_purple():
     k.key(16.8, 'easeInCubic', M(body(0, (6, 0, 0), (-4, 0, 0)),
                                  arms((-84, -30, 10), -40, (-84, 30, -10), -40, (0, 0, -40), (0, 0, 40))))
     k.hold(0.1)
-    # за спиной огромная сфера — ладони держат её, корпус чуть назад
-    HOLD = M(AIR, body(0, (-8, 0, 0), (-12, 0, 0)),
-             arms((-100, -14, 30), -20, (-100, 14, -30), -20, ZERO, ZERO))
-    k.key(17.5, 'easeOutBack', HOLD)
+    # Референс 17,45–18,3 с: сверху на голову — руки скрещены над головой, держат сферу; потом он
+    # откидывается на спину и зависает в воздухе почти горизонтально, руки прямые, выброшены вперёд-вверх
+    # (к небу), ноги чуть согнуты. В этой позе — удар, манга-кадр с его силуэтом и белый экран.
+    OVER = M(AIR, body(0, (-6, 0, 0), (-10, 0, 0)),
+             arms((-160, -20, 24), -30, (-160, 20, -24), -30, (0, 0, -20), (0, 0, 20)))
+    k.key(17.6, 'easeInOutCubic', OVER)
 
-    # Удар: как в Max Red — корпус разворачивается боком (таз ведёт, грудь почти не скручена), правая рука
-    # прямая, продолжение линии плеч, «пистолетом» вперёд-вниз в цель; голова в цель, левая рука назад.
-    def side(lean=4, nod=18, twist=0):
-        return M(AIR, body(-72, (lean, -8 + twist, 0), (nod, 80 - twist, 0)))
+    def lying(tilt=-78, chest=-6, head=-8):
+        legs_bent = {'LowerTorso.pos': ZERO, 'RightUpperLeg': (-26, 0, 6), 'RightLowerLeg': (40, 0, 0),
+                     'RightFoot': (20, 0, 0), 'LeftUpperLeg': (-12, 0, -6), 'LeftLowerLeg': (30, 0, 0),
+                     'LeftFoot': (20, 0, 0)}
+        return M(legs_bent, {'LowerTorso': (tilt, 0, 0), 'UpperTorso': (chest, 0, 0), 'Head': (head, 0, 0)})
 
-    AIM = M(side(), arms((10, 0, 66), -2, (20, 6, -16), -12, (0, 0, 4), ZERO))
-    _smooth_move(k, 17.5, 17.95, HOLD, AIM, n=5,
-                 arc=lambda u: {'RightLowerArm': (-50 * math.sin(math.pi * u), 0, 0),
-                                'RightUpperArm': (-30 * math.sin(math.pi * u), 0, 0)})
-    # выстрел: микро-стоп, короткий толчок кисти и отдача корпусом
-    k.key(18.0, 'easeInQuint', M(side(6, 20), arms((10, 0, 64), 0, (22, 6, -18), -12, (0, 0, 0), ZERO)), overlap=False)
-    k.hold(0.12)
-    k.key(18.35, 'easeOutCubic', M(side(-2, 14, -2), arms((10, 0, 70), -8, (20, 6, -16), -14, (0, 0, 10), ZERO)),
-          overlap=False)
-    # белый экран и после: поза держится, лёгкое дыхание
-    k.key(19.4, 'easeInOutSine', M(side(0, 16), arms((10, 0, 67), -4, (18, 6, -16), -12, (0, 0, 6), ZERO)),
-          overlap=False)
-    k.key(20.4, 'easeInOutSine', M(side(2, 16), arms((10, 0, 66), -4, (18, 6, -16), -12, (0, 0, 4), ZERO)),
-          overlap=False)
+    THROW = M(lying(), arms((-96, -10, 20), 0, (-96, 10, -20), 0, ZERO, ZERO))
+    _smooth_move(k, 17.6, 18.0, OVER, THROW, n=5,
+                 arc=lambda u: {'RightLowerArm': (-40 * math.sin(math.pi * u), 0, 0),
+                                'LeftLowerArm': (-40 * math.sin(math.pi * u), 0, 0)})
+    # удар: руки рывком распрямляются и расходятся, корпус чуть прогибается
+    k.key(18.08, 'easeOutQuint', M(lying(-84, -10, -12), arms((-90, -16, 34), 0, (-90, 16, -34), 0)), overlap=False)
+    k.hold(0.2)
+    # белый экран и после: висит в этой позе, лёгкое покачивание
+    k.key(19.4, 'easeInOutSine', M(lying(-80, -8, -10), arms((-92, -14, 30), -4, (-92, 14, -30), -4)), overlap=False)
+    k.key(20.4, 'easeInOutSine', M(lying(-82, -9, -11), arms((-91, -15, 32), -2, (-91, 15, -32), -2)), overlap=False)
     for t_, m in ((0.7, 'blue'), (2.05, 'throw'), (3.3, 'red'), (3.47, 'red_fire'), (18.0, 'pose')):
         a.marker(t_, m)
     return a

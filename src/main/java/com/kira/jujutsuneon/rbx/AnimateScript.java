@@ -194,6 +194,9 @@ public final class AnimateScript {
         } else if (in.climbing) {
             Slot s = want("climb", 1, 0.1);
             if (s.track != null) s.track.adjustSpeed(Math.abs(in.vy) < 0.3 ? 0 : clamp(in.vy / 2.35, -2, 2));
+        } else if (in.flightW >= 0.5 && !in.onGround) {
+            // Полёт мода: ноги не шагают по воздуху — под слоями fly_* спокойная стойка.
+            want("idle", 1, 0.25);
         } else if (air && airTime > 0.12) {
             boolean jumping = jumpTime >= 0 && jumpTime < 0.31 && in.vy > -2;
             if (jumping) want("jump", 1, 0.1);
