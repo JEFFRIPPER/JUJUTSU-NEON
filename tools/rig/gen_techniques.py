@@ -333,13 +333,20 @@ def max_blue_hold():
 
 # =========================================================================== Фиолетовый (обычный, G)
 
+def _hp_aim(breath=0.0, push=0.0):
+    """Поза выпуска Фиолетового (третья картинка владельца): полубоком к цели (~55°, ведёт таз), правая рука
+    прямо вперёд на уровне плеча, ладонь раскрыта к цели; левая согнута и прижата к груди; голова вдоль руки."""
+    return M(legs(0.0, 0.12 - 0.02 * push), body(-55, (6 + 1.0 * breath + 3 * push, -6, 0), (4, 60, 0)),
+             arms((10 - 1.0 * breath, 0, 88 + 3 * push), -2 - 2 * breath, (-44, 34, -14), -96, (0, 0, 14), (0, 0, 16)))
+
+
 def hollow_purple():
     """Каст Полого Фиолетового, 5 с (castProgress 0..1 с сервера, CAST_TICKS 100). По аниме (пожелание владельца):
-    Годжо стоит прямо и спокойно, кисти сложены перед грудью — правая ладонь вертикально, пальцы левой
-    перекрещены с ней; Красный и Синий рождаются по бокам сами, руки их НЕ стягивают. Никакого «напряжения»
-    и дрожи — только медленное дыхание."""
+    Годжо спокойно складывает кисти перед грудью; Красный и Синий рождаются по бокам сами, руки их НЕ стягивают.
+    Когда шары сошлись (3,1 с), он заранее и плавно переходит в позу выпуска — полубоком, рука вперёд — и
+    просто стоит в ней до выстрела. Никакого «напряжения» и дрожи — только медленное дыхание."""
     a = Anim('hollow_purple', 5.0, loop='hold', props={'priority': 'action', 'fade_in': 0.25, 'fade_out': 0.3,
-                                                       'look': 0.6, 'fp': 'arms'})
+                                                       'look': 0.6, 'aim': 0.5, 'fp': 'arms'})
     k = Keys(a)
 
     def pose(breath=0.0):
@@ -352,41 +359,29 @@ def hollow_purple():
                  arc=lambda u: {'RightUpperArm': (0, 0, 14 * math.sin(math.pi * u)),
                                 'LeftUpperArm': (0, 0, -14 * math.sin(math.pi * u))})
     # спокойное удержание: вдох-выдох раз в ~2,1 с
-    t = 0.7
-    i = 0
-    while t <= 4.99:
-        k.key(round(t, 2), 'easeInOutSine', pose(1.0 if i % 2 else 0.0), overlap=False)
-        t += 1.05
-        i += 1
-    k.key(5.0, 'easeInOutSine', pose(0.5), overlap=False)
+    k.key(1.75, 'easeInOutSine', pose(1.0), overlap=False)
+    k.key(2.8, 'easeInOutSine', pose(0.0), overlap=False)
+    k.key(3.1, 'easeInOutSine', pose(0.3), overlap=False)
+    # шары сошлись — плавно встаёт полубоком, рука уходит вперёд по небольшой дуге
+    _smooth_move(k, 3.1, 4.0, pose(0.3), _hp_aim(), n=6,
+                 arc=lambda u: {'RightLowerArm': (-24 * math.sin(math.pi * u), 0, 0),
+                                'RightUpperArm': (0, 0, 8 * math.sin(math.pi * u))})
+    k.key(4.5, 'easeInOutSine', _hp_aim(1.0), overlap=False)
+    k.key(5.0, 'easeInOutSine', _hp_aim(0.0), overlap=False)
     a.marker(3.1, 'birth')
     return a
 
 
 def hollow_purple_fire():
-    """Выстрел Фиолетового (по аниме): из позы «кисти у груди» корпус плавно встаёт полубоком к цели (~55°, ведёт
-    таз), правая рука выпрямляется вперёд на уровне плеча, ладонь раскрыта к цели; левая согнута и прижата к
-    груди, голова смотрит вдоль руки. Поза держится, пока шар уходит, затем плавный возврат. Без дрожи."""
-    a = Anim('hollow_purple_fire', 1.6, props={'priority': 'action', 'fade_in': 0.05, 'fade_out': 0.3,
+    """Выстрел Фиолетового: он уже стоит в позе выпуска — шар просто уходит с ладони, тело лишь чуть подаётся
+    вперёд. Поза держится, пока шар улетает, затем плавный возврат в стойку. Без дрожи."""
+    a = Anim('hollow_purple_fire', 1.6, props={'priority': 'action', 'fade_in': 0.1, 'fade_out': 0.3,
                                                'look': 0.6, 'aim': 0.5, 'fp': 'arms'})
     k = Keys(a)
-    START = M(legs(0.05, 0.06), body(0, (2.6, 0, 0), (2.6, 0, 0)),
-              arms((-41, -40, 12), -90, (-36, 42, -12), -86, (0, 0, -18), (0, 0, 22)))
-
-    def side(crouch=0.12, lean=6, nod=4):
-        return M(legs(0.0, crouch), body(-55, (lean, -6, 0), (nod, 60, 0)))
-
-    LEFT = (-44, 34, -14), -96
-    SHOT = M(side(), arms((10, 0, 88), -2, LEFT[0], LEFT[1], (0, 0, 14), (0, 0, 16)))
-    HOLD = M(side(0.1, 3, 4), arms((10, 0, 91), -6, (-42, 34, -14), -94, (0, 0, 10), (0, 0, 16)))
-    k.key(0.0, 'linear', START, overlap=False)
-    _smooth_move(k, 0.0, 0.2, START, SHOT, n=4,
-                 arc=lambda u: {'RightLowerArm': (-20 * math.sin(math.pi * u), 0, 0),
-                                'RightUpperArm': (0, 0, 10 * math.sin(math.pi * u))})
-    k.hold(0.12)
-    k.key(0.5, 'easeOutCubic', HOLD, overlap=False)
-    k.key(0.95, 'easeInOutSine', HOLD, overlap=False)
-    _smooth_move(k, 0.95, 1.6, HOLD, SETTLE, n=5)
+    k.key(0.0, 'linear', _hp_aim(), overlap=False)
+    k.key(0.2, 'easeOutCubic', _hp_aim(push=1.0), overlap=False)
+    k.key(0.95, 'easeInOutSine', _hp_aim(push=0.6), overlap=False)
+    _smooth_move(k, 0.95, 1.6, _hp_aim(push=0.6), SETTLE, n=5)
     a.marker(0.2, 'fire')
     return a
 
