@@ -1694,7 +1694,7 @@ public final class MaximumPurpleClient {
 
     /** Брызга у самого объектива не растягивается на пол-экрана бледным пятном — тает по мере подлёта. */
     private static float nearFade(Vec3 camera, Vec3 p, float size) {
-        return (float) smooth((p.distanceTo(camera) - 0.6 - 0.9 * size) / 1.4);
+        return (float) smooth((p.distanceTo(camera) - 0.45 - 0.55 * size) / 0.9);
     }
 
     /** Тёмно-синие кляксы на земле вокруг ног (0,7–2,8 с). */
