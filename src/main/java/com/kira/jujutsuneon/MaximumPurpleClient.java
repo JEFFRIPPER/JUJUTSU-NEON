@@ -558,7 +558,7 @@ public final class MaximumPurpleClient {
     }
 
     /** Кольцо тормозит плавно (скорость спадает по smoothstep до нуля), без рывка и «инерции». */
-    private static final double RING_BRAKE = T_RING_OPEN - 12;
+    private static final double RING_BRAKE = T_RING_OPEN - 20;
     private static final double RING_STOP = T_RING_OPEN + 10;
 
     /** Угол, пройденный в кольце с RING_FROM до t. */
@@ -567,8 +567,10 @@ public final class MaximumPurpleClient {
         if (t > RING_BRAKE) {
             double len = RING_STOP - RING_BRAKE;
             double u = clamp01((t - RING_BRAKE) / len);
-            // интеграл (1 - smoothstep): скорость и ускорение непрерывны
-            a += OMEGA_RING * len * (u - u * u * u + 0.5 * u * u * u * u);
+            // скорость (1-u)^3(1+3u): торможение начинается мягко, большую часть пути шары уже медленные,
+            // к концу скорость и ускорение спадают до нуля
+            double u2 = u * u, u3 = u2 * u;
+            a += OMEGA_RING * len * (u - 2.0 * u3 + 2.0 * u3 * u - 0.6 * u3 * u2);
         }
         return a;
     }
@@ -773,7 +775,7 @@ public final class MaximumPurpleClient {
         if (t >= T_RED_FIRE && s.redTip != null) return s.redTip;
         Minecraft mc = Minecraft.getInstance();
         if (mc.level != null && mc.level.getPlayerByUUID(s.ownerId) instanceof AbstractClientPlayer p) {
-            Vec3 tip = com.kira.jujutsuneon.rbx.PlayerAnimations.jointWorld(p, "RightHand", mc.getFrameTime(), 0.36);
+            Vec3 tip = com.kira.jujutsuneon.rbx.PlayerAnimations.jointWorld(p, "RightHand", mc.getFrameTime(), 0.24);
             if (tip != null) {
                 if (t < T_RED_FIRE) s.redTip = tip;
                 return tip;
