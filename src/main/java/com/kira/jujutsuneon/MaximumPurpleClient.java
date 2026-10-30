@@ -1012,10 +1012,10 @@ public final class MaximumPurpleClient {
             ck(1048 / 3.0, A_PLAYER, 0.95, 0.0, 3.2, A_PLAYER, -0.2, 0.0, 1.45, 70f, 0f, true),
             ck(355.3, A_PLAYER, 1.05, 0.1, 2.65, A_PLAYER, -0.1, 0.0, 1.55, 70f, 0f, false),
             // 17,85–18,3 с: игрок откидывается на спину — камера уходит вниз и вперёд, снимает его сбоку-спереди
-            // на уровне тела, сфера за ним (референс #2150–2186)
+            // на уровне тела, сфера за ним (референс #2150–2186); чуть сбоку от ног, чтобы голова не пряталась за торсом
             ck(359.3, A_PLAYER, 1.5, 0.5, 1.0, A_PLAYER, -0.3, 0.0, 1.0, 72f, 0f, false),
-            ck(361.8, A_PLAYER, 1.8, 0.7, 0.65, A_PLAYER, -0.45, 0.0, 0.9, 72f, 0f, false),
-            ck(366.0, A_PLAYER, 1.95, 0.8, 0.55, A_PLAYER, -0.45, 0.0, 0.9, 74f, 0f, false),
+            ck(361.8, A_PLAYER, 1.15, 1.65, 0.8, A_PLAYER, -0.45, 0.0, 0.9, 72f, 0f, false),
+            ck(366.0, A_PLAYER, 1.25, 1.8, 0.85, A_PLAYER, -0.45, 0.0, 0.9, 74f, 0f, false),
     };
 
     private static Vec3 anchor(Scene s, int a, double f, double r, double u, double t) {
@@ -2477,12 +2477,14 @@ public final class MaximumPurpleClient {
 
     /** Контур игрока «мелом»: белый силуэт со сдвигами по кругу, сверху тот же силуэт чёрным. */
     private static void drawOutlineAt(GuiGraphics g, int w, int h, float zoom, float dx, float dy, float bodyYaw) {
-        float o = Math.max(2.0f, h / 270.0f);
+        float o = Math.max(2.0f, h / 200.0f);
         for (int i = 0; i < 8; i++) {
             double a = i * Math.PI / 4.0;
             drawSilhouetteAt(g, w, h, WHITE_TINT, WHITE_TINT, WHITE_TINT, zoom,
                     dx + (float) Math.cos(a) * o, dy + (float) Math.sin(a) * o, bodyYaw);
         }
+        // белые копии лежат на той же глубине — чёрная иначе проигрывает им тест глубины
+        RenderSystem.clear(GL11.GL_DEPTH_BUFFER_BIT, Minecraft.ON_OSX);
         drawSilhouetteAt(g, w, h, 0.0f, 0.0f, 0.0f, zoom, dx, dy, bodyYaw);
     }
 
