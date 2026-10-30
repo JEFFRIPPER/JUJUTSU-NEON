@@ -228,7 +228,9 @@ def max_red():
     k = Keys(a)
 
     def side(crouch=0.1, lean=2, nod=6, twist=0):
-        return M(legs(0.0, crouch), body(-45, (lean, -35 + twist, 0), (nod, 80 - twist, 0)))
+        # Разворот почти целиком делает таз (ноги — его дети, поворачиваются вместе с ним), грудь почти не
+        # скручена: при скрутке груди на 35° блоки торса расходились — корпус «отслаивался» от ног.
+        return M(legs(0.0, crouch), body(-72, (lean, -8 + twist, 0), (nod, 80 - twist, 0)))
 
     SIDE = M(side(), arms((10, 0, 90), -2, (2, 4, -5), -8, (0, 0, 10)))
     k.key(0.0, 'linear', RED_CHARGE_END, overlap=False)

@@ -108,12 +108,14 @@ public final class RedTechniqueClient {
         final Vec3 start;
         final Vec3 velocity;
         final Vec3 hand;
+        final boolean max;
         final long seed;
         int ticks;
         Vec3 endPos;
         int endTicks;
 
-        Shot(int id, int casterEntity, Vec3 start, Vec3 velocity, Vec3 hand) {
+        Shot(int id, int casterEntity, Vec3 start, Vec3 velocity, Vec3 hand, boolean max) {
+            this.max = max;
             this.id = id;
             this.casterEntity = casterEntity;
             this.start = start;
@@ -125,8 +127,8 @@ public final class RedTechniqueClient {
         /** Точка полёта: с ладони плавно сводится на линию сервера за ~2,5 тика. */
         Vec3 at(double t) {
             if (endPos != null) return endPos;
-            double max = RED_MAX_DISTANCE / velocity.length();
-            Vec3 line = start.add(velocity.scale(Math.min(t, max)));
+            double limit = (this.max ? MAX_RED_MAX_DISTANCE : RED_MAX_DISTANCE) / velocity.length();
+            Vec3 line = start.add(velocity.scale(Math.min(t, limit)));
             if (hand == null) return line;
             double k = smooth(t / 2.5);
             return hand.lerp(line, k);
@@ -136,11 +138,14 @@ public final class RedTechniqueClient {
     private static final class Boom {
         final Vec3 pos;
         final long seed;
+        /** 1 — обычный Красный, 2,6 — Максимальный (кратер втрое больше). */
+        final float scale;
         int ticks;
 
-        Boom(Vec3 pos, long seed) {
+        Boom(Vec3 pos, long seed, float scale) {
             this.pos = pos;
             this.seed = seed;
+            this.scale = scale;
         }
     }
 
@@ -234,17 +239,17 @@ public final class RedTechniqueClient {
         }
     }
 
-    static void onShot(int shotId, int casterEntity, Vec3 start, Vec3 velocity) {
+    static void onShot(int shotId, int casterEntity, Vec3 start, Vec3 velocity, boolean max) {
         Minecraft mc = Minecraft.getInstance();
         if (mc.level == null) return;
         Vec3 hand = null;
         for (Cast c : CASTS.values()) {
-            if (c.entityId == casterEntity && !c.max) {
-                hand = redHand(mc, c, R_FIRE, 1.0f);
+            if (c.entityId == casterEntity && c.max == max) {
+                hand = max ? maxHand(mc, c, M_FIRE, 1.0f).add(velocity.normalize().scale(0.22)) : redHand(mc, c, R_FIRE, 1.0f);
                 break;
             }
         }
-        SHOTS.put(shotId, new Shot(shotId, casterEntity, start, velocity, hand));
+        SHOTS.put(shotId, new Shot(shotId, casterEntity, start, velocity, hand, max));
     }
 
     /** Точки свежих взрывов Красного: ванильный звук взрыва там глушится (у Красного свой). */
@@ -266,7 +271,7 @@ public final class RedTechniqueClient {
         }
     }
 
-    static void onShotEnd(int shotId, Vec3 pos, boolean exploded) {
+    static void onShotEnd(int shotId, Vec3 pos, boolean exploded, boolean max) {
         if (exploded) MUTE_EXPLODE.add(new double[]{pos.x, pos.y, pos.z, System.currentTimeMillis()});
         Shot s = SHOTS.get(shotId);
         if (s != null && s.endPos == null) {
@@ -274,17 +279,18 @@ public final class RedTechniqueClient {
             s.endTicks = 0;
         }
         if (exploded) {
-            BOOMS.add(new Boom(pos, shotId * 31L + 7L));
+            float bs = max ? 2.6f : 1.0f;
+            BOOMS.add(new Boom(pos, shotId * 31L + 7L, bs));
             Random rnd = new Random(shotId * 977L);
-            for (int i = 0; i < 70; i++) {
+            for (int i = 0; i < (max ? 160 : 70); i++) {
                 Vec3 d = randDir(rnd);
-                double sp = 0.35 + rnd.nextDouble() * 1.3;
+                double sp = (0.35 + rnd.nextDouble() * 1.3) * (max ? 1.8 : 1.0);
                 BITS.add(new Bit(pos, d.scale(sp).add(0.0, 0.15, 0.0), (float) (0.05 + rnd.nextDouble() * 0.10),
                         14 + rnd.nextInt(18), false, 0.88, 0.035, rnd));
             }
-            for (int i = 0; i < 14; i++) {
+            for (int i = 0; i < (max ? 40 : 14); i++) {
                 Vec3 d = randDir(rnd);
-                BITS.add(new Bit(pos, d.scale(0.4 + rnd.nextDouble() * 0.8).add(0.0, 0.35, 0.0),
+                BITS.add(new Bit(pos, d.scale((0.4 + rnd.nextDouble() * 0.8) * (max ? 1.8 : 1.0)).add(0.0, 0.35, 0.0),
                         (float) (0.12 + rnd.nextDouble() * 0.22), 26 + rnd.nextInt(20), true, 0.94, 0.045, rnd));
             }
         }
@@ -673,56 +679,65 @@ public final class RedTechniqueClient {
             billboard(pose, cam, camera, ft.add(0.0, 1.0, 0.0), 2.4f, 0f, TEX_GLOW, 1f, 0.15f, 0.1f, glow * 0.25f, true);
         }
 
-        // Спиральные ленты (главное в референсе). Три фазы:
-        //  1) M_CONDENSE: 4 кольца-ленты «прорисовываются» вокруг шара и кисти, каждое под своим наклоном;
-        //  2) к M_SHOCK разрастаются в огромные дуги, обвивают руку и корпус — спиральная воронка вдоль руки;
-        //  3) после M_SHOCK вытягиваются назад вдоль руки и переходят в поток линий.
-        float rib = env(t, M_CONDENSE - 1, M_FLASH, 1.5, 3);
+        // Спиральные «волоски» (главное в референсе): шар как метеорит — из него выходят ленты, каждая из
+        // толстой яркой жилы и нескольких тонких волосков рядом. Ленты закручиваются спиралью вокруг оси руки
+        // и обхватывают её до плеча; потом раздуваются в большие петли вокруг руки и корпуса, а перед
+        // выстрелом вытягиваются назад в поток.
+        float rib = env(t, M_ORB + 1, M_FLASH, 2, 3);
         if (rib > 0.01f) {
-            double draw = smooth(win(t, M_CONDENSE - 1, M_CONDENSE + 4));
-            double grow = smooth(win(t, M_CONDENSE + 2, M_SHOCK));
-            double drag = smooth(win(t, M_SHOCK - 2, M_FLASH));
+            double reveal = smooth(win(t, M_ORB + 1, M_CONDENSE + 4));          // ленты «выползают» из шара
+            double grow = smooth(win(t, M_CONDENSE + 2, M_SHOCK));              // раздуваются в большие петли
+            double drag = smooth(win(t, M_SHOCK - 2, M_FLASH));                 // вытягиваются назад
             Random rnd = new Random(c.seed * 13L);
-            for (int i = 0; i < 5; i++) {
-                // Своя плоскость кольца: ось руки, наклонённая на 15–60°.
-                double tiltA = rnd.nextDouble() * Math.PI * 2.0;
-                double tilt = Math.toRadians(15 + rnd.nextDouble() * 45);
-                Vec3 n = d.scale(Math.cos(tilt)).add(u.scale(Math.cos(tiltA) * Math.sin(tilt))).add(v.scale(Math.sin(tiltA) * Math.sin(tilt))).normalize();
-                Vec3 pu = Math.abs(n.y) > 0.95 ? new Vec3(1, 0, 0) : n.cross(new Vec3(0, 1, 0)).normalize();
-                Vec3 pv = pu.cross(n).normalize();
-                double a0 = rnd.nextDouble() * Math.PI * 2.0;
-                double spin = (0.55 + rnd.nextDouble() * 0.3) * (i % 2 == 0 ? 1 : -1);
-                double rad = (0.28 + 0.1 * i) * (1.0 - grow) + (1.1 + rnd.nextDouble() * 1.2) * grow;
-                // Сначала кольцо вокруг шара, потом спираль-воронка вдоль руки до плеча и за спину.
-                double arc = Math.PI * (0.4 + 1.5 * draw + 2.2 * grow);
-                double back = 0.15 + 3.2 * grow + 3.5 * drag;
-                Vec3 center = orb.subtract(d.scale(0.3 * grow + 1.5 * drag));
-                int segs = 40;
-                Vec3 prev = null;
-                for (int s2 = 0; s2 <= segs; s2++) {
-                    double q = s2 / (double) segs;
-                    double a = a0 + t * spin - q * arc;
-                    double rr = rad * (1.0 - 0.25 * q) * (1.0 - 0.6 * drag * q);
-                    Vec3 p = center.add(pu.scale(Math.cos(a) * rr)).add(pv.scale(Math.sin(a) * rr)).subtract(d.scale(q * back));
-                    if (prev != null) {
-                        // Голова ленты толстая и яркая, хвост тонкий и рваный.
-                        double taper = Math.pow(1.0 - q, 0.7);
-                        float w = (float) ((0.06 + 0.12 * grow) * taper + 0.015);
-                        float aa = rib * (float) Math.min(1.0, (1.0 - q) * 1.6) * (s2 % 7 == 3 && q > 0.5 ? 0.35f : 1f);
-                        streak(pose, camera, prev, p, w * 3.0f, TEX_STREAK, 1f, 0.1f, 0.12f, aa * 0.7f, true);
-                        streak(pose, camera, prev, p, w * 1.6f, TEX_STREAK, 1f, 0.45f, 0.5f, aa * 0.8f, true);
-                        streak(pose, camera, prev, p, w * 0.7f, TEX_STREAK, 1f, 0.95f, 0.92f, aa, true);
+            int strands = 6;
+            for (int i = 0; i < strands; i++) {
+                double th0 = i / (double) strands * Math.PI * 2.0 + rnd.nextDouble() * 0.5;
+                double spin = (0.42 + rnd.nextDouble() * 0.2) * (i % 2 == 0 ? 1 : -1);
+                double turns = 1.1 + rnd.nextDouble() * 0.7;
+                double reach = (0.9 + rnd.nextDouble() * 0.5) * (1.0 + 1.2 * grow) + 3.0 * drag;
+                double rMax = (0.28 + rnd.nextDouble() * 0.18) * (1.0 - grow) + (1.2 + rnd.nextDouble() * 1.3) * grow;
+                double delay = rnd.nextDouble() * 0.25;
+                double vis = Mth.clamp((reveal - delay) / (1.0 - delay), 0.0, 1.0);
+                if (vis <= 0.01) continue;
+                // волоски: 0 — главная жила, 1..3 — тонкие рядом (сдвиг по радиусу и фазе, распушаются к хвосту)
+                for (int h = 0; h < 4; h++) {
+                    double dr = h == 0 ? 0 : (rnd.nextDouble() - 0.5) * 0.22;
+                    double dth = h == 0 ? 0 : (rnd.nextDouble() - 0.5) * 0.35;
+                    int segs = 30;
+                    Vec3 prev = null;
+                    for (int s2 = 0; s2 <= segs; s2++) {
+                        double q = s2 / (double) segs * vis;
+                        double th = th0 + dth * (0.3 + q) + t * spin - q * turns * Math.PI * 2.0;
+                        // от поверхности шара радиус быстро растёт до «обхвата» руки
+                        double rr = 0.12 + (rMax - 0.12) * Math.sin(Math.min(1.0, q * 2.2) * Math.PI / 2.0)
+                                + dr * q * (1.0 + 2.0 * grow);
+                        rr *= 1.0 - 0.55 * drag * q;
+                        Vec3 p = orb.subtract(d.scale(q * reach)).add(u.scale(Math.cos(th) * rr)).add(v.scale(Math.sin(th) * rr));
+                        if (prev != null) {
+                            double head = 1.0 - q / Math.max(vis, 1.0E-3);  // 1 у шара, 0 на кончике
+                            float aa = rib * (float) Math.min(1.0, 0.25 + head * 1.2);
+                            if (h == 0) {
+                                float w = (float) ((0.05 + 0.1 * grow) * (0.35 + 0.65 * head) + 0.015);
+                                streak(pose, camera, prev, p, w * 3.2f, TEX_STREAK, 1f, 0.08f, 0.1f, aa * 0.6f, true);
+                                streak(pose, camera, prev, p, w * 1.6f, TEX_STREAK, 1f, 0.45f, 0.5f, aa * 0.85f, true);
+                                streak(pose, camera, prev, p, w * 0.7f, TEX_STREAK, 1f, 0.97f, 0.93f, aa, true);
+                            } else {
+                                float w = 0.012f + 0.01f * (float) grow;
+                                streak(pose, camera, prev, p, w * 2.5f, TEX_STREAK, 1f, 0.2f, 0.22f, aa * 0.45f, true);
+                                streak(pose, camera, prev, p, w, TEX_STREAK, 1f, 0.85f, 0.85f, aa * 0.8f, true);
+                            }
+                        }
+                        prev = p;
                     }
-                    prev = p;
                 }
             }
-            // Искры, осыпающиеся с лент.
+            // Искры, осыпающиеся с лент и шара.
             Random sp = new Random(c.seed * 101L + (long) Math.floor(t));
-            for (int i = 0; i < 10; i++) {
+            for (int i = 0; i < 14; i++) {
                 double a = sp.nextDouble() * Math.PI * 2.0;
-                double r = 0.3 + (0.4 + 2.4 * grow) * sp.nextDouble();
-                Vec3 p = orb.add(u.scale(Math.cos(a) * r)).add(v.scale(Math.sin(a) * r)).subtract(d.scale(sp.nextDouble() * 2.0 * grow));
-                billboard(pose, cam, camera, p, 0.08f + 0.06f * sp.nextFloat(), 0f, TEX_GLOW, 1f, 0.6f, 0.55f, rib * 0.8f, true);
+                double r = 0.12 + (0.3 + 2.0 * grow) * sp.nextDouble();
+                Vec3 p = orb.add(u.scale(Math.cos(a) * r)).add(v.scale(Math.sin(a) * r)).subtract(d.scale(sp.nextDouble() * (0.5 + 2.0 * grow)));
+                billboard(pose, cam, camera, p, 0.05f + 0.05f * sp.nextFloat(), 0f, TEX_GLOW, 1f, 0.6f, 0.55f, rib * 0.8f, true);
             }
         }
 
@@ -884,6 +899,10 @@ public final class RedTechniqueClient {
 
     /** Летящий маленький Красный: шар, огненный след, волны жара. */
     private static void renderShot(PoseStack pose, Camera cam, Vec3 camera, Shot s, float pt) {
+        if (s.max) {
+            renderMaxShot(pose, cam, camera, s, pt);
+            return;
+        }
         double t = s.ticks + pt;
         float alpha = 1.0f;
         float scale = 1.0f;
@@ -921,24 +940,111 @@ public final class RedTechniqueClient {
         redOrb(pose, cam, camera, p, r, t, alpha, s.seed);
     }
 
+    /**
+     * Летящий Максимальный Красный — как метеорит на сверхзвуке: большой зернистый красный шар, длинный
+     * хвост, вокруг хвоста закручиваются волоски (продолжение лент из каста), а позади остаются ударные
+     * волны — кольца, которые расходятся от траектории и вместе складываются в конус, «режущий» воздух.
+     */
+    private static void renderMaxShot(PoseStack pose, Camera cam, Vec3 camera, Shot s, float pt) {
+        double t = s.ticks + pt;
+        float alpha = 1.0f, scale = 1.0f;
+        if (s.endPos != null) {
+            double k = (s.endTicks + pt) / 5.0;
+            alpha = (float) Math.max(0.0, 1.0 - k);
+            scale = (float) Math.max(0.0, 1.0 - k * 0.6);
+            if (alpha <= 0.01f) return;
+        }
+        Vec3 p = s.at(t);
+        Vec3 dir = s.velocity.normalize();
+        Vec3 u = Math.abs(dir.y) > 0.95 ? new Vec3(1, 0, 0) : dir.cross(new Vec3(0, 1, 0)).normalize();
+        Vec3 v = u.cross(dir).normalize();
+        float r = MAX_RED_ORB_RADIUS * scale;
+        float far = (float) Math.max(1.0, p.distanceTo(camera) * 0.05);
+        double speed = s.velocity.length();
+
+        // Ударные волны: каждые 1,5 тика на траектории рождается кольцо, расходится и гаснет.
+        // Из-за скорости шара кольца позади выстраиваются в конус Маха.
+        double flown = s.endPos == null ? t : s.ticks;
+        for (int i = 0; i < 14; i++) {
+            double t0 = Math.floor(flown / 1.5) * 1.5 - i * 1.5;
+            if (t0 < 0.5) break;
+            double age = t - t0;
+            if (age < 0 || age > 12) continue;
+            Vec3 c = s.at(t0);
+            if (s.endPos != null && c.equals(s.endPos)) continue;
+            double rad = r * 1.5 + age * 0.55;
+            float a = (float) ((1.0 - age / 12.0) * (1.0 - age / 12.0)) * 0.75f;
+            Vec3 prev = null;
+            int n = 24;
+            for (int k = 0; k <= n; k++) {
+                double ang = k / (double) n * Math.PI * 2.0;
+                Vec3 q = c.add(u.scale(Math.cos(ang) * rad)).add(v.scale(Math.sin(ang) * rad)).subtract(dir.scale(age * 0.15));
+                if (prev != null) {
+                    streak(pose, camera, prev, q, 0.28f + (float) age * 0.03f, TEX_STREAK, 1f, 0.75f, 0.75f, a * 0.35f, true);
+                    streak(pose, camera, prev, q, 0.07f, TEX_STREAK, 1f, 0.95f, 0.95f, a * 0.6f, true);
+                }
+                prev = q;
+            }
+        }
+
+        if (s.endPos == null) {
+            // Хвост метеорита.
+            double len = Math.min(16.0, t * speed);
+            Vec3 prev = p;
+            int n = 16;
+            for (int i = 1; i <= n; i++) {
+                double q = i / (double) n;
+                Vec3 b = p.subtract(dir.scale(len * q));
+                float w = (float) (r * 2.2 * (1.0 - q) + 0.02) * far;
+                float a = (float) Math.pow(1.0 - q, 1.3);
+                streak(pose, camera, prev, b, w * 2.6f, TEX_STREAK, 1f, 0.06f, 0.05f, a * 0.6f, true);
+                streak(pose, camera, prev, b, w * 1.2f, TEX_STREAK, 1f, 0.35f, 0.3f, a * 0.8f, true);
+                streak(pose, camera, prev, b, w * 0.45f, TEX_STREAK, 1f, 0.95f, 0.9f, a, true);
+                prev = b;
+            }
+            // Волоски-спирали вокруг хвоста.
+            for (int h = 0; h < 4; h++) {
+                Vec3 pr = null;
+                for (int k = 0; k <= 24; k++) {
+                    double q = k / 24.0;
+                    double ang = h * Math.PI / 2.0 + t * 0.9 - q * Math.PI * 3.0;
+                    double rr = r * (1.2 + 3.0 * q);
+                    Vec3 b = p.subtract(dir.scale(q * Math.min(9.0, len))).add(u.scale(Math.cos(ang) * rr)).add(v.scale(Math.sin(ang) * rr));
+                    if (pr != null) {
+                        float a = (float) (1.0 - q);
+                        streak(pose, camera, pr, b, 0.09f * far, TEX_STREAK, 1f, 0.15f, 0.15f, a * 0.5f, true);
+                        streak(pose, camera, pr, b, 0.03f * far, TEX_STREAK, 1f, 0.9f, 0.88f, a * 0.9f, true);
+                    }
+                    pr = b;
+                }
+            }
+            // Носовой скачок: яркая «шапка» сжатого воздуха перед шаром.
+            billboard(pose, cam, camera, p.add(dir.scale(r * 1.1)), r * 5.0f * far, (float) (t * 0.5), TEX_SHOCK, 1f, 0.8f, 0.8f, 0.45f, true);
+            billboard(pose, cam, camera, p, r * 18.0f, (float) (t * 0.4), TEX_HEAT, 1f, 0.55f, 0.45f, 0.2f, true);
+        }
+        billboard(pose, cam, camera, p, r * 7.0f * far, (float) (t * 0.3), TEX_GLOW, 1f, 0.08f, 0.05f, 0.85f * alpha, true);
+        maxOrb(pose, cam, camera, p, r, t, alpha, s.seed);
+    }
+
     /** Взрыв Красного: вспышка, красная сфера, волна по земле, дым. */
     private static void renderBoom(PoseStack pose, Camera cam, Vec3 camera, Boom b, double t) {
+        float S = b.scale;
         double k = 1.0 - Math.pow(1.0 - win(t, 0, 10), 3.0);
         float core = env(t, 0, 10, 0.2, 7);
         if (core > 0.01f) {
-            colorSphere(pose, camera, b.pos, (float) (1.0 + 4.5 * k), 1f, 0.85f, 0.8f, core, 14, 20);
-            billboard(pose, cam, camera, b.pos, (float) (6.0 + 10.0 * k), 0f, TEX_GLOW, 1f, 0.55f, 0.45f, core, true);
+            colorSphere(pose, camera, b.pos, (float) ((1.0 + 4.5 * k) * S), 1f, 0.85f, 0.8f, core, 14, 20);
+            billboard(pose, cam, camera, b.pos, (float) ((6.0 + 10.0 * k) * S), 0f, TEX_GLOW, 1f, 0.55f, 0.45f, core, true);
         }
         float shell = env(t, 0, 22, 0.3, 12);
         if (shell > 0.01f) {
-            sphere(pose, camera, b.pos, (float) (1.5 + 9.0 * k), TEX_ENERGY, t * 0.05, t * 0.03, 1f, 0.12f, 0.08f, shell * 0.75f, 2.2f, 18, 28);
-            sphere(pose, camera, b.pos, (float) (1.2 + 7.0 * k), TEX_ENERGY, -t * 0.07, -t * 0.02, 1f, 0.4f, 0.3f, shell * 0.45f, 1.4f, 16, 24);
+            sphere(pose, camera, b.pos, (float) ((1.5 + 9.0 * k) * S), TEX_ENERGY, t * 0.05, t * 0.03, 1f, 0.12f, 0.08f, shell * 0.75f, 2.2f, 18, 28);
+            sphere(pose, camera, b.pos, (float) ((1.2 + 7.0 * k) * S), TEX_ENERGY, -t * 0.07, -t * 0.02, 1f, 0.4f, 0.3f, shell * 0.45f, 1.4f, 16, 24);
         }
         float wave = env(t, 0, 16, 0.2, 10);
         if (wave > 0.01f) {
             double kw = 1.0 - Math.pow(1.0 - win(t, 0, 16), 2.0);
-            billboard(pose, cam, camera, b.pos, (float) (2.0 + 26.0 * kw), 0f, TEX_SHOCK, 1f, 0.3f, 0.25f, wave, true);
-            flat(pose, camera, b.pos.add(0.0, -0.4, 0.0), (float) (2.0 + 30.0 * kw), 0f, TEX_SHOCK, 1f, 0.3f, 0.25f, wave * 0.8f, true);
+            billboard(pose, cam, camera, b.pos, (float) ((2.0 + 26.0 * kw) * S), 0f, TEX_SHOCK, 1f, 0.3f, 0.25f, wave, true);
+            flat(pose, camera, b.pos.add(0.0, -0.4, 0.0), (float) ((2.0 + 30.0 * kw) * S), 0f, TEX_SHOCK, 1f, 0.3f, 0.25f, wave * 0.8f, true);
         }
         float smoke = env(t, 2, 46, 3, 20);
         if (smoke > 0.01f) {
@@ -946,8 +1052,8 @@ public final class RedTechniqueClient {
             double ks = win(t, 0, 40);
             for (int i = 0; i < 16; i++) {
                 Vec3 d = randDir(rnd);
-                Vec3 q = b.pos.add(d.scale(2.0 + 6.0 * ks * (0.6 + rnd.nextDouble() * 0.6))).add(0.0, ks * 2.0, 0.0);
-                billboard(pose, cam, camera, q, (float) (3.0 + 3.0 * ks), (float) (i + t * 0.01), TEX_SMOKE, 0.35f, 0.25f, 0.25f, smoke * 0.6f, false);
+                Vec3 q = b.pos.add(d.scale((2.0 + 6.0 * ks * (0.6 + rnd.nextDouble() * 0.6)) * S)).add(0.0, ks * 2.0 * S, 0.0);
+                billboard(pose, cam, camera, q, (float) ((3.0 + 3.0 * ks) * S), (float) (i + t * 0.01), TEX_SMOKE, 0.35f, 0.25f, 0.25f, smoke * 0.6f, false);
             }
         }
     }
