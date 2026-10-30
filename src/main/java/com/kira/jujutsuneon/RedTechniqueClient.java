@@ -661,9 +661,8 @@ public final class RedTechniqueClient {
         // Шар перед ладонью: рождается на M_ORB размером с ладонь и дальше почти не растёт (как в референсе).
         if (t >= M_ORB - 0.5 && t < M_FIRE + 0.5) {
             double pop = 1.0 - Math.pow(1.0 - win(t, M_ORB - 0.5, M_ORB + 2.5), 3.0);
-            float r = (float) (0.2 * pop + 0.03 * win(t, M_ORB, M_FIRE) + 0.012 * Math.sin(t * 2.7));
-            redOrb(pose, cam, camera, orb, r, t, (float) pop, c.seed);
-            billboard(pose, cam, camera, orb, 1.4f + 0.6f * (float) win(t, M_ORB, M_FIRE), 0f, TEX_GLOW, 1f, 0.08f, 0.06f, (float) pop * 0.55f, true);
+            float r = (float) (0.11 * pop + 0.012 * win(t, M_ORB, M_FIRE) + 0.006 * Math.sin(t * 2.7));
+            maxOrb(pose, cam, camera, orb, r, t, (float) pop, c.seed);
         }
 
         // Красный свет на земле и на персонаже.
@@ -692,11 +691,12 @@ public final class RedTechniqueClient {
                 Vec3 pv = pu.cross(n).normalize();
                 double a0 = rnd.nextDouble() * Math.PI * 2.0;
                 double spin = (0.55 + rnd.nextDouble() * 0.3) * (i % 2 == 0 ? 1 : -1);
-                double rad = (0.32 + 0.12 * i) * (1.0 - grow) + (1.6 + rnd.nextDouble() * 1.6) * grow;
-                double arc = Math.PI * (0.4 + 1.5 * draw + 0.3 * grow);
-                double back = 0.4 + 2.2 * grow + 4.0 * drag;
-                Vec3 center = orb.subtract(d.scale(0.8 * grow + 1.5 * drag));
-                int segs = 28;
+                double rad = (0.28 + 0.1 * i) * (1.0 - grow) + (1.1 + rnd.nextDouble() * 1.2) * grow;
+                // Сначала кольцо вокруг шара, потом спираль-воронка вдоль руки до плеча и за спину.
+                double arc = Math.PI * (0.4 + 1.5 * draw + 2.2 * grow);
+                double back = 0.15 + 3.2 * grow + 3.5 * drag;
+                Vec3 center = orb.subtract(d.scale(0.3 * grow + 1.5 * drag));
+                int segs = 40;
                 Vec3 prev = null;
                 for (int s2 = 0; s2 <= segs; s2++) {
                     double q = s2 / (double) segs;
@@ -726,12 +726,12 @@ public final class RedTechniqueClient {
         }
 
         // Поток перед выстрелом: прямые линии летят от шара назад вдоль руки и за спину.
-        float flow = env(t, M_SHOCK, M_FIRE + 1, 1, 1.5);
+        float flow = env(t, M_SHOCK - 1, M_FIRE + 1, 1.5, 1.5);
         if (flow > 0.01f) {
             Random rnd = new Random(c.seed * 31L + 7);
-            for (int i = 0; i < 26; i++) {
+            for (int i = 0; i < 40; i++) {
                 double a = rnd.nextDouble() * Math.PI * 2.0;
-                double off = 0.15 + rnd.nextDouble() * 1.8;
+                double off = 0.12 + rnd.nextDouble() * 1.5;
                 double sp = 0.9 + rnd.nextDouble() * 0.7;
                 double ph = rnd.nextDouble();
                 double travel = ((t - M_SHOCK) * sp * 0.22 + ph) % 1.0;
@@ -741,8 +741,9 @@ public final class RedTechniqueClient {
                 Vec3 p0 = orb.add(side).subtract(d.scale(back));
                 Vec3 p1 = p0.subtract(d.scale(l));
                 float aa = flow * (float) Math.sin(travel * Math.PI);
-                streak(pose, camera, p0, p1, 0.12f, TEX_STREAK, 1f, 0.2f, 0.16f, aa * 0.6f, true);
-                streak(pose, camera, p0, p1, 0.045f, TEX_STREAK, 1f, 0.9f, 0.9f, aa, true);
+                streak(pose, camera, p0, p1, 0.32f, TEX_STREAK, 1f, 0.12f, 0.1f, aa * 0.7f, true);
+                streak(pose, camera, p0, p1, 0.16f, TEX_STREAK, 1f, 0.5f, 0.5f, aa * 0.8f, true);
+                streak(pose, camera, p0, p1, 0.06f, TEX_STREAK, 1f, 0.95f, 0.92f, aa, true);
             }
         }
 
@@ -1002,6 +1003,15 @@ public final class RedTechniqueClient {
      * Маленький объёмный Красный: белое горячее ядро, красная сфера, две закрученные навстречу
      * оболочки энергии, мягкий ореол и бегущие по поверхности молнии.
      */
+    /** Шар Максимального Красного: размером с ладонь, сплошь насыщенно-красный (без белого ядра), зернистый край. */
+    private static void maxOrb(PoseStack pose, Camera cam, Vec3 camera, Vec3 c, float r, double t, float alpha, long seed) {
+        if (alpha <= 0.01f || r <= 0.002f) return;
+        billboard(pose, cam, camera, c, r * 4.5f, 0f, TEX_GLOW, 1f, 0.05f, 0.03f, alpha * 0.7f, true);
+        sphere(pose, camera, c, r * 1.25f, TEX_ENERGY, t * 0.07, t * 0.02, 1f, 0.06f, 0.04f, alpha * 0.8f, 2.0f, 10, 16);
+        colorSphere(pose, camera, c, r, 1f, 0.06f, 0.06f, alpha, 10, 16);
+        crackles(pose, camera, c, r * 1.4f, t, alpha, seed, 4, 1f, 0.35f, 0.3f);
+    }
+
     private static void redOrb(PoseStack pose, Camera cam, Vec3 camera, Vec3 c, float r, double t, float alpha, long seed) {
         if (alpha <= 0.01f || r <= 0.002f) return;
         billboard(pose, cam, camera, c, r * 9.0f, 0f, TEX_GLOW, 1f, 0.10f, 0.06f, alpha * 0.75f, true);
@@ -1029,12 +1039,10 @@ public final class RedTechniqueClient {
             if (e == null || e.position().distanceTo(eye) > 48.0) continue;
             double t = c.ticks + pt;
             // Пока заряжается шар, весь кадр уходит в тёмно-красный (как в референсе).
-            float tint = env(t, M_ORB, M_FLASH, 6, 0.5) * (0.12f + 0.16f * (float) win(t, M_ORB, M_FLASH));
-            if (tint > 0.01f) fill(event, w, h, tint, 0x6A0008);
-            // Выстрел: один кадр негатива (чёрный силуэт на белом), потом белая вспышка ≤ 0,25 с.
-            int frame = (int) Math.floor(t) - M_FLASH;
-            if (frame == 0) negative(event, w, h, 1);
-            float glare = env(t, M_FLASH + 1, M_FLASH + 5, 0.1, 3) * 0.85f;
+            float tint = env(t, M_ORB, M_FLASH + 1, 5, 0.5) * (0.25f + 0.3f * (float) win(t, M_ORB, M_SHOCK));
+            if (tint > 0.01f) fill(event, w, h, tint, 0x500006);
+            // Выстрел: белая вспышка ≤ 0,25 с (негатив с инвертированным HUD выглядел как глюк — убран).
+            float glare = env(t, M_FLASH, M_FLASH + 5, 0.4, 3) * 0.9f;
             if (glare > 0.01f) fill(event, w, h, glare, 0xFFF4EE);
             float shot = env(t, M_FIRE + 3, M_FIRE + 8, 0.5, 4) * 0.3f;
             if (shot > 0.01f) fill(event, w, h, shot, 0xFF2010);

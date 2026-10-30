@@ -523,7 +523,9 @@ public final class PlayerAnimations {
             double lw = AnimateScript.clamp(mix.look, 0, 1);
             if (lw > 1.0E-3) {
                 QMath.mul(parent, q[hd], anim);       // голова по анимации, в пространстве модели
-                QMath.mul(look, q[hd], target);       // голова смотрит, куда игрок (тонкости анимации — поверх)
+                // голова смотрит, куда игрок, поверх позы клипа в пространстве модели: если клип развернул
+                // корпус и довернул голову назад к цели, взгляд не уезжает вбок на угол разворота
+                QMath.mul(look, anim, target);
                 QMath.slerp(anim, target, lw, tmp);
                 QMath.mul(parentInv, tmp, q[hd]);
             }
