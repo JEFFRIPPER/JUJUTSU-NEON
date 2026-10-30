@@ -1628,7 +1628,7 @@ public final class MaximumPurpleClient {
             Vec3 dir = hashDir(seed + i * 3.3);
             Vec3 p = center.add(dir.scale(speed * (0.5 + 0.8 * h1) * easeOut(u)));
             float size = Mth.lerp((float) easeOut(u), size0, size1) * (float) (0.6 + 0.8 * h2);
-            float a = alpha * (float) (smooth(u / 0.12) * (1.0 - smooth((u - 0.5) / 0.5)));
+            float a = alpha * (float) (smooth(u / 0.12) * (1.0 - smooth((u - 0.5) / 0.5))) * nearFade(camera, p, size);
             float roll = (float) (h1 * Math.PI * 2.0 + (h2 - 0.5) * 2.0 * u);
             billboard(pose, cam, camera, p, size, roll, TEX_BSPLASH[(int) (h0 * TEX_BSPLASH.length) % TEX_BSPLASH.length],
                     1.0f, 1.0f, 1.0f, a, false);
@@ -1665,7 +1665,7 @@ public final class MaximumPurpleClient {
                     .add(s.forward.scale((h - 0.5) * 0.8)).normalize();
             Vec3 p = blue.add(out.scale(radius * (0.5 + 1.4 * easeOut(u))));
             float size = radius * (float) (0.35 + 0.5 * easeOut(u)) * (float) (0.7 + 0.6 * h);
-            float a = k * (float) (smooth(u / 0.15) * (1.0 - smooth((u - 0.45) / 0.55)));
+            float a = k * (float) (smooth(u / 0.15) * (1.0 - smooth((u - 0.45) / 0.55))) * nearFade(camera, p, size);
             billboard(pose, cam, camera, p, size, (float) (ang + 1.57 + h), TEX_BSPLASH[j % TEX_BSPLASH.length],
                     1f, 1f, 1f, a, false);
         }
@@ -1679,6 +1679,11 @@ public final class MaximumPurpleClient {
             billboard(pose, cam, camera, p, size * 2.6f, 0f, TEX_BLOOM, 0.35f, 0.7f, 1.0f, 0.75f * a, true);
             billboard(pose, cam, camera, p, size, 0f, TEX_BLOOM, 1.0f, 1.0f, 1.0f, a, true);
         }
+    }
+
+    /** Брызга у самого объектива не растягивается на пол-экрана бледным пятном — тает по мере подлёта. */
+    private static float nearFade(Vec3 camera, Vec3 p, float size) {
+        return (float) smooth((p.distanceTo(camera) - 0.35 - 0.4 * size) / 0.8);
     }
 
     /** Тёмно-синие кляксы на земле вокруг ног (0,7–2,8 с). */
