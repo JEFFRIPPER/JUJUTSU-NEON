@@ -558,7 +558,7 @@ public final class MaximumPurpleClient {
     }
 
     /** Кольцо тормозит плавно (скорость спадает по smoothstep до нуля), без рывка и «инерции». */
-    private static final double RING_BRAKE = T_RING_OPEN - 6;
+    private static final double RING_BRAKE = T_RING_OPEN - 12;
     private static final double RING_STOP = T_RING_OPEN + 10;
 
     /** Угол, пройденный в кольце с RING_FROM до t. */
@@ -764,6 +764,8 @@ public final class MaximumPurpleClient {
 
     /** #384 референса — рождение Красного (до этого у лица ничего красного нет). */
     private static final double RED_BORN = 206 / 3.0;
+    /** 2,9 с: маленький Красный загорается над кончиком поднятого пальца и растёт до выстрела. */
+    private static final double RED_TIP_FROM = 58.0;
 
     /** Над кончиком указательного пальца поднятой вверх правой руки: там рождается Красный.
      *  После выстрела — точка, где он был в момент выстрела (рука уже опускается, шар улетает сам). */
@@ -782,7 +784,7 @@ public final class MaximumPurpleClient {
 
     /** Позиция Красного или null. */
     private static Vec3 redPos(Scene s, double t) {
-        if (t < RED_BORN - 0.4 || t >= T_MERGED) return null;
+        if (t < RED_TIP_FROM || t >= T_MERGED) return null;
         MaxPurpleRefTracks.Track tr = MaxPurpleRefTracks.at(t);
         if (tr != null) return trackedOrb(s, tr, t, false);
         // Над пальцем поднятой вверх руки.
@@ -800,7 +802,8 @@ public final class MaximumPurpleClient {
     private static float redRadius(Scene s, double t) {
         MaxPurpleRefTracks.Track tr = MaxPurpleRefTracks.at(t);
         if (tr != null) return trackedRadius(s, tr, t, false);
-        if (t < T_RED_FIRE) return (float) (0.04 + 0.08 * smooth(win(t, RED_BORN - 0.4, RED_BORN + 0.6)) + 0.01 * Math.sin(t * 1.7));
+        if (t < T_RED_FIRE) return (float) (0.03 + 0.05 * smooth(win(t, RED_TIP_FROM, RED_BORN - 2.0))
+                + 0.04 * smooth(win(t, RED_BORN - 0.4, RED_BORN + 0.6)) + 0.01 * Math.sin(t * 1.7));
         if (t < CHASE_FROM) return (float) (0.10 + 0.22 * easeOut(win(t, 69, 90)));
         if (t < T_SPACE) return (float) (0.32 + 0.06 * smooth(win(t, CHASE_FROM, CHASE_FROM + 20)));
         return 0.42f;
@@ -1524,7 +1527,7 @@ public final class MaximumPurpleClient {
 
     /** Синий во вступлении 0,67–3,0 с: вспышка-кольцо, вихрь, разряды, бросок с белой вспышкой. */
     private static void renderBlueIntro(PoseStack pose, Camera cam, Vec3 camera, Scene s, double t, Vec3 blue) {
-        if (t > 50.0) return;
+        if (t > 62.0) return;
         Vec3 toCam = blue == null ? Vec3.ZERO : camera.subtract(blue).normalize();
         // #58–67: тонкое ярко-белое кольцо вокруг поднятой кисти, расширяется почти во весь кадр
         if (blue != null && t >= T_SPAWN - 0.2 && t < 16.5) {
@@ -1605,8 +1608,8 @@ public final class MaximumPurpleClient {
         }
         // #237–255: белое гаснет в бело-голубой водоворот — крупные мягкие ленты и белые шарики вокруг персонажа
         // бросок (референс 1,9–2,7 с): брызги на весь кадр, разлетаются и тают; на земле кляксы
-        splashBurst(pose, cam, camera, rel, t, T_RELEASE + 0.2, 2.0, 22, 41.0, 2.6, 0.7f, 2.4f, 15.0, 1.0f);
-        splashBurst(pose, cam, camera, s.atP(0.0, 0.0, 1.1, t), t, T_RELEASE + 1.0, 3.0, 14, 47.0, 1.9, 0.5f, 1.6f, 14.0, 0.95f);
+        splashBurst(pose, cam, camera, rel, t, T_RELEASE + 0.2, 2.0, 15, 41.0, 2.6, 0.5f, 1.6f, 15.0, 1.0f);
+        splashBurst(pose, cam, camera, s.atP(0.0, 0.0, 1.1, t), t, T_RELEASE + 1.0, 3.0, 10, 47.0, 2.2, 0.4f, 1.2f, 16.0, 0.9f);
         groundSplats(pose, camera, s, t);
     }
 
@@ -1675,16 +1678,6 @@ public final class MaximumPurpleClient {
             float size = radius * (float) (0.08 + 0.07 * hash(i + 9.0));
             billboard(pose, cam, camera, p, size * 2.6f, 0f, TEX_BLOOM, 0.35f, 0.7f, 1.0f, 0.75f * a, true);
             billboard(pose, cam, camera, p, size, 0f, TEX_BLOOM, 1.0f, 1.0f, 1.0f, a, true);
-        }
-        // чёрные «мазки» (1,0–1,6 с): тонкие тёмные росчерки сквозь вихрь
-        float ink = env(t, 19.0, 33.0, 1.0, 2.0) * k;
-        for (int i = 0; i < 3 && ink > 0.0f; i++) {
-            double seed = Math.floor(t / 3.0) * 3.0 + i;
-            if (hash(seed * 1.7) < 0.4) continue;
-            Vec3 d = hashDir(seed * 5.1);
-            Vec3 a0 = blue.add(d.scale(-radius * 1.2)), a1 = blue.add(d.scale(radius * 1.3)).add(0.0, 0.2 * radius, 0.0);
-            List<Vec3> pts = List.of(a0, lerp(a0, a1, 0.5).add(hashDir(seed).scale(radius * 0.2)), a1);
-            solidRibbon(pose, camera, pts, radius * 0.06f, 0.01f, 0.02f, 0.08f, 0.9f * ink, false);
         }
     }
 
