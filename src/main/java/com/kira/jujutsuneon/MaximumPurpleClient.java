@@ -99,6 +99,12 @@ public final class MaximumPurpleClient {
     }
 
     private static final ResourceLocation TEX_BLOOM = tex("max_purple_bloom");
+    /** Синий во вступлении: аниме-брызги «жидкости», водоворот штрихов, клякса на земле (tools/gen_max_purple_blue_fx.py). */
+    private static final ResourceLocation[] TEX_BSPLASH = {
+            tex("max_purple_bsplash_0"), tex("max_purple_bsplash_1"), tex("max_purple_bsplash_2"),
+            tex("max_purple_bsplash_3"), tex("max_purple_bsplash_4"), tex("max_purple_bsplash_5")};
+    private static final ResourceLocation TEX_BSWIRL = tex("max_purple_bswirl");
+    private static final ResourceLocation TEX_BSPLAT = tex("max_purple_bsplat");
     private static final ResourceLocation TEX_RED_ORB = tex("max_purple_red_orb");
     private static final ResourceLocation TEX_BLUE_ORB = tex("max_purple_blue_orb");
     private static final ResourceLocation TEX_SPACE = tex("max_purple_space");
@@ -535,10 +541,35 @@ public final class MaximumPurpleClient {
         else {
             int i = 0;
             while (t > kt[i + 1]) i++;
-            a = Mth.lerp((t - kt[i]) / (kt[i + 1] - kt[i]), ka[i], ka[i + 1]);
+            // сплайн, а не ломаная: скорость между витками меняется плавно, без толчков
+            double u = (t - kt[i]) / (kt[i + 1] - kt[i]);
+            double p0 = i > 0 ? ka[i - 1] : 2.0 * ka[0] - ka[1], p3 = i + 2 < ka.length ? ka[i + 2] : 2.0 * ka[4] - ka[3];
+            a = catmull(p0, ka[i], ka[i + 1], p3, u);
         }
-        if (t > RING_FROM) a += (Math.min(t, T_RING_OPEN + 16) - RING_FROM) * OMEGA_RING;
-        if (t > T_RING_OPEN + 16) a += (t - T_RING_OPEN - 16) * OMEGA_RING * 0.2;
+        if (t > RING_FROM) {
+            a += ringTurn(t);
+            // Фаза подгоняется незаметно за всё время кольца, чтобы вращение остановилось ровно там,
+            // где шары и должны встать: Красный — вправо от игрока, Синий — напротив.
+            double end = ka[4] + ringTurn(RING_STOP);
+            double corr = Mth.wrapDegrees(Math.toDegrees(-end)) * Math.PI / 180.0;
+            a += corr * smooth(win(t, RING_FROM, RING_STOP));
+        }
+        return a;
+    }
+
+    /** Кольцо тормозит плавно (скорость спадает по smoothstep до нуля), без рывка и «инерции». */
+    private static final double RING_BRAKE = T_RING_OPEN - 6;
+    private static final double RING_STOP = T_RING_OPEN + 10;
+
+    /** Угол, пройденный в кольце с RING_FROM до t. */
+    private static double ringTurn(double t) {
+        double a = (Math.min(t, RING_BRAKE) - RING_FROM) * OMEGA_RING;
+        if (t > RING_BRAKE) {
+            double len = RING_STOP - RING_BRAKE;
+            double u = clamp01((t - RING_BRAKE) / len);
+            // интеграл (1 - smoothstep): скорость и ускорение непрерывны
+            a += OMEGA_RING * len * (u - u * u * u + 0.5 * u * u * u * u);
+        }
         return a;
     }
 
@@ -552,17 +583,14 @@ public final class MaximumPurpleClient {
         double a = chaseAngle(t) + (blue ? chaseGap(t) : 0.0);
         double ringK = smooth(win(t, RING_FROM - 6, RING_FROM));
         double radius = Mth.lerp(ringK, CHASE_R + 0.35 * Math.sin(t * 0.13 + (blue ? 1.7 : 0.0)), 3.0);
+        // при торможении кольцо чуть расходится до боковых позиций
+        radius = Mth.lerp(smooth(win(t, RING_BRAKE, RING_STOP)), radius, OPEN_R);
         double squash = Mth.lerp(ringK, 0.85, 1.0);
         double bob = (1.0 - ringK) * 0.45 * Math.sin(a * 2.0 + (blue ? 1.0 : 0.0));
-        Vec3 c = s.core().add(circle(s, a, radius, squash)).add(0.0, bob, 0.0);
-        // Кольцо раскрывается: Красный — вправо от игрока (на экране слева), Синий — влево.
-        double open = smooth(win(t, T_RING_OPEN, T_RING_OPEN + 16));
-        if (open > 0.0) {
-            Vec3 side = s.core().add(s.right.scale(blue ? -OPEN_R : OPEN_R))
-                    .add(0.0, 0.12 * Math.sin(t * 0.17 + (blue ? 2.0 : 0.0)), 0.0);
-            c = lerp(c, side, open);
-        }
-        return c;
+        // Кольцо раскрывается: вращение само плавно останавливается так, что Красный — вправо от игрока
+        // (на экране слева), Синий — влево; дальше только лёгкое «дыхание».
+        double hover = 0.12 * Math.sin(t * 0.17 + (blue ? 2.0 : 0.0)) * smooth(win(t, RING_BRAKE, RING_STOP + 10));
+        return s.core().add(circle(s, a, radius, squash)).add(0.0, bob + hover, 0.0);
     }
 
     /** Шары в «космосе»: по бокам, медленно сходятся, в конце — рывком в центр. */
@@ -962,10 +990,11 @@ public final class MaximumPurpleClient {
             // 11,4–14,1 с: снизу — кольцо, игрок поднимается к центру, кольцо раскрывается
             // (референс 120 к/с #1370–1683: камера чуть ниже кольца, почти горизонтально, кольцо ~0,6 ширины кадра;
             //  игрок входит в кадр снизу ~12,3 с и поднимается под кольцо)
-            ck(RING_FROM, A_CORE, 4.2, -0.6, -1.3, A_CORE, 0.0, 0.0, -0.3, 70f, 0f, true),
-            ck(250, A_CORE, 4.8, 0.0, -1.5, A_CORE, 0.0, 0.0, -0.6, 70f, 0f, false),
-            ck(266, A_CORE, 5.6, 0.2, -1.6, A_CORE, 0.0, 0.0, -0.9, 70f, 0f, false),
-            ck(283, A_CORE, 6.2, 0.2, -1.7, A_CORE, 0.0, 0.0, -1.0, 70f, 0f, false),
+            // кольцо в верхней половине кадра, низ кадра — там, откуда поднимается игрок (виден с 12,25 с)
+            ck(RING_FROM, A_CORE, 4.2, -0.6, -1.3, A_CORE, 0.0, 0.0, -1.5, 70f, 0f, true),
+            ck(250, A_CORE, 4.8, 0.0, -1.5, A_CORE, 0.0, 0.0, -2.0, 70f, 0f, false),
+            ck(266, A_CORE, 5.6, 0.2, -1.6, A_CORE, 0.0, 0.0, -2.1, 70f, 0f, false),
+            ck(283, A_CORE, 6.2, 0.2, -1.7, A_CORE, 0.0, 0.0, -2.0, 70f, 0f, false),
             // 15,25–16,55 с: «космос» — Красный слева, Синий справа, ядро растёт
             ck(916 / 3.0, A_CORE, 6.6, 0.0, -0.3, A_CORE, 0.0, 0.0, 0.0, 62f, -4f, true),
             ck(331, A_CORE, 5.0, 0.0, -0.15, A_CORE, 0.0, 0.0, 0.0, 58f, -2f, false),
@@ -1514,8 +1543,7 @@ public final class MaximumPurpleClient {
             // в начале взрыв шире кадра (#63–71), потом плотный клубок r≈1,1 блока
             float radius = (float) (Mth.lerp(smooth(win(t, 15.6, 17.0)), 0.3 + 1.5 * grow, 1.05)
                     + 0.15 * smooth(win(t, 28.0, 32.0)) - 0.25 * smooth(win(t, 38.0, 41.0)));
-            Vec3 axis = new Vec3(0.25 * Math.sin(t * 0.07), 1.0, 0.3).normalize();
-            liquidVortex(pose, cam, camera, blue, axis, radius, t, k, 17, 11);
+            blueSplashVortex(pose, cam, camera, s, blue, radius, t, k);
             // #106+: тёмно-синие ошмётки отлетают влево-вниз
             float debris = env(t, 21.5, T_RELEASE, 1.0, 1.0);
             for (int i = 0; i < 8 && debris > 0.0f; i++) {
@@ -1576,10 +1604,121 @@ public final class MaximumPurpleClient {
             }
         }
         // #237–255: белое гаснет в бело-голубой водоворот — крупные мягкие ленты и белые шарики вокруг персонажа
-        float swirl = env(t, T_RELEASE + 1.2, 48.5, 0.8, 3.0);
-        if (swirl > 0.0f) {
-            liquidVortex(pose, cam, camera, s.atP(0.0, 0.0, 1.1, t), new Vec3(0.1, 1.0, 0.2), 1.9f, t, swirl * 0.85f, 41, 9);
+        // бросок (референс 1,9–2,7 с): брызги на весь кадр, разлетаются и тают; на земле кляксы
+        splashBurst(pose, cam, camera, rel, t, T_RELEASE + 0.2, 2.0, 22, 41.0, 2.6, 0.7f, 2.4f, 15.0, 1.0f);
+        splashBurst(pose, cam, camera, s.atP(0.0, 0.0, 1.1, t), t, T_RELEASE + 1.0, 3.0, 14, 47.0, 1.9, 0.5f, 1.6f, 14.0, 0.95f);
+        groundSplats(pose, camera, s, t);
+    }
+
+    /**
+     * Брызги-«жидкость» (cel): каждая рождается в [t0, t0 + spread], вылетает из center, крутится, растёт и тает.
+     * Всё считается от t — без состояния, одинаково на любом кадре.
+     */
+    private static void splashBurst(PoseStack pose, Camera cam, Vec3 camera, Vec3 center, double t, double t0, double spread,
+                                    int count, double seed, double speed, float size0, float size1, double life, float alpha) {
+        if (t < t0 || t > t0 + spread + life) return;
+        for (int i = 0; i < count; i++) {
+            double h0 = hash(seed + i * 1.37), h1 = hash(seed + i * 2.71 + 0.5), h2 = hash(seed + i * 4.13 + 1.0);
+            double age = t - (t0 + spread * h0);
+            if (age < 0.0 || age > life) continue;
+            double u = age / life;
+            Vec3 dir = hashDir(seed + i * 3.3);
+            Vec3 p = center.add(dir.scale(speed * (0.5 + 0.8 * h1) * easeOut(u)));
+            float size = Mth.lerp((float) easeOut(u), size0, size1) * (float) (0.6 + 0.8 * h2);
+            float a = alpha * (float) (smooth(u / 0.12) * (1.0 - smooth((u - 0.5) / 0.5)));
+            float roll = (float) (h1 * Math.PI * 2.0 + (h2 - 0.5) * 2.0 * u);
+            billboard(pose, cam, camera, p, size, roll, TEX_BSPLASH[(int) (h0 * TEX_BSPLASH.length) % TEX_BSPLASH.length],
+                    1.0f, 1.0f, 1.0f, a, false);
         }
+    }
+
+    /**
+     * Синий в руке (референс 0,5–1,9 с): водоворот из штрихов вокруг шара, от него постоянно срываются брызги,
+     * вокруг — светящиеся голубые точки; в начале — вспышка и взрыв брызг.
+     */
+    private static void blueSplashVortex(PoseStack pose, Camera cam, Vec3 camera, Scene s, Vec3 blue, float radius, double t, float k) {
+        if (k <= 0.01f) return;
+        // вспышка рождения (0,5 с): бело-голубой свет почти во весь кадр
+        float flash = env(t, 13.6, 17.0, 0.4, 2.4);
+        billboard(pose, cam, camera, blue, 3.2f * flash, 0f, TEX_BLOOM, 0.75f, 0.9f, 1.0f, 0.9f * flash, true);
+        // взрыв брызг (0,6–0,8 с)
+        splashBurst(pose, cam, camera, blue, t, 14.2, 2.5, 16, 17.0, 1.7, 0.4f, 1.5f, 12.0, 1.0f);
+        // водоворот: два слоя штрихов крутятся навстречу, дышат
+        float sw = radius * (1.6f + 0.15f * (float) Math.sin(t * 0.4));
+        billboard(pose, cam, camera, blue, sw, (float) (-t * 0.38), TEX_BSWIRL, 1f, 1f, 1f, 0.95f * k, false);
+        billboard(pose, cam, camera, blue, sw * 0.7f, (float) (t * 0.55 + 1.0), TEX_BSWIRL, 1f, 1f, 1f, 0.7f * k, false);
+        billboard(pose, cam, camera, blue, radius * 1.4f, 0f, TEX_BLOOM, 0.3f, 0.6f, 1.0f, 0.5f * k, true);
+        // поток брызг, срывающихся с водоворота: новая каждые ~1,4 тика, по касательной
+        double from = 16.0, step = 1.4, life = 9.0;
+        int n0 = Math.max(0, (int) Math.floor((t - life - from) / step)), n1 = (int) Math.floor((t - from) / step);
+        for (int j = n0; j <= n1; j++) {
+            double birth = from + j * step;
+            double age = t - birth;
+            if (age < 0.0 || age > life) continue;
+            double u = age / life;
+            double h = hash(j * 1.91 + 5.0);
+            double ang = j * 2.39996 - t * 0.38;
+            Vec3 out = s.right.scale(Math.cos(ang)).add(new Vec3(0, 1, 0).scale(Math.sin(ang) * 0.8))
+                    .add(s.forward.scale((h - 0.5) * 0.8)).normalize();
+            Vec3 p = blue.add(out.scale(radius * (0.5 + 1.4 * easeOut(u))));
+            float size = radius * (float) (0.35 + 0.5 * easeOut(u)) * (float) (0.7 + 0.6 * h);
+            float a = k * (float) (smooth(u / 0.15) * (1.0 - smooth((u - 0.45) / 0.55)));
+            billboard(pose, cam, camera, p, size, (float) (ang + 1.57 + h), TEX_BSPLASH[j % TEX_BSPLASH.length],
+                    1f, 1f, 1f, a, false);
+        }
+        // светящиеся точки, медленно разлетаются
+        for (int i = 0; i < 12; i++) {
+            double h = hash(i * 11.1 + 3.0);
+            double lifeT = (t * 0.035 + h) % 1.0;
+            Vec3 p = blue.add(hashDir(i * 2.9 + 4.0).scale(radius * (0.9 + 1.6 * lifeT)));
+            float a = (float) Math.sin(Math.PI * lifeT) * k;
+            float size = radius * (float) (0.08 + 0.07 * hash(i + 9.0));
+            billboard(pose, cam, camera, p, size * 2.6f, 0f, TEX_BLOOM, 0.35f, 0.7f, 1.0f, 0.75f * a, true);
+            billboard(pose, cam, camera, p, size, 0f, TEX_BLOOM, 1.0f, 1.0f, 1.0f, a, true);
+        }
+        // чёрные «мазки» (1,0–1,6 с): тонкие тёмные росчерки сквозь вихрь
+        float ink = env(t, 19.0, 33.0, 1.0, 2.0) * k;
+        for (int i = 0; i < 3 && ink > 0.0f; i++) {
+            double seed = Math.floor(t / 3.0) * 3.0 + i;
+            if (hash(seed * 1.7) < 0.4) continue;
+            Vec3 d = hashDir(seed * 5.1);
+            Vec3 a0 = blue.add(d.scale(-radius * 1.2)), a1 = blue.add(d.scale(radius * 1.3)).add(0.0, 0.2 * radius, 0.0);
+            List<Vec3> pts = List.of(a0, lerp(a0, a1, 0.5).add(hashDir(seed).scale(radius * 0.2)), a1);
+            solidRibbon(pose, camera, pts, radius * 0.06f, 0.01f, 0.02f, 0.08f, 0.9f * ink, false);
+        }
+    }
+
+    /** Тёмно-синие кляксы на земле вокруг ног (0,7–2,8 с). */
+    private static void groundSplats(PoseStack pose, Vec3 camera, Scene s, double t) {
+        float a = env(t, 15.0, 57.0, 2.0, 8.0);
+        if (a <= 0.0f) return;
+        for (int i = 0; i < 7; i++) {
+            double born = i < 3 ? 15.0 + i * 2.0 : T_RELEASE + (i - 3) * 1.5;
+            if (t < born) continue;
+            double grow = easeOut(win(t, born, born + 4.0));
+            double ang = hash(i * 3.7 + 1.0) * Math.PI * 2.0, d = 0.6 + 1.6 * hash(i * 5.3);
+            Vec3 c = s.at(Math.cos(ang) * d, Math.sin(ang) * d, 0.02 + i * 0.002);
+            float size = (float) ((0.6 + 0.8 * hash(i * 7.1)) * grow);
+            groundQuad(pose, camera, c, size, (float) (hash(i * 9.9) * 6.28), TEX_BSPLAT, 0.95f * a);
+        }
+    }
+
+    /** Квадрат на земле (горизонтальный). */
+    private static void groundQuad(PoseStack pose, Vec3 camera, Vec3 center, float size, float roll, ResourceLocation texture, float alpha) {
+        if (alpha <= 0.003f || size <= 0.0f) return;
+        double h = size * 0.5, c = Math.cos(roll) * h, sn = Math.sin(roll) * h;
+        double x = center.x - camera.x, y = center.y - camera.y, z = center.z - camera.z;
+        RenderSystem.setShader(GameRenderer::getPositionTexColorShader);
+        RenderSystem.setShaderTexture(0, texture);
+        HollowPurpleReferenceClient.mpAlphaBlend();
+        Matrix4f m = pose.last().pose();
+        BufferBuilder buf = Tesselator.getInstance().getBuilder();
+        buf.begin(VertexFormat.Mode.QUADS, DefaultVertexFormat.POSITION_TEX_COLOR);
+        quadVertex(buf, m, x - c + sn, y, z - sn - c, 0f, 0f, 1f, 1f, 1f, alpha);
+        quadVertex(buf, m, x - c - sn, y, z - sn + c, 0f, 1f, 1f, 1f, 1f, alpha);
+        quadVertex(buf, m, x + c - sn, y, z + sn + c, 1f, 1f, 1f, 1f, 1f, alpha);
+        quadVertex(buf, m, x + c + sn, y, z + sn - c, 1f, 0f, 1f, 1f, 1f, alpha);
+        BufferUploader.drawWithShader(buf.end());
     }
 
     private static void renderScene(PoseStack pose, Camera cam, Vec3 camera, Scene s, double t, boolean isLocal) {

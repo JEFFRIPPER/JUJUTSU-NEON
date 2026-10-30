@@ -95,7 +95,7 @@ public final class MaximumPurple {
 
     /** Подъём начинается сразу после выстрела Красным (T_RED_FIRE) и идёт медленно до темноты. */
     static final int T_RISE_START = 72;
-    static final int T_RISE_END = 282;
+    static final int T_RISE_END = 290;
     static final double RISE_HEIGHT = 24.0;
     static final double RADIUS = 100.0;
     /** 50 + высота подъёма: кратер углубляется на столько, на сколько игрок поднялся. */
@@ -138,13 +138,40 @@ public final class MaximumPurple {
     private MaximumPurple() {
     }
 
-    /** Высота игрока над точкой старта в момент t (тики кат-сцены): плавный подъём к шарам. */
+    /**
+     * Ключи подъёма (тик, высота). По референсу: сразу после Красного медленно отрывается от земли; в плане
+     * снизу на кольцо (12,25–13,75 с) игрок виден — входит в кадр снизу и плавно подходит под кольцо.
+     */
+    private static final double[][] RISE = {
+            {T_RISE_START, 0.0}, {120, 2.2}, {180, 9.0}, {245, 20.6}, {275, 23.4}, {T_RISE_END, RISE_HEIGHT}};
+
+    /** Высота игрока над точкой старта в момент t (тики кат-сцены): монотонный кубический сплайн, скорость
+     *  на концах нулевая — ни рывка в начале, ни «инерции» в конце. */
     static double heightAt(double t) {
-        if (t <= T_RISE_START) return 0.0;
-        if (t >= T_RISE_END) return RISE_HEIGHT;
-        double x = (t - T_RISE_START) / (double) (T_RISE_END - T_RISE_START);
-        // Медленный разгон сразу после Красного («потихонечку»), ровный подъём и мягкое торможение под кольцом.
-        return RISE_HEIGHT * x * x * x * (x * (x * 6.0 - 15.0) + 10.0);
+        double[][] k = RISE;
+        int n = k.length;
+        if (t <= k[0][0]) return k[0][1];
+        if (t >= k[n - 1][0]) return k[n - 1][1];
+        int i = 0;
+        while (t > k[i + 1][0]) i++;
+        double h = k[i + 1][0] - k[i][0];
+        double u = (t - k[i][0]) / h;
+        double m0 = riseSlope(i), m1 = riseSlope(i + 1);
+        double u2 = u * u, u3 = u2 * u;
+        return (2 * u3 - 3 * u2 + 1) * k[i][1] + (u3 - 2 * u2 + u) * h * m0
+                + (-2 * u3 + 3 * u2) * k[i + 1][1] + (u3 - u2) * h * m1;
+    }
+
+    /** Наклон в ключе по Фрицшу–Карлсону (без перелёта), на концах — ноль. */
+    private static double riseSlope(int i) {
+        double[][] k = RISE;
+        if (i == 0 || i == k.length - 1) return 0.0;
+        double d0 = (k[i][1] - k[i - 1][1]) / (k[i][0] - k[i - 1][0]);
+        double d1 = (k[i + 1][1] - k[i][1]) / (k[i + 1][0] - k[i][0]);
+        if (d0 * d1 <= 0.0) return 0.0;
+        double w0 = 2 * (k[i + 1][0] - k[i][0]) + (k[i][0] - k[i - 1][0]);
+        double w1 = (k[i + 1][0] - k[i][0]) + 2 * (k[i][0] - k[i - 1][0]);
+        return (w0 + w1) / (w0 / d0 + w1 / d1);
     }
 
     // ------------------------------------------------------------------ packets
