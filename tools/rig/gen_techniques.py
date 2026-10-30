@@ -482,46 +482,46 @@ def max_purple():
     поднимается раскрывшись, собирает шары в ладонях и встаёт в позу Годжо. Камера — кат-сцены, поэтому fp=none."""
     import math
     a = Anim('max_purple', 20.4, loop='hold', props={'priority': 'action4', 'fade_in': 0.15, 'fade_out': 0.6,
-                                                     'look': 0.15, 'face': 0, 'fp': 'none'})
+                                                     'look': 0.0, 'face': 0, 'fp': 'none'})
     k = Keys(a)
     k.key(0.0, 'linear', REST)
     # Синий в правой ладони
-    k.key(0.7, 'easeOutCubic', M(legs(0.2, 0.3), body(8, (4, 10, 0), (6, -12, 0)),
+    k.key(0.7, 'easeOutCubic', M(legs(0.2, 0.3), body(8, (4, 10, 0), (4, -6, 0)),
                                   arms((-60, -20, 16), -50, (-10, 10, -14), -20, (0, 50, 0))))
     # вихрь: присед, рука с Синим отведена вниз-назад (замах)
-    k.key(1.3, 'easeInOutCubic', M(legs(0.5, 1.0), body(24, (18, 26, -4), (4, -24, 0)),
+    k.key(1.3, 'easeInOutCubic', M(legs(0.5, 1.0), body(24, (18, 26, -4), (-12, -10, 0)),
                                    arms((10, 10, 30), -40, (-40, 30, -10), -60, (0, 30, 0))))
-    k.key(1.85, 'easeInOutSine', M(legs(0.55, 1.05), body(26, (20, 28, -5), (2, -26, 0)),
+    k.key(1.85, 'easeInOutSine', M(legs(0.55, 1.05), body(26, (20, 28, -5), (-14, -12, 0)),
                                    arms((16, 12, 32), -36, (-44, 32, -10), -60)))
     # бросок вверх: рука по дуге через сторону над головой, тело разгибается
-    k.key(1.95, 'easeInSine', M(legs(0.3, 0.6), body(14, (4, 16, -4), (-10, -14, 0)),
+    k.key(1.95, 'easeInSine', M(legs(0.3, 0.6), body(14, (4, 16, -4), (-8, -8, 0)),
                                 arms((-80, 10, 60), -30, (-30, 20, -20), -40)))
-    k.key(2.05, 'easeInQuint', M(legs(-0.1, 0.0), body(-4, (-16, -6, 2), (-34, 6, 0)),
+    k.key(2.05, 'easeInQuint', M(legs(-0.1, 0.0), body(-4, (-16, -6, 2), (-16, 4, 0)),
                                   arms((-170, 0, 10), -4, (-10, -10, -30), -20, (0, 0, 0))))
     k.hold(0.15)
     # референс 2,4–2,7 с: после броска правая рука проходит перед корпусом и уходит вверх,
     # левая кисть поднимается к лицу
-    k.key(2.45, 'easeInOutCubic', M(legs(-0.1, 0.25), body(-6, (-2, -8, 2), (-16, 10, 0)),
+    k.key(2.45, 'easeInOutCubic', M(legs(-0.1, 0.25), body(-6, (-2, -8, 2), (-4, 8, 0)),
                                     arms((-120, -20, 20), -40, (-80, 26, -26), -90, (0, 0, 0), (0, -30, 0))))
     # Красный: правая рука прямо вверх, указательный палец к небу, шар над кончиком пальца;
     # левая кисть у лица
-    k.key(2.75, 'easeOutCubic', M(legs(-0.1, 0.25), body(-8, (-8, -10, 2), (-34, 12, 0)),
+    k.key(2.75, 'easeOutCubic', M(legs(-0.1, 0.25), body(-8, (-8, -10, 2), (-6, 10, 0)),
                                   arms((-176, 0, -8), 0, (-98, 32, -30), -112, (0, 0, 0), (0, -40, 0))))
-    k.key(3.1, 'easeInOutSine', M(body(-8, (-7, -10, 2), (-35, 12, 0)),
+    k.key(3.1, 'easeInOutSine', M(body(-8, (-7, -10, 2), (-6, 10, 0)),
                                   arms((-177, 0, -8), 0, (-98, 32, -30), -112)))
-    k.key(3.42, 'easeInOutSine', M(body(-8, (-8, -10, 2), (-36, 12, 0)),
+    k.key(3.42, 'easeInOutSine', M(body(-8, (-8, -10, 2), (-7, 10, 0)),
                                    arms((-177, 0, -8), 0, (-98, 32, -30), -112)))
     # выстрел Красного вверх с кончика пальца: короткий толчок всем телом
-    k.key(3.47, 'easeInQuint', M(legs(-0.05, 0.05), body(-6, (-12, -8, 0), (-40, 10, 0)),
+    k.key(3.47, 'easeInQuint', M(legs(-0.05, 0.05), body(-6, (-12, -8, 0), (-8, 8, 0)),
                                   arms((-179, 0, -6), 0, (-96, 34, -28), -114)))
     k.hold(0.15)
     # подъём уже начался: рука ещё поднята, медленно уходит вниз-в сторону, тело раскрывается
-    k.key(4.4, 'easeInOutSine', M(legs(0.0, 0.15), body(0, (-8, 0, 0), (-32, 0, 0)),
+    k.key(4.4, 'easeInOutSine', M(legs(0.0, 0.15), body(0, (-8, 0, 0), (-12, 0, 0)),
                                   arms((-150, 0, 20), -16, (-50, 10, -30), -40)))
     # небо: обе руки ведут шары (дирижирует), дыхание, перенос веса
-    k.key(5.0, 'easeInOutSine', M(legs(0.15, 0.3), body(6, (-4, 8, 0), (-30, -6, 0)),
+    k.key(5.0, 'easeInOutSine', M(legs(0.15, 0.3), body(6, (-4, 8, 0), (-12, -4, 0)),
                                   arms((-120, -10, 40), -30, (-70, 10, -40), -40, (0, 30, 0), (0, -30, 0))))
-    k.key(6.4, 'easeInOutSine', M(legs(-0.15, 0.35), body(-6, (-6, -8, 0), (-34, 6, 0)),
+    k.key(6.4, 'easeInOutSine', M(legs(-0.15, 0.35), body(-6, (-6, -8, 0), (-12, 4, 0)),
                                   arms((-100, -20, 30), -40, (-120, 20, -30), -30, (0, 30, 0), (0, -30, 0))))
     # погоня: ладони кружат друг вокруг друга (шары гоняются)
     t = 8.0
@@ -529,7 +529,7 @@ def max_purple():
         ph = (t - 8.0) / 1.1 * 2 * math.pi
         k.key(round(t, 2), 'catmullrom', M(
             legs(0.1 * math.sin(ph), 0.3),
-            body(6 * math.sin(ph), (-6 + 2 * math.cos(ph), 8 * math.sin(ph), 0), (-34, -6 * math.sin(ph), 0)),
+            body(6 * math.sin(ph), (-6 + 2 * math.cos(ph), 8 * math.sin(ph), 0), (-12, -4 * math.sin(ph), 0)),
             arms((-96 + 18 * math.sin(ph), 4, 42 + 12 * math.cos(ph)), -30 - 10 * math.cos(ph),
                  (-96 - 18 * math.sin(ph), -4, -42 + 12 * math.cos(ph)), -30 + 10 * math.cos(ph),
                  (0, 30, 0), (0, -30, 0))), overlap=False)
@@ -559,7 +559,7 @@ def max_purple():
              arms((-160, -20, 24), -30, (-160, 20, -24), -30, (0, 0, -20), (0, 0, 20)))
     k.key(17.6, 'easeInOutCubic', OVER)
 
-    def lying(tilt=-78, chest=-6, head=20):
+    def lying(tilt=-78, chest=-6, head=6):
         legs_bent = {'LowerTorso.pos': ZERO, 'RightUpperLeg': (-26, 0, 6), 'RightLowerLeg': (40, 0, 0),
                      'RightFoot': (20, 0, 0), 'LeftUpperLeg': (-12, 0, -6), 'LeftLowerLeg': (30, 0, 0),
                      'LeftFoot': (20, 0, 0)}
@@ -570,11 +570,11 @@ def max_purple():
                  arc=lambda u: {'RightLowerArm': (-40 * math.sin(math.pi * u), 0, 0),
                                 'LeftLowerArm': (-40 * math.sin(math.pi * u), 0, 0)})
     # удар: руки рывком распрямляются и раскидываются в стороны, корпус чуть прогибается
-    k.key(18.08, 'easeOutQuint', M(lying(-84, -10, 16), arms((-26, 0, 90), 0, (-26, 0, -90), 0)), overlap=False)
+    k.key(18.08, 'easeOutQuint', M(lying(-84, -10, 4), arms((-26, 0, 90), 0, (-26, 0, -90), 0)), overlap=False)
     k.hold(0.2)
     # белый экран и после: висит в этой позе, лёгкое покачивание
-    k.key(19.4, 'easeInOutSine', M(lying(-80, -8, 20), arms((-30, 0, 86), -4, (-30, 0, -86), -4)), overlap=False)
-    k.key(20.4, 'easeInOutSine', M(lying(-82, -9, 19), arms((-29, 0, 88), -2, (-29, 0, -88), -2)), overlap=False)
+    k.key(19.4, 'easeInOutSine', M(lying(-80, -8, 6), arms((-30, 0, 86), -4, (-30, 0, -86), -4)), overlap=False)
+    k.key(20.4, 'easeInOutSine', M(lying(-82, -9, 5), arms((-29, 0, 88), -2, (-29, 0, -88), -2)), overlap=False)
     for t_, m in ((0.7, 'blue'), (2.05, 'throw'), (3.3, 'red'), (3.47, 'red_fire'), (18.0, 'pose')):
         a.marker(t_, m)
     return a
