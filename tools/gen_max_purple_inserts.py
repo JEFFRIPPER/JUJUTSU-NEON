@@ -115,50 +115,119 @@ def insert_bubbles(rng):
     return img.convert("RGB")
 
 
-def hand_poly(cx, cy, s):
-    """Кисть «пистолетом» (блочная, своя рисовка): ладонь-кулак + вытянутый указательный палец влево."""
-    fist = [(cx - 0.05 * s, cy - 0.32 * s), (cx + 0.62 * s, cy - 0.38 * s), (cx + 0.70 * s, cy + 0.40 * s),
-            (cx + 0.02 * s, cy + 0.46 * s)]
-    finger = [(cx - 0.95 * s, cy - 0.40 * s), (cx + 0.10 * s, cy - 0.46 * s), (cx + 0.12 * s, cy - 0.12 * s),
-              (cx - 0.93 * s, cy - 0.10 * s)]
-    thumb = [(cx + 0.18 * s, cy - 0.30 * s), (cx + 0.42 * s, cy - 0.33 * s), (cx + 0.40 * s, cy + 0.05 * s),
-             (cx + 0.20 * s, cy + 0.06 * s)]
-    return fist, finger, thumb
+
+def catmull(pts, n=12, closed=True):
+    out = []
+    P = pts + pts[:3] if closed else [pts[0]] + pts + [pts[-1]]
+    m = len(pts) if closed else len(pts) - 1
+    for i in range(m):
+        p0, p1, p2, p3 = P[i], P[i + 1], P[i + 2], P[i + 3]
+        if not closed:
+            p0, p1, p2, p3 = P[i], P[i + 1], P[i + 2], P[i + 3]
+        for k in range(n):
+            t = k / n
+            t2, t3 = t * t, t * t * t
+            out.append(tuple(0.5 * ((2 * p1[j]) + (-p0[j] + p2[j]) * t + (2 * p0[j] - 5 * p1[j] + 4 * p2[j] - p3[j]) * t2
+                                    + (-p0[j] + 3 * p1[j] - 3 * p2[j] + p3[j]) * t3) for j in range(2)))
+    if not closed:
+        out.append(pts[-1])
+    return out
+
+# Кисть «пистолетом» в своих единицах: x — к кончику пальца, y — вверх; запястье в (0,0)
+HAND = [(0.00, 0.21), (0.18, 0.25), (0.33, 0.29), (0.40, 0.37), (0.44, 0.50), (0.49, 0.61), (0.56, 0.645),
+        (0.615, 0.60), (0.61, 0.48), (0.60, 0.36), (0.66, 0.285), (0.80, 0.27), (0.98, 0.262), (1.13, 0.252),
+        (1.205, 0.232), (1.225, 0.19), (1.20, 0.152), (1.12, 0.142), (0.95, 0.140), (0.80, 0.128),
+        (0.775, 0.07), (0.775, 0.0), (0.735, -0.06), (0.66, -0.08), (0.655, -0.13), (0.62, -0.185),
+        (0.54, -0.20), (0.52, -0.245), (0.47, -0.285), (0.38, -0.285), (0.24, -0.25), (0.10, -0.215),
+        (0.00, -0.20)]
+# складки и ногти
+LINES = [
+    [(0.80, 0.128), (0.70, 0.12), (0.62, 0.10)],              # нижний край указательного уходит в ладонь
+    [(0.775, 0.0), (0.70, 0.00), (0.62, 0.02)],               # граница среднего пальца
+    [(0.66, -0.08), (0.60, -0.07), (0.53, -0.05)],            # средний / безымянный
+    [(0.54, -0.20), (0.48, -0.18), (0.42, -0.15)],            # безымянный / мизинец
+    [(1.15, 0.236), (1.10, 0.20), (1.15, 0.16)],              # ноготь указательного
+    [(0.585, 0.615), (0.555, 0.57), (0.59, 0.53)],            # ноготь большого
+    [(0.93, 0.26), (0.95, 0.215)], [(0.93, 0.145), (0.95, 0.18)],  # сгиб пальца
+    [(0.60, 0.36), (0.52, 0.33), (0.44, 0.30)],               # основание большого пальца
+]
+SLEEVE = [(0.04, 0.29), (-0.20, 0.33), (-0.70, 0.36), (-1.60, 0.38), (-1.60, -0.34), (-0.70, -0.31),
+          (-0.20, -0.28), (0.04, -0.26), (0.08, 0.0)]
+SLEEVE_FOLDS = [[(-0.15, 0.30), (-0.30, 0.10), (-0.22, -0.10)], [(-0.45, 0.36), (-0.55, 0.05)],
+                [(-0.62, -0.30), (-0.50, -0.05)], [(-0.80, 0.38), (-0.85, 0.1), (-0.78, -0.12)]]
 
 
-def sketch_poly(dr, poly, rng, color, strokes=5, width=3):
-    """Контур «от руки»: несколько дрожащих обводок."""
-    for _ in range(strokes):
-        pts = [(x + rng.uniform(-5, 5), y + rng.uniform(-5, 5)) for x, y in poly]
-        dr.line(pts + [pts[0]], fill=color, width=width)
+def tf(pts, cx, cy, s, ang, mirror):
+    ca, sa = math.cos(ang), math.sin(ang)
+    out = []
+    for x, y in pts:
+        if mirror: x = -x
+        rx, ry = x * ca - y * sa, x * sa + y * ca
+        out.append((cx + rx * s, cy - ry * s))
+    return out
 
 
-def hatch_inside(dr, poly, rng, color, n=40):
-    xs = [p[0] for p in poly]; ys = [p[1] for p in poly]
+def jitter(pts, rng, a):
+    return [(x + rng.uniform(-a, a), y + rng.uniform(-a, a)) for x, y in pts]
+
+
+def draw_hand(dr, rng, cx, cy, s, ang=0.0, mirror=True, fill=(250, 250, 250), ink=(15, 15, 15), sleeve=(20, 20, 26),
+              lw=7, passes=2, hatch=(70, 70, 70), sleeve_ink=None):
+    sl = tf(catmull(SLEEVE, 8), cx, cy, s, ang, mirror)
+    dr.polygon(sl, fill=sleeve)
+    if sleeve_ink:
+        for f in SLEEVE_FOLDS:
+            dr.line(tf(catmull(f, 10, False), cx, cy, s, ang, mirror), fill=sleeve_ink, width=max(2, lw // 2))
+    outline = tf(catmull(HAND, 10), cx, cy, s, ang, mirror)
+    dr.polygon(outline, fill=fill)
+    # тень на нижней половине кисти — косая штриховка внутри
+    if hatch:
+        mask = Image.new("L", dr.im.size, 0)
+        ImageDraw.Draw(mask).polygon(outline, fill=255)
+        lay = Image.new("L", dr.im.size, 0)
+        ld = ImageDraw.Draw(lay)
+        base = tf([(0.0, -0.02), (0.75, -0.02)], cx, cy, s, ang, mirror)
+        for i in range(70):
+            u = rng.uniform(0.02, 0.98)
+            x = base[0][0] + (base[1][0] - base[0][0]) * u
+            y = base[0][1] + (base[1][1] - base[0][1]) * u + rng.uniform(-0.02, 0.28) * s
+            L = rng.uniform(0.05, 0.12) * s
+            ld.line([(x, y), (x + L * 0.5, y - L)], fill=255, width=max(2, lw // 3))
+        lay = Image.composite(lay, Image.new("L", lay.size, 0), mask)
+        dr.bitmap((0, 0), lay, fill=hatch)
+    for _ in range(passes):
+        dr.line(jitter(outline, rng, lw * 0.25) + [outline[0]], fill=ink, width=lw, joint="curve")
+    for ln in LINES:
+        dr.line(jitter(tf(catmull(ln, 8, False), cx, cy, s, ang, mirror), rng, lw * 0.15), fill=ink,
+                width=max(2, int(lw * 0.6)), joint="curve")
+
+
+
+
+def speed_lines(dr, rng, color, n, wmin, wmax):
     for _ in range(n):
-        x = rng.uniform(min(xs), max(xs)); y = rng.uniform(min(ys), max(ys))
-        dr.line([(x, y), (x + rng.uniform(10, 30), y + rng.uniform(-25, -8))], fill=color, width=2)
+        x = rng.uniform(-400, W + 200); y = rng.uniform(-200, H + 200)
+        L = rng.uniform(150, 700); w = rng.uniform(wmin, wmax)
+        dr.line([(x, y), (x + L * 0.42, y - L)], fill=color, width=int(w))
 
 
 def manga_hand(rng):
-    """Кадр 1: белая диагональная штриховка на чёрном, в центре кисть «пистолетом» белым скетчем."""
+    """Кадр 1: чёрно-белая диагональная штриховка, по центру кисть «пистолетом» (тушь по белому), рукав чёрный."""
     img = Image.new("RGB", (W, H), (0, 0, 0))
     dr = ImageDraw.Draw(img)
-    for _ in range(420):
-        x = rng.uniform(-400, W + 200); y = rng.uniform(-200, H + 200)
-        L = rng.uniform(150, 700); w = rng.uniform(4, 22)
-        dr.line([(x, y), (x + L * 0.42, y - L)], fill=(255, 255, 255), width=int(w))
-    fist, finger, thumb = hand_poly(W * 0.5, H * 0.5, 420)
-    for poly in (finger, fist, thumb):
-        dr.polygon(poly, fill=(250, 250, 250))
-    for poly in (finger, fist, thumb):
-        sketch_poly(dr, poly, rng, (20, 20, 20), 4, 4)
-        hatch_inside(dr, poly, rng, (60, 60, 60), 30)
+    speed_lines(dr, rng, (255, 255, 255), 420, 4, 22)
+    # белая «подложка» за кистью, чтобы контур читался на штриховке
+    halo = Image.new("L", (W, H), 0)
+    hd = ImageDraw.Draw(halo)
+    hd.polygon(tf(catmull(HAND, 10), W * 0.56, H * 0.53, 760, 0.10, True), fill=255)
+    halo = halo.filter(ImageFilter.MaxFilter(41))
+    dr.bitmap((0, 0), halo, fill=(255, 255, 255))
+    draw_hand(dr, rng, W * 0.56, H * 0.53, 760, ang=0.10, sleeve=(8, 8, 10), sleeve_ink=(120, 120, 130), lw=9, passes=3)
     return img
 
 
 def manga_x(rng):
-    """Кадр 2: слева белый «X» на серо-чёрном градиенте, в центре контур кисти белыми штрихами на чёрном."""
+    """Кадр 2: слева белый «X» на серо-чёрном градиенте, в центре та же кисть белым контуром на чёрном."""
     x = np.linspace(1.0, 0.0, W, dtype=np.float32)
     g = np.clip(x * 1.6 - 0.35, 0, 1) ** 1.4 * 95
     base = np.repeat(np.repeat(g[None, :, None], H, 0), 3, 2)
@@ -167,10 +236,8 @@ def manga_x(rng):
     w = 95
     dr.line([(-120, -60), (520, H + 60)], fill=(255, 255, 255), width=w)
     dr.line([(520, -60), (-120, H + 60)], fill=(255, 255, 255), width=w)
-    fist, finger, thumb = hand_poly(W * 0.48, H * 0.47, 330)
-    for poly in (finger, fist, thumb):
-        sketch_poly(dr, poly, rng, (235, 235, 235), 6, 3)
-        hatch_inside(dr, poly, rng, (150, 150, 150), 14)
+    draw_hand(dr, rng, W * 0.58, H * 0.50, 640, ang=0.10, fill=(6, 6, 8), ink=(240, 240, 240), sleeve=(0, 0, 0),
+              sleeve_ink=(200, 200, 210), lw=7, passes=3, hatch=(150, 150, 150))
     return img
 
 

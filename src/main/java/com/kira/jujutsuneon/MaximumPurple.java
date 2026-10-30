@@ -4,6 +4,7 @@ import net.minecraft.ChatFormatting;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.network.chat.Component;
+import net.minecraft.network.protocol.game.ClientboundLevelChunkWithLightPacket;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
@@ -92,8 +93,8 @@ public final class MaximumPurple {
     static final int T_MIN_END = 408;       // 20,40 с — белый уходит
     static final int ANIM_TICKS = 408;
 
-    /** Подъём игрока к шарам. */
-    static final int T_RISE_START = 228;
+    /** Подъём начинается сразу после выстрела Красным (T_RED_FIRE) и идёт медленно до темноты. */
+    static final int T_RISE_START = 72;
     static final int T_RISE_END = 282;
     static final double RISE_HEIGHT = 24.0;
     static final double RADIUS = 100.0;
@@ -112,6 +113,10 @@ public final class MaximumPurple {
     private static final long BUDGET_HIDDEN_NANOS = 22_000_000L;
     private static final long BUDGET_WHITE_NANOS = 38_000_000L;
     private static final int BLOCK_FLAGS = 2 | 16 | 32;
+    /** Скрытая вырезка клиентам по блоку не шлётся: тысячи изменений за тик заставляли клиент
+     *  перестраивать секции чанков каждый кадр (сильные лаги с броска Синего). Чанки целиком
+     *  уходят клиентам один раз — в белом экране (syncCarved). */
+    private static final int HIDDEN_FLAGS = 16 | 32;
 
     private static final String PROTOCOL = "3";
     private static final SimpleChannel CHANNEL = NetworkRegistry.newSimpleChannel(
@@ -138,11 +143,8 @@ public final class MaximumPurple {
         if (t <= T_RISE_START) return 0.0;
         if (t >= T_RISE_END) return RISE_HEIGHT;
         double x = (t - T_RISE_START) / (double) (T_RISE_END - T_RISE_START);
-        // референс: игрок быстро взлетает (вне кадра), входит в кадр снизу ~12,3 с и медленно подходит под кольцо
-        // плавно: разгон и торможение (раньше 85 % высоты набиралось за первые полсекунды — выглядело как телепорт)
-        double k = x * x * (3.0 - 2.0 * x);
-        double e = 1.0 - Math.pow(1.0 - x, 3.0);
-        return RISE_HEIGHT * (0.55 * k + 0.45 * e);
+        // Медленный разгон сразу после Красного («потихонечку»), ровный подъём и мягкое торможение под кольцом.
+        return RISE_HEIGHT * x * x * x * (x * (x * 6.0 - 15.0) + 10.0);
     }
 
     // ------------------------------------------------------------------ packets
@@ -233,6 +235,8 @@ public final class MaximumPurple {
         int finalIndex;
         boolean hiddenDone;
         boolean destructionDone;
+        /** Чанки со скрытой вырезкой уже отправлены клиентам заново. */
+        boolean carvedSynced;
 
         Cast(ServerPlayer owner) {
             this.ownerId = owner.getUUID();
@@ -484,7 +488,7 @@ public final class MaximumPurple {
     private static void carveHidden(Cast cast) {
         long deadline = System.nanoTime() + BUDGET_HIDDEN_NANOS;
         int total = cast.columns.length / 2;
-        Carver carver = new Carver(cast);
+        Carver carver = new Carver(cast, HIDDEN_FLAGS);
         while (cast.hiddenIndex < total) {
             int i = cast.hiddenIndex;
             int x = cast.columns[i * 2], z = cast.columns[i * 2 + 1];
@@ -500,9 +504,10 @@ public final class MaximumPurple {
 
     /** Остаток (корка и всё над землёй) — во время белого экрана. */
     private static void carveFinal(Cast cast) {
+        syncCarved(cast);
         long deadline = System.nanoTime() + BUDGET_WHITE_NANOS;
         int total = cast.columns.length / 2;
-        Carver carver = new Carver(cast);
+        Carver carver = new Carver(cast, BLOCK_FLAGS);
         while (cast.finalIndex < total) {
             int i = cast.finalIndex;
             int x = cast.columns[i * 2], z = cast.columns[i * 2 + 1];
@@ -517,6 +522,27 @@ public final class MaximumPurple {
         cast.destructionDone = true;
     }
 
+    /** Один раз заново шлёт клиентам все чанки кратера (после скрытой вырезки без синхронизации). */
+    private static void syncCarved(Cast cast) {
+        if (cast.carvedSynced || cast.hiddenIndex == 0) return;
+        cast.carvedSynced = true;
+        ServerLevel level = cast.level;
+        int r = (int) Math.ceil(RADIUS) + 2;
+        int x0 = (cast.feetBlock.getX() - r) >> 4, x1 = (cast.feetBlock.getX() + r) >> 4;
+        int z0 = (cast.feetBlock.getZ() - r) >> 4, z1 = (cast.feetBlock.getZ() + r) >> 4;
+        for (int cx = x0; cx <= x1; cx++) {
+            for (int cz = z0; cz <= z1; cz++) {
+                LevelChunk chunk = level.getChunkSource().getChunkNow(cx, cz);
+                if (chunk == null) continue;
+                List<ServerPlayer> players = level.getChunkSource().chunkMap.getPlayers(chunk.getPos(), false);
+                if (players.isEmpty()) continue;
+                ClientboundLevelChunkWithLightPacket packet =
+                        new ClientboundLevelChunkWithLightPacket(chunk, level.getLightEngine(), null, null);
+                for (ServerPlayer p : players) p.connection.send(packet);
+            }
+        }
+    }
+
     private static final class Carver {
         final ServerLevel level;
         final BlockState air = Blocks.AIR.defaultBlockState();
@@ -524,8 +550,11 @@ public final class MaximumPurple {
         LevelChunk chunk;
         int chunkX = Integer.MIN_VALUE, chunkZ = Integer.MIN_VALUE;
 
-        Carver(Cast cast) {
+        final int flags;
+
+        Carver(Cast cast, int flags) {
             this.level = cast.level;
+            this.flags = flags;
         }
 
         void column(int x, int z, int bottom, int top) {
@@ -550,7 +579,7 @@ public final class MaximumPurple {
                 BlockState state = chunk.getBlockState(pos);
                 if (!state.isAir() && !isProtected(state) && !DomainExpansion.denyTechniqueEdit(level, pos, null)) {
                     if (state.hasBlockEntity()) Clearable.tryClear(level.getBlockEntity(pos));
-                    level.setBlock(pos, air, BLOCK_FLAGS);
+                    level.setBlock(pos, air, flags);
                 }
                 y--;
             }
@@ -576,18 +605,16 @@ public final class MaximumPurple {
     // ------------------------------------------------------------------ end
 
     private static void finish(Cast cast, ServerPlayer owner, boolean completed) {
+        // Прервали до белого экрана — клиенты всё равно должны получить уже вырезанное.
+        syncCarved(cast);
         if (owner != null) {
             owner.fallDistance = 0.0f;
             owner.getAbilities().mayfly = cast.origMayfly;
             owner.getAbilities().flying = cast.origMayfly && cast.origFlying;
             owner.onUpdateAbilities();
-            if (completed && owner.isAlive()) {
-                // После удара не висит в воздухе: медленно опускается в кратер (без урона от падения).
-                // Полёт мода можно включить самому, как обычно.
-                owner.addEffect(new net.minecraft.world.effect.MobEffectInstance(
-                        net.minecraft.world.effect.MobEffects.SLOW_FALLING, 20 * 25, 0, false, false, true));
-            }
             if (completed) {
+                // Игрок остаётся там, куда поднялся, — в режиме полёта.
+                if (owner.isAlive()) JujutsuNeonFlightPatch.startForTechnique(owner);
                 // Откат 60 секунд отсчитывается от окончания техники.
                 owner.getPersistentData().putLong("jn_cd_max_purple", cast.level.getGameTime() + COOLDOWN_TICKS);
             }
@@ -612,6 +639,7 @@ public final class MaximumPurple {
         player.onUpdateAbilities();
         if (!cast.damageDone) {
             CASTS.remove(player.getUUID());
+            syncCarved(cast);
             CHANNEL.send(PacketDistributor.DIMENSION.with(() -> cast.level.dimension()), new EndPacket(cast.ownerId, false));
         }
     }

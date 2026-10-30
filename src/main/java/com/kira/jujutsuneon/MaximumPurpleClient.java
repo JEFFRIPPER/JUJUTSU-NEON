@@ -156,6 +156,8 @@ public final class MaximumPurpleClient {
 
     private static final class Scene {
         final UUID ownerId;
+        /** Кончик пальца в момент выстрела Красным (redFist). */
+        Vec3 redTip;
         final ClientLevel level;
         final Vec3 feet;
         final float yaw;
@@ -324,7 +326,8 @@ public final class MaximumPurpleClient {
             local = null;
             if (!completed) stopTheme(mc);
             restoreLocal(mc);
-            // После удара игрок плавно опускается (медленное падение с сервера), а не висит в воздухе.
+            // Игрок остаётся там, куда поднялся, — в режиме полёта.
+            if (completed && mc.player != null) JujutsuNeonFlightClient.beginFlightForTechnique();
         }
     }
 
@@ -734,9 +737,19 @@ public final class MaximumPurpleClient {
     /** #384 референса — рождение Красного (до этого у лица ничего красного нет). */
     private static final double RED_BORN = 206 / 3.0;
 
-    /** Правый кулак у подбородка (поза #320–414): там рождается Красный. */
+    /** Над кончиком указательного пальца поднятой вверх правой руки: там рождается Красный.
+     *  После выстрела — точка, где он был в момент выстрела (рука уже опускается, шар улетает сам). */
     private static Vec3 redFist(Scene s, double t) {
-        return s.atP(0.32, 0.12, 1.58, t);
+        if (t >= T_RED_FIRE && s.redTip != null) return s.redTip;
+        Minecraft mc = Minecraft.getInstance();
+        if (mc.level != null && mc.level.getPlayerByUUID(s.ownerId) instanceof AbstractClientPlayer p) {
+            Vec3 tip = com.kira.jujutsuneon.rbx.PlayerAnimations.jointWorld(p, "RightHand", mc.getFrameTime(), 0.36);
+            if (tip != null) {
+                if (t < T_RED_FIRE) s.redTip = tip;
+                return tip;
+            }
+        }
+        return s.atP(0.05, 0.36, 2.25, t);
     }
 
     /** Позиция Красного или null. */
@@ -744,7 +757,7 @@ public final class MaximumPurpleClient {
         if (t < RED_BORN - 0.4 || t >= T_MERGED) return null;
         MaxPurpleRefTracks.Track tr = MaxPurpleRefTracks.at(t);
         if (tr != null) return trackedOrb(s, tr, t, false);
-        // Кулак поднятой согнутой руки — на уровне головы рядом с лицом.
+        // Над пальцем поднятой вверх руки.
         Vec3 top = redFist(s, t);
         if (t < T_RED_FIRE) return top;
         if (t < TR_SKY.from()) {
@@ -1727,20 +1740,15 @@ public final class MaximumPurpleClient {
             RenderSystem.setShader(GameRenderer::getPositionColorShader);
             HollowPurpleReferenceClient.mpPurple(pose, camera, c, s.forward, (float) (0.9 + 1.4 * g), 1.0f, t, 1.0f, 1.0f);
             renderCore(pose, cam, camera, c, merged, t, (float) (1.8 + 1.5 * g));
-            float swirl = env(t, T_SWIRL, T_BEHIND, 1.0, 1.0);
-            billboard(pose, cam, camera, c, (float) (3.0 + 7.0 * g), (float) (t * 0.35), TEX_SWIRL, 1f, 1f, 1f, 0.95f * swirl, false);
-            billboard(pose, cam, camera, c, (float) (2.4 + 6.0 * g), (float) (-t * 0.5 + 1.0), TEX_SWIRL, 1f, 0.9f, 1f, 0.6f * swirl, true);
         }
 
-        // ---- 17,5–18,2 с: огромная фиолетовая спираль перед игроком
+        // ---- 17,5–18,2 с: огромный фиолетовый шар перед игроком (без спирали — по просьбе)
         float big = env(t, T_BEHIND, T_MANGA_C + 3, 1.0, 3.0);
         if (big > 0.0f) {
             Vec3 c = bigSpherePos(s, t);
             double g = win(t, T_BEHIND, T_EXPLODE);
             float size = (float) (6.6 + 1.6 * g);
             billboard(pose, cam, camera, c, size * 1.5f, 0f, TEX_BLOOM, 0.75f, 0.2f, 1.0f, 0.7f * big, true);
-            billboard(pose, cam, camera, c, size, (float) (t * 0.3), TEX_SWIRL, 1f, 1f, 1f, big, false);
-            billboard(pose, cam, camera, c, size * 0.8f, (float) (-t * 0.45 + 2.0), TEX_SWIRL, 1f, 1f, 1f, 0.55f * big, true);
             RenderSystem.setShader(GameRenderer::getPositionColorShader);
             HollowPurpleReferenceClient.mpAdditiveBlend();
             HollowPurpleReferenceClient.mpSphere(pose, camera, c, size * 0.5f, 18, 28, 8, 9, 0.35f * big, 0.08f, t, 501.0);
@@ -2172,23 +2180,12 @@ public final class MaximumPurpleClient {
             fillColor(g, w, h, 0.9f, 0xF7F2FA);
             drawCracks(g, w, h, t);
         }
-        // 16,97–17,43 с: огромный закрученный фиолетовый шар (центр белый, лепестки с тёмно-фиолетовой кромкой),
-        // пульсирует; по углам виден мир
-        float swirl = env(t, 1018 / 3.0, T_BEHIND - 0.5, 0.3, 1.0);
-        if (swirl > 0.0f) {
-            float pulse = 0.5f + 0.5f * (float) Math.sin(t * 1.6);
-            fillColor(g, w, h, (0.25f + 0.15f * pulse) * swirl, 0xFFF0FF);
-            float sc = (float) (1.05 + 0.08 * pulse + 0.25 * win(t, 1018 / 3.0, T_BEHIND));
-            drawSpinningTint(g, w, h, TEX_SWIRL, (float) (t * 0.32), sc * 1.04f, 0.35f, 0.08f, 0.6f, 0.8f * swirl);
-            drawSpinning(g, w, h, TEX_SWIRL, (float) (t * 0.32), sc, 0.9f * swirl);
-            drawSpinning(g, w, h, TEX_BLOOM, 0f, sc * 0.55f, (0.55f + 0.3f * pulse) * swirl);
-        }
-
         // референс 120 к/с #2187–2190: штриховка и кисть «пистолетом»; #2191–2201: белый «X» и контур кисти; #2202 — белый
-        if (t >= 366.0 && t < 366.7) {
-            drawFrame(g, w, h, MANGA_D1, t - 366.0);
-        } else if (t >= 366.7 && t < 368.7) {
-            drawFrame(g, w, h, MANGA_D2, (t - 366.7) * 0.3);
+        // Кадры держатся ~0,15 с каждый, чтобы рисунок кисти успевал читаться.
+        if (t >= 362.5 && t < 365.5) {
+            drawFrame(g, w, h, MANGA_D1, (t - 362.5) * 0.3);
+        } else if (t >= 365.5 && t < 368.7) {
+            drawFrame(g, w, h, MANGA_D2, (t - 365.5) * 0.3);
         }
 
         // 18,43 с (кадр 1106): сразу белый экран, пока дорезается кратер
