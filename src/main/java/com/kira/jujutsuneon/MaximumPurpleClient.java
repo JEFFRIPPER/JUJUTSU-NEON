@@ -32,6 +32,7 @@ import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.client.event.ClientPlayerNetworkEvent;
 import net.minecraftforge.client.event.MovementInputUpdateEvent;
 import net.minecraftforge.client.event.RenderGuiEvent;
+import net.minecraftforge.client.event.RenderHighlightEvent;
 import net.minecraftforge.client.event.RenderGuiOverlayEvent;
 import net.minecraftforge.client.event.RenderHandEvent;
 import net.minecraftforge.client.event.RenderLevelStageEvent;
@@ -1174,6 +1175,12 @@ public final class MaximumPurpleClient {
         if (cameraEntity != null) event.setCanceled(true);
     }
 
+    /** Рамка выделения блока под игроком не мелькает в кадре катсцены. */
+    @SubscribeEvent(priority = EventPriority.HIGHEST)
+    public static void onHighlight(RenderHighlightEvent.Block event) {
+        if (cameraEntity != null) event.setCanceled(true);
+    }
+
     @SubscribeEvent(priority = EventPriority.HIGHEST)
     public static void onOverlay(RenderGuiOverlayEvent.Pre event) {
         if (cameraEntity != null) event.setCanceled(true);
@@ -1687,7 +1694,7 @@ public final class MaximumPurpleClient {
 
     /** Брызга у самого объектива не растягивается на пол-экрана бледным пятном — тает по мере подлёта. */
     private static float nearFade(Vec3 camera, Vec3 p, float size) {
-        return (float) smooth((p.distanceTo(camera) - 0.35 - 0.4 * size) / 0.8);
+        return (float) smooth((p.distanceTo(camera) - 0.6 - 0.9 * size) / 1.4);
     }
 
     /** Тёмно-синие кляксы на земле вокруг ног (0,7–2,8 с). */
@@ -2328,12 +2335,12 @@ public final class MaximumPurpleClient {
         if (t >= 362.5 && t < 365.5) {
             double k = t - 362.5;
             drawFrame(g, w, h, MANGA_D1, k * 0.3);
-            drawSilhouetteAt(g, w, h, WHITE_TINT, WHITE_TINT, WHITE_TINT, 1.0f + 0.02f * (float) k, 0.0f, -h * 0.3f, 90.0f);
+            drawSilhouetteAt(g, w, h, WHITE_TINT, WHITE_TINT, WHITE_TINT, 1.0f + 0.02f * (float) k, w * 0.16f, -h * 0.3f, 90.0f);
             drawFrame(g, w, h, TEX_HATCH, 0.0);
         } else if (t >= 365.5 && t < 368.7) {
             double k = t - 365.5;
             drawFrame(g, w, h, MANGA_D2, k * 0.3);
-            drawOutlineAt(g, w, h, 1.04f + 0.02f * (float) k, w * 0.06f, -h * 0.3f, 90.0f);
+            drawOutlineAt(g, w, h, 1.04f + 0.02f * (float) k, w * 0.2f, -h * 0.3f, 90.0f);
         }
 
         // 18,43 с (кадр 1106): сразу белый экран, пока дорезается кратер
