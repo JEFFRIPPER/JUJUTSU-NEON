@@ -63,7 +63,7 @@ public final class RedTechnique {
     static final float RED_ORB_RADIUS = 0.16f;
 
     /** Снаряд Максимального Красного: летит как обычный Красный, но сверхзвуком, и оставляет кратер. */
-    static final double MAX_RED_SPEED = 5.0;
+    static final double MAX_RED_SPEED = 3.5;
     static final double MAX_RED_MAX_DISTANCE = 200.0;
     /** Радиус кратера (у обычного Красного взрыв силой 12 выбивает ~8–9 блоков в земле). */
     static final double MAX_RED_CRATER_RADIUS = 24.0;

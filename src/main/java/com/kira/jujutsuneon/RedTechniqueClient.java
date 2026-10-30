@@ -124,6 +124,13 @@ public final class RedTechniqueClient {
             this.seed = id * 7919L + 13L;
         }
 
+        /** Точка на линии полёта (без остановки в точке попадания) — для следов, оставшихся позади. */
+        Vec3 onLine(double t) {
+            double limit = (this.max ? MAX_RED_MAX_DISTANCE : RED_MAX_DISTANCE) / velocity.length();
+            Vec3 line = start.add(velocity.scale(Math.min(t, limit)));
+            return hand == null ? line : hand.lerp(line, smooth(t / 2.5));
+        }
+
         /** Точка полёта: с ладони плавно сводится на линию сервера за ~2,5 тика. */
         Vec3 at(double t) {
             if (endPos != null) return endPos;
@@ -349,7 +356,9 @@ public final class RedTechniqueClient {
         // Максимальный Красный: стоит на месте и не падает (иначе сервер дёргал бы его назад).
         if (mc.player != null) {
             if (locksLocalPlayer()) {
-                if (!mc.player.isNoGravity()) {
+                // Только в воздухе: на земле без гравитации игрок переставал быть onGround, AnimateScript
+                // копил «падение», и когда клип уходил — на кадр проступала поза падения (руки буквой Т).
+                if (!mc.player.isNoGravity() && !mc.player.onGround()) {
                     mc.player.setNoGravity(true);
                     gravityChanged = true;
                 }
@@ -952,10 +961,12 @@ public final class RedTechniqueClient {
             double k = (s.endTicks + pt) / 5.0;
             alpha = (float) Math.max(0.0, 1.0 - k);
             scale = (float) Math.max(0.0, 1.0 - k * 0.6);
-            if (alpha <= 0.01f) return;
+            // кольца ударных волн позади ещё догорают ~12 тиков после попадания
+            if (s.endTicks + pt > 12) return;
         }
         Vec3 p = s.at(t);
         Vec3 dir = s.velocity.normalize();
+        if (alpha <= 0.01f) p = s.endPos;
         Vec3 u = Math.abs(dir.y) > 0.95 ? new Vec3(1, 0, 0) : dir.cross(new Vec3(0, 1, 0)).normalize();
         Vec3 v = u.cross(dir).normalize();
         float r = MAX_RED_ORB_RADIUS * scale;
@@ -964,14 +975,13 @@ public final class RedTechniqueClient {
 
         // Ударные волны: каждые 1,5 тика на траектории рождается кольцо, расходится и гаснет.
         // Из-за скорости шара кольца позади выстраиваются в конус Маха.
-        double flown = s.endPos == null ? t : s.ticks;
-        for (int i = 0; i < 14; i++) {
-            double t0 = Math.floor(flown / 1.5) * 1.5 - i * 1.5;
+        double flown = s.endPos == null ? t : s.ticks - s.endTicks;
+        for (int i = 0; i < 20; i++) {
+            double t0 = Math.floor(flown / 1.0) * 1.0 - i * 1.0;
             if (t0 < 0.5) break;
             double age = t - t0;
             if (age < 0 || age > 12) continue;
-            Vec3 c = s.at(t0);
-            if (s.endPos != null && c.equals(s.endPos)) continue;
+            Vec3 c = s.onLine(t0);
             double rad = r * 1.5 + age * 0.55;
             float a = (float) ((1.0 - age / 12.0) * (1.0 - age / 12.0)) * 0.75f;
             Vec3 prev = null;
@@ -1022,6 +1032,7 @@ public final class RedTechniqueClient {
             billboard(pose, cam, camera, p.add(dir.scale(r * 1.1)), r * 5.0f * far, (float) (t * 0.5), TEX_SHOCK, 1f, 0.8f, 0.8f, 0.45f, true);
             billboard(pose, cam, camera, p, r * 18.0f, (float) (t * 0.4), TEX_HEAT, 1f, 0.55f, 0.45f, 0.2f, true);
         }
+        if (alpha <= 0.01f) return;
         billboard(pose, cam, camera, p, r * 7.0f * far, (float) (t * 0.3), TEX_GLOW, 1f, 0.08f, 0.05f, 0.85f * alpha, true);
         maxOrb(pose, cam, camera, p, r, t, alpha, s.seed);
     }
@@ -1032,13 +1043,13 @@ public final class RedTechniqueClient {
         double k = 1.0 - Math.pow(1.0 - win(t, 0, 10), 3.0);
         float core = env(t, 0, 10, 0.2, 7);
         if (core > 0.01f) {
-            colorSphere(pose, camera, b.pos, (float) ((1.0 + 4.5 * k) * S), 1f, 0.85f, 0.8f, core, 14, 20);
+            colorSphere(pose, camera, b.pos, (float) ((1.0 + 4.5 * k) * Math.min(S, 1.6f)), 1f, 0.85f, 0.8f, core, 14, 20);
             billboard(pose, cam, camera, b.pos, (float) ((6.0 + 10.0 * k) * S), 0f, TEX_GLOW, 1f, 0.55f, 0.45f, core, true);
         }
         float shell = env(t, 0, 22, 0.3, 12);
         if (shell > 0.01f) {
-            sphere(pose, camera, b.pos, (float) ((1.5 + 9.0 * k) * S), TEX_ENERGY, t * 0.05, t * 0.03, 1f, 0.12f, 0.08f, shell * 0.75f, 2.2f, 18, 28);
-            sphere(pose, camera, b.pos, (float) ((1.2 + 7.0 * k) * S), TEX_ENERGY, -t * 0.07, -t * 0.02, 1f, 0.4f, 0.3f, shell * 0.45f, 1.4f, 16, 24);
+            sphere(pose, camera, b.pos, (float) ((1.5 + 9.0 * k) * Math.min(S, 1.6f)), TEX_ENERGY, t * 0.05, t * 0.03, 1f, 0.12f, 0.08f, shell * 0.75f, 2.2f, 18, 28);
+            sphere(pose, camera, b.pos, (float) ((1.2 + 7.0 * k) * Math.min(S, 1.6f)), TEX_ENERGY, -t * 0.07, -t * 0.02, 1f, 0.4f, 0.3f, shell * 0.45f, 1.4f, 16, 24);
         }
         float wave = env(t, 0, 16, 0.2, 10);
         if (wave > 0.01f) {
