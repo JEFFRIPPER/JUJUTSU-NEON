@@ -335,7 +335,9 @@ public final class LapseBlue {
         if (right.lengthSqr() < 1.0E-4) right = new Vec3(1.0, 0.0, 0.0);
         right = right.normalize();
         Vec3 up = right.cross(forward).normalize();
-        Vec3 center = eye.add(forward.scale(2.75)).add(0.0, -0.30, 0.0);
+        // Ком висит справа-внизу у руки, а не по центру перед глазами: от первого лица не закрывает прицел,
+        // в виде сзади — голову.
+        Vec3 center = eye.add(forward.scale(2.4)).add(right.scale(1.05)).add(0.0, -0.75, 0.0);
         double[] o = GRAB_OFFSETS[Math.min(i, GRAB_OFFSETS.length - 1)];
         return center.add(right.scale(o[0])).add(up.scale(o[1]));
     }

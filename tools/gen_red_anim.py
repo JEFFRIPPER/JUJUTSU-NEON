@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Анимации тела для Красного и Максимального Красного (Player Animator / Emotecraft v3).
 
-Результат (src/main/resources/assets/jujutsu_neon/player_animation/):
+Результат (tools/rig/legacy_pa/ — исходник для tools/rig/convert_pa.py → animations/player/techniques.animation.json):
   red_cast.json — обычный Красный (18 тиков, бросок на 13-м — RedTechnique.R_FIRE).
                   Только руки, корпус и голова: ноги ванильные, можно идти.
   max_red.json  — Максимальный Красный (36 тиков, выстрел на 26-м — RedTechnique.M_FIRE), всё тело.
@@ -26,7 +26,7 @@ import json
 import math
 from pathlib import Path
 
-OUT = Path(__file__).resolve().parent.parent / "src/main/resources/assets/jujutsu_neon/player_animation"
+OUT = Path(__file__).resolve().parent / "rig/legacy_pa"
 OUT.mkdir(parents=True, exist_ok=True)
 
 CHANNELS = {

@@ -32,6 +32,7 @@ import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.client.event.ClientPlayerNetworkEvent;
 import net.minecraftforge.client.event.MovementInputUpdateEvent;
 import net.minecraftforge.client.event.RenderGuiEvent;
+import net.minecraftforge.client.event.RenderHighlightEvent;
 import net.minecraftforge.client.event.RenderGuiOverlayEvent;
 import net.minecraftforge.client.event.RenderHandEvent;
 import net.minecraftforge.client.event.RenderLevelStageEvent;
@@ -99,6 +100,12 @@ public final class MaximumPurpleClient {
     }
 
     private static final ResourceLocation TEX_BLOOM = tex("max_purple_bloom");
+    /** Синий во вступлении: аниме-брызги «жидкости», водоворот штрихов, клякса на земле (tools/gen_max_purple_blue_fx.py). */
+    private static final ResourceLocation[] TEX_BSPLASH = {
+            tex("max_purple_bsplash_0"), tex("max_purple_bsplash_1"), tex("max_purple_bsplash_2"),
+            tex("max_purple_bsplash_3"), tex("max_purple_bsplash_4"), tex("max_purple_bsplash_5")};
+    private static final ResourceLocation TEX_BSWIRL = tex("max_purple_bswirl");
+    private static final ResourceLocation TEX_BSPLAT = tex("max_purple_bsplat");
     private static final ResourceLocation TEX_RED_ORB = tex("max_purple_red_orb");
     private static final ResourceLocation TEX_BLUE_ORB = tex("max_purple_blue_orb");
     private static final ResourceLocation TEX_SPACE = tex("max_purple_space");
@@ -156,6 +163,10 @@ public final class MaximumPurpleClient {
 
     private static final class Scene {
         final UUID ownerId;
+        /** Кончик пальца в момент выстрела Красным (redFist). */
+        Vec3 redTip;
+        /** Ладонь с Синим в момент броска (blueHand). */
+        Vec3 blueTip;
         final ClientLevel level;
         final Vec3 feet;
         final float yaw;
@@ -280,7 +291,12 @@ public final class MaximumPurpleClient {
         SCENES.put(ownerId, scene);
         // Живая анимация тела (Player Animator + сгибы bendy-lib) — у владельца, видят все.
         if (mc.level.getPlayerByUUID(ownerId) instanceof AbstractClientPlayer owner) {
-            MaximumPurpleAnimation.play(owner);
+            // Новый клип R15 (gen_techniques.py: max_purple); без него — старый слой Player Animator.
+            if (com.kira.jujutsuneon.rbx.ClipLibrary.get("max_purple") != null) {
+                com.kira.jujutsuneon.rbx.PlayerAnimations.play(owner, "max_purple");
+            } else {
+                MaximumPurpleAnimation.play(owner);
+            }
         }
 
         if (ownerId.equals(mc.player.getUUID())) {
@@ -416,6 +432,7 @@ public final class MaximumPurpleClient {
         Minecraft mc = Minecraft.getInstance();
         if (mc.level != null && mc.level.getPlayerByUUID(scene.ownerId) instanceof AbstractClientPlayer owner) {
             MaximumPurpleAnimation.stop(owner);
+            com.kira.jujutsuneon.rbx.PlayerAnimations.stop(owner, "max_purple", 0.6);
         }
     }
 
@@ -527,10 +544,37 @@ public final class MaximumPurpleClient {
         else {
             int i = 0;
             while (t > kt[i + 1]) i++;
-            a = Mth.lerp((t - kt[i]) / (kt[i + 1] - kt[i]), ka[i], ka[i + 1]);
+            // сплайн, а не ломаная: скорость между витками меняется плавно, без толчков
+            double u = (t - kt[i]) / (kt[i + 1] - kt[i]);
+            double p0 = i > 0 ? ka[i - 1] : 2.0 * ka[0] - ka[1], p3 = i + 2 < ka.length ? ka[i + 2] : 2.0 * ka[4] - ka[3];
+            a = catmull(p0, ka[i], ka[i + 1], p3, u);
         }
-        if (t > RING_FROM) a += (Math.min(t, T_RING_OPEN + 16) - RING_FROM) * OMEGA_RING;
-        if (t > T_RING_OPEN + 16) a += (t - T_RING_OPEN - 16) * OMEGA_RING * 0.2;
+        if (t > RING_FROM) {
+            a += ringTurn(t);
+            // Фаза подгоняется незаметно за всё время кольца, чтобы вращение остановилось ровно там,
+            // где шары и должны встать: Красный — вправо от игрока, Синий — напротив.
+            double end = ka[4] + ringTurn(RING_STOP);
+            double corr = Mth.wrapDegrees(Math.toDegrees(-end)) * Math.PI / 180.0;
+            a += corr * smooth(win(t, RING_FROM, RING_STOP));
+        }
+        return a;
+    }
+
+    /** Кольцо тормозит плавно (скорость спадает по smoothstep до нуля), без рывка и «инерции». */
+    private static final double RING_BRAKE = T_RING_OPEN - 20;
+    private static final double RING_STOP = T_RING_OPEN + 10;
+
+    /** Угол, пройденный в кольце с RING_FROM до t. */
+    private static double ringTurn(double t) {
+        double a = (Math.min(t, RING_BRAKE) - RING_FROM) * OMEGA_RING;
+        if (t > RING_BRAKE) {
+            double len = RING_STOP - RING_BRAKE;
+            double u = clamp01((t - RING_BRAKE) / len);
+            // скорость (1-u)^3(1+3u): торможение начинается мягко, большую часть пути шары уже медленные,
+            // к концу скорость и ускорение спадают до нуля
+            double u2 = u * u, u3 = u2 * u;
+            a += OMEGA_RING * len * (u - 2.0 * u3 + 2.0 * u3 * u - 0.6 * u3 * u2);
+        }
         return a;
     }
 
@@ -544,17 +588,14 @@ public final class MaximumPurpleClient {
         double a = chaseAngle(t) + (blue ? chaseGap(t) : 0.0);
         double ringK = smooth(win(t, RING_FROM - 6, RING_FROM));
         double radius = Mth.lerp(ringK, CHASE_R + 0.35 * Math.sin(t * 0.13 + (blue ? 1.7 : 0.0)), 3.0);
+        // при торможении кольцо чуть расходится до боковых позиций
+        radius = Mth.lerp(smooth(win(t, RING_BRAKE, RING_STOP)), radius, OPEN_R);
         double squash = Mth.lerp(ringK, 0.85, 1.0);
         double bob = (1.0 - ringK) * 0.45 * Math.sin(a * 2.0 + (blue ? 1.0 : 0.0));
-        Vec3 c = s.core().add(circle(s, a, radius, squash)).add(0.0, bob, 0.0);
-        // Кольцо раскрывается: Красный — вправо от игрока (на экране слева), Синий — влево.
-        double open = smooth(win(t, T_RING_OPEN, T_RING_OPEN + 16));
-        if (open > 0.0) {
-            Vec3 side = s.core().add(s.right.scale(blue ? -OPEN_R : OPEN_R))
-                    .add(0.0, 0.12 * Math.sin(t * 0.17 + (blue ? 2.0 : 0.0)), 0.0);
-            c = lerp(c, side, open);
-        }
-        return c;
+        // Кольцо раскрывается: вращение само плавно останавливается так, что Красный — вправо от игрока
+        // (на экране слева), Синий — влево; дальше только лёгкое «дыхание».
+        double hover = 0.12 * Math.sin(t * 0.17 + (blue ? 2.0 : 0.0)) * smooth(win(t, RING_BRAKE, RING_STOP + 10));
+        return s.core().add(circle(s, a, radius, squash)).add(0.0, bob + hover, 0.0);
     }
 
     /** Шары в «космосе»: по бокам, медленно сходятся, в конце — рывком в центр. */
@@ -703,11 +744,11 @@ public final class MaximumPurpleClient {
         if (t < T_SPAWN - 0.3 || t >= T_MERGED) return null;
         MaxPurpleRefTracks.Track tr = MaxPurpleRefTracks.at(t);
         if (tr != null) return trackedOrb(s, tr, t, true);
-        if (t < T_RELEASE) return bluePathPos(s, t);
+        if (t < T_RELEASE) return blueHand(s, t);
         if (t < TR_SKY.from()) {
             // Синий брошен — по спирали уходит ввысь (за кадр)
-            Vec3 top = bluePathPos(s, T_RELEASE);
-            Vec3 b1 = s.at(-2.5, -7.0, 25.0);
+            Vec3 top = blueHand(s, T_RELEASE);
+            Vec3 b1 = s.at(5.0, -3.0, 25.0); // вперёд и вверх — туда, куда его вытолкнула рука
             double p = win(t, T_RELEASE, 66);
             Vec3 base = lerp(top, b1, easeOut(p));
             Vec3 pos = base.add(spiralAround(s, b1.subtract(top), p, 3.0, 1.7 * smooth(win(t, T_RELEASE, 46))));
@@ -728,18 +769,48 @@ public final class MaximumPurpleClient {
 
     /** #384 референса — рождение Красного (до этого у лица ничего красного нет). */
     private static final double RED_BORN = 206 / 3.0;
+    /** 2,9 с: маленький Красный загорается над кончиком поднятого пальца и растёт до выстрела. */
+    private static final double RED_TIP_FROM = 58.0;
 
-    /** Правый кулак у подбородка (поза #320–414): там рождается Красный. */
+    /** Над кончиком указательного пальца поднятой вверх правой руки: там рождается Красный.
+     *  После выстрела — точка, где он был в момент выстрела (рука уже опускается, шар улетает сам). */
     private static Vec3 redFist(Scene s, double t) {
-        return s.atP(0.32, 0.12, 1.58, t);
+        if (t >= T_RED_FIRE && s.redTip != null) return s.redTip;
+        Minecraft mc = Minecraft.getInstance();
+        if (mc.level != null && mc.level.getPlayerByUUID(s.ownerId) instanceof AbstractClientPlayer p) {
+            Vec3 tip = com.kira.jujutsuneon.rbx.PlayerAnimations.jointWorld(p, "RightHand", mc.getFrameTime(), 0.24);
+            if (tip != null) {
+                if (t < T_RED_FIRE) s.redTip = tip;
+                return tip;
+            }
+        }
+        return s.atP(0.05, 0.36, 2.25, t);
+    }
+
+    /**
+     * Синий до броска — в правой ладони (референс: рождается в руке и чуть подлетает над ней, рука ведёт его
+     * по дуге и выталкивает). После броска — точка, где ладонь его отпустила.
+     */
+    private static Vec3 blueHand(Scene s, double t) {
+        if (t >= T_RELEASE && s.blueTip != null) return s.blueTip;
+        Minecraft mc = Minecraft.getInstance();
+        if (mc.level != null && mc.level.getPlayerByUUID(s.ownerId) instanceof AbstractClientPlayer p) {
+            Vec3 palm = com.kira.jujutsuneon.rbx.PlayerAnimations.jointWorld(p, "RightHand", mc.getFrameTime(), 0.3);
+            if (palm != null) {
+                Vec3 pos = palm.add(0.0, 0.2 * smooth(win(t, T_SPAWN, T_SPAWN + 8)), 0.0);
+                if (t < T_RELEASE) s.blueTip = pos;
+                return pos;
+            }
+        }
+        return bluePathPos(s, t);
     }
 
     /** Позиция Красного или null. */
     private static Vec3 redPos(Scene s, double t) {
-        if (t < RED_BORN - 0.4 || t >= T_MERGED) return null;
+        if (t < RED_TIP_FROM || t >= T_MERGED) return null;
         MaxPurpleRefTracks.Track tr = MaxPurpleRefTracks.at(t);
         if (tr != null) return trackedOrb(s, tr, t, false);
-        // Кулак поднятой согнутой руки — на уровне головы рядом с лицом.
+        // Над пальцем поднятой вверх руки.
         Vec3 top = redFist(s, t);
         if (t < T_RED_FIRE) return top;
         if (t < TR_SKY.from()) {
@@ -754,7 +825,8 @@ public final class MaximumPurpleClient {
     private static float redRadius(Scene s, double t) {
         MaxPurpleRefTracks.Track tr = MaxPurpleRefTracks.at(t);
         if (tr != null) return trackedRadius(s, tr, t, false);
-        if (t < T_RED_FIRE) return (float) (0.04 + 0.08 * smooth(win(t, RED_BORN - 0.4, RED_BORN + 0.6)) + 0.01 * Math.sin(t * 1.7));
+        if (t < T_RED_FIRE) return (float) (0.03 + 0.05 * smooth(win(t, RED_TIP_FROM, RED_BORN - 2.0))
+                + 0.04 * smooth(win(t, RED_BORN - 0.4, RED_BORN + 0.6)) + 0.01 * Math.sin(t * 1.7));
         if (t < CHASE_FROM) return (float) (0.10 + 0.22 * easeOut(win(t, 69, 90)));
         if (t < T_SPACE) return (float) (0.32 + 0.06 * smooth(win(t, CHASE_FROM, CHASE_FROM + 20)));
         return 0.42f;
@@ -944,23 +1016,27 @@ public final class MaximumPurpleClient {
             // 11,4–14,1 с: снизу — кольцо, игрок поднимается к центру, кольцо раскрывается
             // (референс 120 к/с #1370–1683: камера чуть ниже кольца, почти горизонтально, кольцо ~0,6 ширины кадра;
             //  игрок входит в кадр снизу ~12,3 с и поднимается под кольцо)
-            ck(RING_FROM, A_CORE, 4.2, -0.6, -1.3, A_CORE, 0.0, 0.0, -0.3, 70f, 0f, true),
-            ck(250, A_CORE, 4.8, 0.0, -1.5, A_CORE, 0.0, 0.0, -0.6, 70f, 0f, false),
-            ck(266, A_CORE, 5.6, 0.2, -1.6, A_CORE, 0.0, 0.0, -0.9, 70f, 0f, false),
-            ck(283, A_CORE, 6.2, 0.2, -1.7, A_CORE, 0.0, 0.0, -1.0, 70f, 0f, false),
+            // кольцо в верхней половине кадра, низ кадра — там, откуда поднимается игрок (виден с 12,25 с)
+            ck(RING_FROM, A_CORE, 4.2, -0.6, -1.3, A_CORE, 0.0, 0.0, -1.5, 70f, 0f, true),
+            ck(250, A_CORE, 4.8, 0.0, -1.5, A_CORE, 0.0, 0.0, -2.0, 70f, 0f, false),
+            ck(266, A_CORE, 5.6, 0.2, -1.6, A_CORE, 0.0, 0.0, -2.1, 70f, 0f, false),
+            ck(283, A_CORE, 6.2, 0.2, -1.7, A_CORE, 0.0, 0.0, -2.0, 70f, 0f, false),
             // 15,25–16,55 с: «космос» — Красный слева, Синий справа, ядро растёт
             ck(916 / 3.0, A_CORE, 6.6, 0.0, -0.3, A_CORE, 0.0, 0.0, 0.0, 62f, -4f, true),
             ck(331, A_CORE, 5.0, 0.0, -0.15, A_CORE, 0.0, 0.0, 0.0, 58f, -2f, false),
             // 16,8–17,45 с: один большой фиолетовый шар, белый вихрь
             ck(336, A_CORE, 3.6, 0.0, 0.0, A_CORE, 0.0, 0.0, 0.0, 70f, 0f, true),
             ck(349, A_CORE, 1.9, 0.0, 0.0, A_CORE, 0.0, 0.0, 0.0, 82f, 8f, false),
-            // 17,45–18,3 с (референс #2081–2186, один план): спереди-сверху на опущенную голову, шар за спиной;
-            // камера опускается к груди (руки над головой), потом снова сверху — игрок откидывается назад
-            ck(1048 / 3.0, A_PLAYER, 0.95, 0.0, 3.2, A_PLAYER, -0.2, 0.0, 1.45, 70f, 0f, true),
-            ck(355.3, A_PLAYER, 1.05, 0.1, 2.65, A_PLAYER, -0.1, 0.0, 1.55, 70f, 0f, false),
-            ck(359.3, A_PLAYER, 1.35, 0.0, 1.75, A_PLAYER, 0.0, 0.0, 1.6, 70f, 0f, false),
-            ck(361.8, A_PLAYER, 1.25, -0.2, 2.55, A_PLAYER, -0.25, 0.0, 1.05, 72f, 0f, false),
-            ck(366.0, A_PLAYER, 1.35, -0.3, 2.8, A_PLAYER, -0.3, 0.0, 0.95, 74f, 0f, false),
+            // 17,3–17,85 с (референс): камера сзади у затылка, чуть ниже макушки, смотрит вверх на шар;
+            // потом чуть отъезжает — руки через стороны вскидываются над головой
+            ck(1048 / 3.0, A_PLAYER, -0.75, 0.0, 1.3, A_CORE, 0.0, 0.0, 0.0, 72f, 0f, true),
+            ck(353.0, A_PLAYER, -0.85, 0.1, 1.5, A_CORE, 0.0, 0.0, 0.0, 72f, 0f, false),
+            ck(357.0, A_PLAYER, -1.05, 0.15, 1.3, A_PLAYER, 0.0, 0.0, 2.4, 74f, 0f, false),
+            // 17,9 с: смена плана — спереди, чуть ниже лица, руки над головой, за ним вихрь
+            ck(358.0, A_PLAYER, 1.6, 0.0, 0.5, A_PLAYER, 0.0, 0.0, 1.7, 72f, 0f, true),
+            // 18,0–18,2 с: неподвижно спереди-снизу, круто вверх — ремень и свисающие ноги, голова скрыта грудью
+            ck(359.6, A_PLAYER, 0.8, 0.0, -1.1, A_PLAYER, -0.1, 0.0, 1.3, 74f, 0f, true),
+            ck(366.0, A_PLAYER, 0.8, 0.0, -1.1, A_PLAYER, -0.1, 0.0, 1.3, 74f, 0f, false),
     };
 
     private static Vec3 anchor(Scene s, int a, double f, double r, double u, double t) {
@@ -1117,6 +1193,12 @@ public final class MaximumPurpleClient {
 
     @SubscribeEvent(priority = EventPriority.HIGHEST)
     public static void onRenderHand(RenderHandEvent event) {
+        if (cameraEntity != null) event.setCanceled(true);
+    }
+
+    /** Рамка выделения блока под игроком не мелькает в кадре катсцены. */
+    @SubscribeEvent(priority = EventPriority.HIGHEST)
+    public static void onHighlight(RenderHighlightEvent.Block event) {
         if (cameraEntity != null) event.setCanceled(true);
     }
 
@@ -1477,7 +1559,7 @@ public final class MaximumPurpleClient {
 
     /** Синий во вступлении 0,67–3,0 с: вспышка-кольцо, вихрь, разряды, бросок с белой вспышкой. */
     private static void renderBlueIntro(PoseStack pose, Camera cam, Vec3 camera, Scene s, double t, Vec3 blue) {
-        if (t > 50.0) return;
+        if (t > 62.0) return;
         Vec3 toCam = blue == null ? Vec3.ZERO : camera.subtract(blue).normalize();
         // #58–67: тонкое ярко-белое кольцо вокруг поднятой кисти, расширяется почти во весь кадр
         if (blue != null && t >= T_SPAWN - 0.2 && t < 16.5) {
@@ -1496,8 +1578,7 @@ public final class MaximumPurpleClient {
             // в начале взрыв шире кадра (#63–71), потом плотный клубок r≈1,1 блока
             float radius = (float) (Mth.lerp(smooth(win(t, 15.6, 17.0)), 0.3 + 1.5 * grow, 1.05)
                     + 0.15 * smooth(win(t, 28.0, 32.0)) - 0.25 * smooth(win(t, 38.0, 41.0)));
-            Vec3 axis = new Vec3(0.25 * Math.sin(t * 0.07), 1.0, 0.3).normalize();
-            liquidVortex(pose, cam, camera, blue, axis, radius, t, k, 17, 11);
+            blueSplashVortex(pose, cam, camera, s, blue, radius, t, k);
             // #106+: тёмно-синие ошмётки отлетают влево-вниз
             float debris = env(t, 21.5, T_RELEASE, 1.0, 1.0);
             for (int i = 0; i < 8 && debris > 0.0f; i++) {
@@ -1540,7 +1621,7 @@ public final class MaximumPurpleClient {
             }
         }
         // #231–236: тонкое белое кольцо у кисти + белые лучи-копья, кольцо расширяется
-        Vec3 rel = bluePathPos(s, T_RELEASE);
+        Vec3 rel = blueHand(s, T_RELEASE);
         float ring = env(t, T_RELEASE + 0.4, T_RELEASE + 2.2, 0.1, 0.8);
         if (ring > 0.0f) {
             float r = (float) (0.3 + 1.6 * easeOut(win(t, T_RELEASE + 0.4, T_RELEASE + 1.8)));
@@ -1558,10 +1639,116 @@ public final class MaximumPurpleClient {
             }
         }
         // #237–255: белое гаснет в бело-голубой водоворот — крупные мягкие ленты и белые шарики вокруг персонажа
-        float swirl = env(t, T_RELEASE + 1.2, 48.5, 0.8, 3.0);
-        if (swirl > 0.0f) {
-            liquidVortex(pose, cam, camera, s.atP(0.0, 0.0, 1.1, t), new Vec3(0.1, 1.0, 0.2), 1.9f, t, swirl * 0.85f, 41, 9);
+        // бросок (референс 1,9–2,7 с): брызги на весь кадр, разлетаются и тают; на земле кляксы
+        splashBurst(pose, cam, camera, rel, t, T_RELEASE + 0.2, 2.0, 15, 41.0, 2.6, 0.5f, 1.6f, 15.0, 1.0f);
+        splashBurst(pose, cam, camera, s.atP(0.0, 0.0, 1.1, t), t, T_RELEASE + 1.0, 3.0, 10, 47.0, 2.2, 0.4f, 1.2f, 16.0, 0.9f);
+        groundSplats(pose, camera, s, t);
+    }
+
+    /**
+     * Брызги-«жидкость» (cel): каждая рождается в [t0, t0 + spread], вылетает из center, крутится, растёт и тает.
+     * Всё считается от t — без состояния, одинаково на любом кадре.
+     */
+    private static void splashBurst(PoseStack pose, Camera cam, Vec3 camera, Vec3 center, double t, double t0, double spread,
+                                    int count, double seed, double speed, float size0, float size1, double life, float alpha) {
+        if (t < t0 || t > t0 + spread + life) return;
+        for (int i = 0; i < count; i++) {
+            double h0 = hash(seed + i * 1.37), h1 = hash(seed + i * 2.71 + 0.5), h2 = hash(seed + i * 4.13 + 1.0);
+            double age = t - (t0 + spread * h0);
+            if (age < 0.0 || age > life) continue;
+            double u = age / life;
+            Vec3 dir = hashDir(seed + i * 3.3);
+            Vec3 p = center.add(dir.scale(speed * (0.5 + 0.8 * h1) * easeOut(u)));
+            float size = Mth.lerp((float) easeOut(u), size0, size1) * (float) (0.6 + 0.8 * h2);
+            float a = alpha * (float) (smooth(u / 0.12) * (1.0 - smooth((u - 0.5) / 0.5))) * nearFade(camera, p, size);
+            float roll = (float) (h1 * Math.PI * 2.0 + (h2 - 0.5) * 2.0 * u);
+            billboard(pose, cam, camera, p, size, roll, TEX_BSPLASH[(int) (h0 * TEX_BSPLASH.length) % TEX_BSPLASH.length],
+                    1.0f, 1.0f, 1.0f, a, false);
         }
+    }
+
+    /**
+     * Синий в руке (референс 0,5–1,9 с): водоворот из штрихов вокруг шара, от него постоянно срываются брызги,
+     * вокруг — светящиеся голубые точки; в начале — вспышка и взрыв брызг.
+     */
+    private static void blueSplashVortex(PoseStack pose, Camera cam, Vec3 camera, Scene s, Vec3 blue, float radius, double t, float k) {
+        if (k <= 0.01f) return;
+        // вспышка рождения (0,5 с): бело-голубой свет почти во весь кадр
+        float flash = env(t, 13.6, 17.0, 0.4, 2.4);
+        billboard(pose, cam, camera, blue, 3.2f * flash, 0f, TEX_BLOOM, 0.75f, 0.9f, 1.0f, 0.9f * flash, true);
+        // взрыв брызг (0,6–0,8 с)
+        splashBurst(pose, cam, camera, blue, t, 14.2, 2.5, 16, 17.0, 1.7, 0.4f, 1.5f, 12.0, 1.0f);
+        // водоворот: два слоя штрихов крутятся навстречу, дышат
+        float sw = radius * (1.6f + 0.15f * (float) Math.sin(t * 0.4));
+        billboard(pose, cam, camera, blue, sw, (float) (-t * 0.38), TEX_BSWIRL, 1f, 1f, 1f, 0.95f * k, false);
+        billboard(pose, cam, camera, blue, sw * 0.7f, (float) (t * 0.55 + 1.0), TEX_BSWIRL, 1f, 1f, 1f, 0.7f * k, false);
+        billboard(pose, cam, camera, blue, radius * 1.4f, 0f, TEX_BLOOM, 0.3f, 0.6f, 1.0f, 0.5f * k, true);
+        // поток брызг, срывающихся с водоворота: новая каждые ~1,4 тика, по касательной
+        double from = 16.0, step = 1.4, life = 9.0;
+        int n0 = Math.max(0, (int) Math.floor((t - life - from) / step)), n1 = (int) Math.floor((t - from) / step);
+        for (int j = n0; j <= n1; j++) {
+            double birth = from + j * step;
+            double age = t - birth;
+            if (age < 0.0 || age > life) continue;
+            double u = age / life;
+            double h = hash(j * 1.91 + 5.0);
+            double ang = j * 2.39996 - t * 0.38;
+            Vec3 out = s.right.scale(Math.cos(ang)).add(new Vec3(0, 1, 0).scale(Math.sin(ang) * 0.8))
+                    .add(s.forward.scale((h - 0.5) * 0.8)).normalize();
+            Vec3 p = blue.add(out.scale(radius * (0.5 + 1.4 * easeOut(u))));
+            float size = radius * (float) (0.35 + 0.5 * easeOut(u)) * (float) (0.7 + 0.6 * h);
+            float a = k * (float) (smooth(u / 0.15) * (1.0 - smooth((u - 0.45) / 0.55))) * nearFade(camera, p, size);
+            billboard(pose, cam, camera, p, size, (float) (ang + 1.57 + h), TEX_BSPLASH[j % TEX_BSPLASH.length],
+                    1f, 1f, 1f, a, false);
+        }
+        // светящиеся точки, медленно разлетаются
+        for (int i = 0; i < 12; i++) {
+            double h = hash(i * 11.1 + 3.0);
+            double lifeT = (t * 0.035 + h) % 1.0;
+            Vec3 p = blue.add(hashDir(i * 2.9 + 4.0).scale(radius * (0.9 + 1.6 * lifeT)));
+            float a = (float) Math.sin(Math.PI * lifeT) * k;
+            float size = radius * (float) (0.08 + 0.07 * hash(i + 9.0));
+            billboard(pose, cam, camera, p, size * 2.6f, 0f, TEX_BLOOM, 0.35f, 0.7f, 1.0f, 0.75f * a, true);
+            billboard(pose, cam, camera, p, size, 0f, TEX_BLOOM, 1.0f, 1.0f, 1.0f, a, true);
+        }
+    }
+
+    /** Брызга у самого объектива не растягивается на пол-экрана бледным пятном — тает по мере подлёта. */
+    private static float nearFade(Vec3 camera, Vec3 p, float size) {
+        return (float) smooth((p.distanceTo(camera) - 0.45 - 0.55 * size) / 0.9);
+    }
+
+    /** Тёмно-синие кляксы на земле вокруг ног (0,7–2,8 с). */
+    private static void groundSplats(PoseStack pose, Vec3 camera, Scene s, double t) {
+        float a = env(t, 15.0, 57.0, 2.0, 8.0);
+        if (a <= 0.0f) return;
+        for (int i = 0; i < 7; i++) {
+            double born = i < 3 ? 15.0 + i * 2.0 : T_RELEASE + (i - 3) * 1.5;
+            if (t < born) continue;
+            double grow = easeOut(win(t, born, born + 4.0));
+            double ang = hash(i * 3.7 + 1.0) * Math.PI * 2.0, d = 0.6 + 1.6 * hash(i * 5.3);
+            Vec3 c = s.at(Math.cos(ang) * d, Math.sin(ang) * d, 0.02 + i * 0.002);
+            float size = (float) ((0.6 + 0.8 * hash(i * 7.1)) * grow);
+            groundQuad(pose, camera, c, size, (float) (hash(i * 9.9) * 6.28), TEX_BSPLAT, 0.95f * a);
+        }
+    }
+
+    /** Квадрат на земле (горизонтальный). */
+    private static void groundQuad(PoseStack pose, Vec3 camera, Vec3 center, float size, float roll, ResourceLocation texture, float alpha) {
+        if (alpha <= 0.003f || size <= 0.0f) return;
+        double h = size * 0.5, c = Math.cos(roll) * h, sn = Math.sin(roll) * h;
+        double x = center.x - camera.x, y = center.y - camera.y, z = center.z - camera.z;
+        RenderSystem.setShader(GameRenderer::getPositionTexColorShader);
+        RenderSystem.setShaderTexture(0, texture);
+        HollowPurpleReferenceClient.mpAlphaBlend();
+        Matrix4f m = pose.last().pose();
+        BufferBuilder buf = Tesselator.getInstance().getBuilder();
+        buf.begin(VertexFormat.Mode.QUADS, DefaultVertexFormat.POSITION_TEX_COLOR);
+        quadVertex(buf, m, x - c + sn, y, z - sn - c, 0f, 0f, 1f, 1f, 1f, alpha);
+        quadVertex(buf, m, x - c - sn, y, z - sn + c, 0f, 1f, 1f, 1f, 1f, alpha);
+        quadVertex(buf, m, x + c - sn, y, z + sn + c, 1f, 1f, 1f, 1f, 1f, alpha);
+        quadVertex(buf, m, x + c + sn, y, z + sn - c, 1f, 0f, 1f, 1f, 1f, alpha);
+        BufferUploader.drawWithShader(buf.end());
     }
 
     private static void renderScene(PoseStack pose, Camera cam, Vec3 camera, Scene s, double t, boolean isLocal) {
@@ -1722,20 +1909,15 @@ public final class MaximumPurpleClient {
             RenderSystem.setShader(GameRenderer::getPositionColorShader);
             HollowPurpleReferenceClient.mpPurple(pose, camera, c, s.forward, (float) (0.9 + 1.4 * g), 1.0f, t, 1.0f, 1.0f);
             renderCore(pose, cam, camera, c, merged, t, (float) (1.8 + 1.5 * g));
-            float swirl = env(t, T_SWIRL, T_BEHIND, 1.0, 1.0);
-            billboard(pose, cam, camera, c, (float) (3.0 + 7.0 * g), (float) (t * 0.35), TEX_SWIRL, 1f, 1f, 1f, 0.95f * swirl, false);
-            billboard(pose, cam, camera, c, (float) (2.4 + 6.0 * g), (float) (-t * 0.5 + 1.0), TEX_SWIRL, 1f, 0.9f, 1f, 0.6f * swirl, true);
         }
 
-        // ---- 17,5–18,2 с: огромная фиолетовая спираль перед игроком
+        // ---- 17,5–18,2 с: огромный фиолетовый шар перед игроком (без спирали — по просьбе)
         float big = env(t, T_BEHIND, T_MANGA_C + 3, 1.0, 3.0);
         if (big > 0.0f) {
             Vec3 c = bigSpherePos(s, t);
             double g = win(t, T_BEHIND, T_EXPLODE);
             float size = (float) (6.6 + 1.6 * g);
             billboard(pose, cam, camera, c, size * 1.5f, 0f, TEX_BLOOM, 0.75f, 0.2f, 1.0f, 0.7f * big, true);
-            billboard(pose, cam, camera, c, size, (float) (t * 0.3), TEX_SWIRL, 1f, 1f, 1f, big, false);
-            billboard(pose, cam, camera, c, size * 0.8f, (float) (-t * 0.45 + 2.0), TEX_SWIRL, 1f, 1f, 1f, 0.55f * big, true);
             RenderSystem.setShader(GameRenderer::getPositionColorShader);
             HollowPurpleReferenceClient.mpAdditiveBlend();
             HollowPurpleReferenceClient.mpSphere(pose, camera, c, size * 0.5f, 18, 28, 8, 9, 0.35f * big, 0.08f, t, 501.0);
@@ -1948,7 +2130,7 @@ public final class MaximumPurpleClient {
         }
         // бросок: синий взрыв
         if (t >= T_RELEASE && t < T_RELEASE + 2) {
-            Vec3 top = bluePathPos(s, T_RELEASE);
+            Vec3 top = blueHand(s, T_RELEASE);
             for (int i = 0; i < 12; i++) {
                 boolean white = RNG.nextInt(3) == 0;
                 spark(top, rndVec(0.3), 0.22f, white ? 0.9f : 0.3f, white ? 0.95f : 0.6f, 1.0f, 8, 0.8);
@@ -2167,27 +2349,23 @@ public final class MaximumPurpleClient {
             fillColor(g, w, h, 0.9f, 0xF7F2FA);
             drawCracks(g, w, h, t);
         }
-        // 16,97–17,43 с: огромный закрученный фиолетовый шар (центр белый, лепестки с тёмно-фиолетовой кромкой),
-        // пульсирует; по углам виден мир
-        float swirl = env(t, 1018 / 3.0, T_BEHIND - 0.5, 0.3, 1.0);
-        if (swirl > 0.0f) {
-            float pulse = 0.5f + 0.5f * (float) Math.sin(t * 1.6);
-            fillColor(g, w, h, (0.25f + 0.15f * pulse) * swirl, 0xFFF0FF);
-            float sc = (float) (1.05 + 0.08 * pulse + 0.25 * win(t, 1018 / 3.0, T_BEHIND));
-            drawSpinningTint(g, w, h, TEX_SWIRL, (float) (t * 0.32), sc * 1.04f, 0.35f, 0.08f, 0.6f, 0.8f * swirl);
-            drawSpinning(g, w, h, TEX_SWIRL, (float) (t * 0.32), sc, 0.9f * swirl);
-            drawSpinning(g, w, h, TEX_BLOOM, 0f, sc * 0.55f, (0.55f + 0.3f * pulse) * swirl);
-        }
-
         // референс 120 к/с #2187–2190: штриховка и кисть «пистолетом»; #2191–2201: белый «X» и контур кисти; #2202 — белый
-        if (t >= 366.0 && t < 366.7) {
-            drawFrame(g, w, h, MANGA_D1, t - 366.0);
-        } else if (t >= 366.7 && t < 368.7) {
-            drawFrame(g, w, h, MANGA_D2, (t - 366.7) * 0.3);
+        // Манга-кадры удара: сам игрок, зависший в воздухе буквой «Т» (его модель в текущей позе, спереди),
+        // рисунком пером — белый контур, тело тушью. Сначала на чёрно-белых линиях со штриховкой, потом рядом
+        // с «X»; ~0,18 с каждый с лёгким наездом.
+        if (t >= 362.5 && t < 366.0) {
+            double k = t - 362.5;
+            drawFrame(g, w, h, MANGA_D1, k * 0.3);
+            drawOutlineAt(g, w, h, 0.6f + 0.012f * (float) k, 0.0f, -h * 0.19f, 180.0f);
+            drawFrame(g, w, h, TEX_HATCH, 0.0);
+        } else if (t >= 366.0 && t < 369.5) {
+            double k = t - 366.0;
+            drawFrame(g, w, h, MANGA_D2, k * 0.3);
+            drawOutlineAt(g, w, h, 0.62f + 0.012f * (float) k, w * 0.12f, -h * 0.19f, 180.0f);
         }
 
-        // 18,43 с (кадр 1106): сразу белый экран, пока дорезается кратер
-        if (t >= 368.7) fillColor(g, w, h, 1.0f, 0xFFFFFF);
+        // сразу белый экран, пока дорезается кратер
+        if (t >= 369.5) fillColor(g, w, h, 1.0f, 0xFFFFFF);
     }
 
     /** 3,40 с (кадр 204): чёрный кадр — слева белая звезда-крест, справа белый силуэт игрока. */
@@ -2316,6 +2494,19 @@ public final class MaximumPurpleClient {
         p.xRotO = xRotO;
         p.yHeadRot = head;
         p.yHeadRotO = headO;
+    }
+
+    /** Контур игрока «мелом»: белый силуэт со сдвигами по кругу, сверху тот же силуэт чёрным. */
+    private static void drawOutlineAt(GuiGraphics g, int w, int h, float zoom, float dx, float dy, float bodyYaw) {
+        float o = Math.max(2.0f, h / 200.0f);
+        for (int i = 0; i < 8; i++) {
+            double a = i * Math.PI / 4.0;
+            drawSilhouetteAt(g, w, h, WHITE_TINT, WHITE_TINT, WHITE_TINT, zoom,
+                    dx + (float) Math.cos(a) * o, dy + (float) Math.sin(a) * o, bodyYaw);
+        }
+        // белые копии лежат на той же глубине — чёрная иначе проигрывает им тест глубины
+        RenderSystem.clear(GL11.GL_DEPTH_BUFFER_BIT, Minecraft.ON_OSX);
+        drawSilhouetteAt(g, w, h, 0.0f, 0.0f, 0.0f, zoom, dx, dy, bodyYaw);
     }
 
     private static void fillColor(GuiGraphics g, int w, int h, float alpha, int rgb) {

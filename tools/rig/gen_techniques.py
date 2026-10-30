@@ -1,0 +1,653 @@
+"""Анимации техник Годжо для модели R15, нарисованные позами (как в Blender/Moon Animator для Roblox).
+
+  python3 tools/rig/gen_techniques.py        — пишет animations/player/gojo.animation.json и проверяет позы
+  python3 tools/rig/keys.py src/main/resources/assets/jujutsu_neon/animations/player/gojo.animation.json \
+      animation.player.red_cast 0.15,0.65     — крупные кадры ключевых поз
+  python3 tools/rig/preview.py anim <тот же файл> animation.player.red_cast --views back,side,front — гифка
+
+Принципы (гайд Roblox-аниматоров, конспект пользователя):
+  1. Антиципация: перед действием замах в обратную сторону и присед.
+  2. Overlapping action: таз начинает, корпус догоняет, плечо, предплечье, кисть приходят последними (LAG).
+  3. Дуги: на пути кисти — промежуточный ключ (рука идёт по дуге, а не по прямой).
+  4. Микро-стоп: в момент выстрела/удара поза держится 2–3 кадра (hold), потом отдача.
+  5. Крайние позы всем телом: стойка ног, присед (LowerTorso вниз), скрут корпуса, наклон.
+  6. Руки всё время перед глазами (вид от первого лица — руки модели) и не проходят сквозь голову (check()).
+
+Оси Blockbench для R15 (проверено tools/rig/where.py):
+  рука/бедро X < 0 — вперёд/вверх; предплечье X < 0 — сгиб локтя; голень X > 0 — сгиб колена;
+  правая рука: Z > 0 — наружу, Y < 0 — кисть к центру груди (левая рука — знаки Y и Z наоборот);
+  корпус X > 0 — наклон вперёд, Y > 0 — скрут вправо, Z > 0 — наклон влево; голова X > 0 — взгляд вниз;
+  LowerTorso.pos: X > 0 — влево, Y > 0 — вверх, Z > 0 — назад (пиксели).
+
+Клипы отсюда convert_pa.py больше не создаёт (MADE_HERE).
+"""
+import json
+import math
+import os
+import sys
+import tempfile
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from anim_dsl import Anim, write  # noqa: E402
+
+ZERO = (0.0, 0.0, 0.0)
+
+# Насколько раньше (−) или позже (+) ключа приходит кость: корпус ведёт, кисть догоняет.
+LAG = {
+    'LowerTorso': -0.05, 'LowerTorso.pos': -0.05,
+    'UpperTorso': -0.03,
+    'Head': 0.02,
+    'RightUpperArm': 0.0, 'LeftUpperArm': 0.0,
+    'RightLowerArm': 0.02, 'LeftLowerArm': 0.02,
+    'RightHand': 0.04, 'LeftHand': 0.04,
+}
+
+REST = {
+    'LowerTorso.pos': ZERO, 'LowerTorso': ZERO, 'UpperTorso': ZERO, 'Head': ZERO,
+    'RightUpperArm': (0, 0, 4), 'RightLowerArm': (-6, 0, 0), 'RightHand': ZERO,
+    'LeftUpperArm': (0, 0, -4), 'LeftLowerArm': (-6, 0, 0), 'LeftHand': ZERO,
+    'RightUpperLeg': ZERO, 'RightLowerLeg': ZERO, 'RightFoot': ZERO,
+    'LeftUpperLeg': ZERO, 'LeftLowerLeg': ZERO, 'LeftFoot': ZERO,
+}
+
+# Конец техники — мягкая стойка (дальше fade_out в обычную анимацию).
+SETTLE = {
+    'LowerTorso.pos': (0, -0.4, 0), 'LowerTorso': ZERO, 'UpperTorso': (2, 0, 0), 'Head': ZERO,
+    'RightUpperArm': (-10, -4, 8), 'RightLowerArm': (-18, 0, 0), 'RightHand': ZERO,
+    'LeftUpperArm': (-6, 4, -8), 'LeftLowerArm': (-14, 0, 0), 'LeftHand': ZERO,
+    'RightUpperLeg': (-4, 0, 3), 'RightLowerLeg': (6, 0, 0), 'RightFoot': (-2, 0, -3),
+    'LeftUpperLeg': (-2, 0, -3), 'LeftLowerLeg': (6, 0, 0), 'LeftFoot': (-4, 0, 3),
+}
+
+
+def legs(stance, crouch):
+    """Ноги и таз: stance — шаг (−1 правая вперёд … +1 правая назад), crouch — присед 0..1."""
+    r_th = -26 * crouch + 22 * stance
+    l_th = -26 * crouch - 22 * stance
+    r_kn = 10 + 46 * crouch + max(0, -stance) * 18
+    l_kn = 10 + 46 * crouch + max(0, stance) * 18
+    return {
+        'LowerTorso.pos': (0, -0.4 - 3.4 * crouch, 0.6 * crouch),
+        'RightUpperLeg': (r_th, 0, 6 + 4 * crouch),
+        'RightLowerLeg': (r_kn, 0, 0),
+        'RightFoot': (-r_th - r_kn, 0, -6 - 4 * crouch),
+        'LeftUpperLeg': (l_th, 0, -6 - 4 * crouch),
+        'LeftLowerLeg': (l_kn, 0, 0),
+        'LeftFoot': (-l_th - l_kn, 0, 6 + 4 * crouch),
+    }
+
+
+class Keys:
+    """Позы во времени. key(t, ease, pose) ставит ключи всем уже встреченным костям (остальные держат прошлое
+    значение) со сдвигом LAG (overlap=True). hold(dur) — микро-стоп: та же поза ещё dur секунд."""
+
+    def __init__(self, anim):
+        self.a = anim
+        self.cur = {}
+        self.last_t = {}
+        self.t = 0.0
+
+    def _put(self, bone, t, v, ease):
+        t = max(0.0, min(self.a.length, t))
+        lt = self.last_t.get(bone)
+        if lt is not None and t <= lt + 0.01:
+            t = min(self.a.length, lt + 0.02)
+            if t <= lt:
+                return
+        self.last_t[bone] = t
+        if bone.endswith('.pos'):
+            self.a.pos(bone[:-4], t, v, ease)
+        else:
+            self.a.rot(bone, t, v, ease)
+
+    def key(self, t, ease, pose, overlap=True):
+        self.cur.update(pose)
+        for b in sorted(self.cur):
+            lag = LAG.get(b, 0.0) if overlap and t > 0 else 0.0
+            self._put(b, t + lag, self.cur[b], ease)
+        self.t = t
+        return self
+
+    def hold(self, dur):
+        t = self.t + dur
+        for b in sorted(self.cur):
+            self._put(b, max(t, self.last_t.get(b, 0) + 0.02), self.cur[b], 'linear')
+        self.t = t
+        return self
+
+
+def M(*poses):
+    out = {}
+    for p in poses:
+        out.update(p)
+    return out
+
+
+def arms(r_up, r_low, l_up, l_low, r_hand=ZERO, l_hand=ZERO):
+    return {'RightUpperArm': r_up, 'RightLowerArm': (r_low, 0, 0), 'RightHand': r_hand,
+            'LeftUpperArm': l_up, 'LeftLowerArm': (l_low, 0, 0), 'LeftHand': l_hand}
+
+
+def body(pelvis_yaw=0, chest=(0, 0, 0), head=(0, 0, 0)):
+    return {'LowerTorso': (0, pelvis_yaw, 0), 'UpperTorso': chest, 'Head': head}
+
+
+# =========================================================================== Красный
+
+def red_cast():
+    """Обычный Красный, 0,9 с; выстрел (маркер fire) — 0,65 с = тик R_FIRE 13.
+    Замах: шаг правой назад, присед, скрут вправо, правая кисть у груди (видна от первого лица), левая вперёд.
+    Дуга: перед выпадом кисть уходит чуть наружу, потом вперёд. Выпад: скрут влево, рука прямо в прицел.
+    Микро-стоп 0,1 с, отдача (кисть подбрасывает), возврат."""
+    a = Anim('red_cast', 0.9, props={'priority': 'action', 'fade_in': 0.08, 'fade_out': 0.25,
+                                     'look': 0.6, 'aim': 0.6, 'fp': 'arms'})
+    k = Keys(a)
+    k.key(0.0, 'linear', REST)
+    k.key(0.16, 'easeOutCubic', M(legs(0.6, 0.55), body(16, (8, 22, -3), (-4, -30, 2)),
+                                   arms((-34, -26, 22), -100, (-46, 14, -14), -40, (0, 0, -20), (0, 0, 10))))
+    k.key(0.4, 'easeInOutSine', M(legs(0.65, 0.7), body(18, (11, 26, -4), (-5, -34, 2)),
+                                  arms((-32, -30, 24), -104, (-50, 18, -16), -44, (0, 0, -24), (0, 0, 12))))
+    # дуга: кисть уходит наружу и вверх (разгон к выпаду)
+    k.key(0.56, 'easeInOutSine', M(legs(0.5, 0.65), body(10, (10, 18, -3), (-4, -24, 2)),
+                                   arms((-58, -4, 34), -84, (-40, 10, -18), -40, (0, 0, -10), (0, 0, 8))))
+    # выпад: рука прямо вперёд, корпус скручен влево
+    k.key(0.65, 'easeInQuint', M(legs(-0.55, 0.45), body(-10, (12, -26, 2), (-2, 32, -2)),
+                                  arms((-92, 6, -2), -4, (22, -10, -26), -30)))
+    k.hold(0.1)
+    # отдача: кисть подбрасывает, корпус откидывает
+    k.key(0.8, 'easeOutBack', M(body(-8, (-6, -20, 3), (-6, 26, -2)),
+                                arms((-118, 8, -2), -24, (14, -8, -22), -26, (0, 0, 12))))
+    k.key(0.9, 'easeInOutSine', SETTLE, overlap=False)
+    a.marker(0.16, 'spark')
+    a.marker(0.65, 'fire')
+    return a
+
+
+def red_charge():
+    """Удержание X (до 2 с, потом сам начинается Максимальный Красный): сжатие с нарастанием.
+    Правая кисть у груди, левая накрывает её снизу, присед глубже, дрожь сильнее к концу."""
+    a = Anim('red_charge', 2.0, loop='hold', props={'priority': 'action', 'fade_in': 0.12, 'fade_out': 0.2,
+                                                    'look': 0.5, 'fp': 'arms'})
+    k = Keys(a)
+    k.key(0.0, 'linear', REST)
+    k.key(0.25, 'easeOutCubic', M(legs(0.55, 0.45), body(16, (10, 20, -2), (-6, -24, 0)),
+                                   arms((-28, -30, 18), -90, (-24, 34, -12), -86, (0, 0, -30), (0, 0, 30))))
+    t, i = 0.36, 0
+    while t < 1.95:
+        f = (t - 0.36) / 1.6
+        amp = 0.6 + 2.8 * f
+        s = 1 if i % 2 == 0 else -1
+        k.key(round(t, 2), 'easeInOutSine', M(
+            legs(0.55 + 0.1 * f, 0.45 + 0.4 * f),
+            body(16 + 4 * f, (10 + 7 * f + s * amp * 0.4, 20 + 6 * f + s * amp, -2 + s * amp * 0.5),
+                 (-6 - 3 * f, -24 - 4 * f - s * amp * 0.6, 0)),
+            arms((-28 - 4 * f, -30, 18), -90 - 4 * f, (-24 - 4 * f, 34, -12), -86,
+                 (0, 0, -30), (0, 0, 30))), overlap=False)
+        t += 0.1
+        i += 1
+    return a
+
+
+RED_CHARGE_END = M(legs(0.65, 0.85), body(20, (17, 26, -2), (-9, -28, 0)),
+                   arms((-32, -30, 18), -94, (-28, 34, -12), -86, (0, 0, -30), (0, 0, 30)))
+
+
+def _blend(p0, p1, u):
+    """Поза между p0 и p1 (u = 0..1), покомпонентно."""
+    out = {}
+    for b in set(p0) | set(p1):
+        a0 = p0.get(b, p1.get(b)); a1 = p1.get(b, p0.get(b))
+        out[b] = tuple(x + (y - x) * u for x, y in zip(a0, a1))
+    return out
+
+
+def _smooth_move(k, t0, t1, p0, p1, n=6, arc=None):
+    """Один плавный переход p0 → p1 за t0..t1: ключи с линейным сглаживанием по кривой smoothstep —
+    скорость нарастает и спадает один раз за всё движение, без остановок на промежуточных ключах.
+    arc(u) — добавка к позе в середине пути (дуга руки), обращается в ноль на концах."""
+    for i in range(1, n + 1):
+        u = i / n
+        w = u * u * (3 - 2 * u)
+        pose = _blend(p0, p1, w)
+        if arc:
+            for b, v in arc(u).items():
+                pose[b] = tuple(x + y for x, y in zip(pose[b], v))
+        k.key(round(t0 + (t1 - t0) * u, 3), 'linear', pose, overlap=False)
+
+
+def max_red():
+    """Максимальный Красный по референсу (аниме, 1030.mp4), 2,95 с; тики: шар 19, ленты 24, поток 34,
+    вспышка 39, выстрел 40, конец 59.
+    Плавность — главное (пожелание владельца): каждый разворот корпуса — одно движение по smoothstep
+    без рывков и остановок. 0–0,15: из позы зарядки Красного (red_charge) без скачка; 0,15–0,85: корпус
+    разворачивается боком (правое плечо к цели), рука по дуге вытягивается — продолжение линии плеч,
+    горизонтально, голова в цель; 0,95: ладонь «стопом», рождается шар; дальше поза неподвижна, как в
+    референсе. 2,0: выстрел — микро-стоп, лёгкий толчок кисти; 2,25–2,95: плавный возврат."""
+    a = Anim('max_red', 2.95, props={'priority': 'action', 'fade_in': 0.25, 'fade_out': 0.35, 'look': 0.5,
+                                     'aim': 0.45, 'fp': 'arms'})
+    k = Keys(a)
+
+    def side(crouch=0.1, lean=2, nod=6, twist=0):
+        # Разворот почти целиком делает таз (ноги — его дети, поворачиваются вместе с ним), грудь почти не
+        # скручена: при скрутке груди на 35° блоки торса расходились — корпус «отслаивался» от ног.
+        return M(legs(0.0, crouch), body(-72, (lean, -8 + twist, 0), (nod, 80 - twist, 0)))
+
+    SIDE = M(side(), arms((10, 0, 90), -2, (2, 4, -5), -8, (0, 0, 10)))
+    k.key(0.0, 'linear', RED_CHARGE_END, overlap=False)
+    k.key(0.15, 'easeInOutSine', RED_CHARGE_END, overlap=False)
+    # дуга: на полпути локоть сгибается и кисть идёт ниже-наружу, а не по прямой через грудь
+    _smooth_move(k, 0.15, 0.85, RED_CHARGE_END, SIDE, n=7,
+                 arc=lambda u: {'RightLowerArm': (-40 * math.sin(math.pi * u), 0, 0),
+                                'RightUpperArm': (18 * math.sin(math.pi * u), 0, 0)})
+    # ладонь «стоп»: пальцы вверх
+    k.key(0.95, 'easeInOutSine', M(side(), arms((10, 0, 90), -2, (2, 4, -5), -8, (0, 0, 72))), overlap=False)
+    # неподвижная поза; корпус чуть подаётся вперёд, голова опускается (напряжение)
+    k.key(1.5, 'easeInOutSine', M(side(0.14, 4, 9), arms((10, 0, 90), -2, (2, 4, -5), -8, (0, 0, 74))))
+    k.key(1.9, 'easeInOutSine', M(side(0.18, 6, 10, -2), arms((10, 0, 90), -6, (2, 4, -5), -10, (0, 0, 70))))
+    # выстрел: локоть в замок, кисть доворачивается (корпус не дёргается)
+    SHOT = M(side(0.16, 4, 8), arms((10, 0, 91), -1, (2, 4, -5), -8, (0, 0, 80)))
+    k.key(2.0, 'easeInQuint', SHOT, overlap=False)
+    k.hold(0.1)
+    KICK = M(side(0.12, 0, 6), arms((10, 0, 94), -6, (2, 4, -5), -8, (0, 0, 66)))
+    k.key(2.25, 'easeOutCubic', KICK, overlap=False)
+    # плавный возврат одним движением
+    _smooth_move(k, 2.25, 2.95, KICK, SETTLE, n=7,
+                 arc=lambda u: {'RightLowerArm': (-30 * math.sin(math.pi * u), 0, 0)})
+    a.marker(0.95, 'orb')
+    a.marker(1.2, 'ribbons')
+    a.marker(2.0, 'fire')
+    return a
+
+
+# =========================================================================== Синий
+
+def blue_charge():
+    """Удержание Z (1 с до Максимального Синего): руки сходятся перед грудью, пальцы к пальцам, корпус чуть назад,
+    присед нарастает. Держится последним кадром, пока не начнётся Максимальный Синий или не отпустят."""
+    a = Anim('blue_charge', 1.0, loop='hold', props={'priority': 'action', 'fade_in': 0.12, 'fade_out': 0.25,
+                                                     'look': 0.8, 'fp': 'arms'})
+    k = Keys(a)
+    k.key(0.0, 'linear', REST)
+    k.key(0.3, 'easeOutCubic', M(legs(0.3, 0.35), body(-8, (6, -10, 0), (-2, 12, 0)),
+                                  arms((-50, -34, 10), -70, (-50, 34, -10), -70, (0, 0, -30), (0, 0, 30))))
+    k.key(0.65, 'easeInOutSine', M(legs(0.35, 0.55), body(-10, (9, -12, 0), (-3, 14, 0)),
+                                   arms((-58, -40, 8), -62, (-58, 40, -8), -62, (0, 0, -36), (0, 0, 36))))
+    k.key(1.0, 'easeInOutSine', M(legs(0.35, 0.65), body(-10, (10, -12, 0), (-4, 14, 0)),
+                                  arms((-60, -42, 8), -60, (-60, 42, -8), -60, (0, 0, -38), (0, 0, 38))))
+    return a
+
+
+def max_blue():
+    """Максимальный Синий, вход 2 с (сфера формируется 40 тиков): из сведённых рук — рывок назад (замах),
+    потом обе ладони толкают вперёд-вверх, на самом раскрытии сферы — микро-стоп и отдача; дальше max_blue_hold."""
+    a = Anim('max_blue', 2.0, props={'priority': 'action', 'fade_in': 0.15, 'fade_out': 0.3, 'look': 0.8,
+                                     'fp': 'arms'})
+    k = Keys(a)
+    k.key(0.0, 'linear', M(legs(0.35, 0.65), body(-10, (10, -12, 0), (-4, 14, 0)),
+                           arms((-60, -42, 8), -60, (-60, 42, -8), -60, (0, 0, -38), (0, 0, 38))), overlap=False)
+    # замах: руки к груди, корпус назад, глубже присед
+    k.key(0.35, 'easeOutCubic', M(legs(0.45, 0.85), body(-6, (-8, -6, 0), (-8, 8, 0)),
+                                   arms((-18, -30, 26), -100, (-18, 30, -26), -100, (0, 0, -20), (0, 0, 20))))
+    k.key(0.55, 'easeInOutSine', M(body(-6, (-11, -6, 0), (-10, 8, 0)),
+                                   arms((-14, -28, 28), -106, (-14, 28, -28), -106)))
+    # дуга: локти наружу-вверх по пути вперёд
+    k.key(0.7, 'easeInCubic', M(legs(0.1, 0.6), body(-2, (2, 0, 0), (-4, 2, 0)),
+                                arms((-80, -10, 40), -70, (-80, 10, -40), -70)))
+    # толчок обеими ладонями вперёд-вверх
+    k.key(0.82, 'easeInQuint', M(legs(-0.35, 0.55), body(2, (14, 4, 0), (0, -2, 0)),
+                                  arms((-112, -18, 10), -6, (-112, 18, -10), -6, (0, 0, -10), (0, 0, 10))))
+    k.hold(0.12)
+    # отдача: корпус откидывает, руки чуть вверх
+    k.key(1.1, 'easeOutBack', M(legs(-0.2, 0.45), body(0, (-6, 2, 0), (-8, 0, 0)),
+                                arms((-114, -14, 24), -18, (-114, 14, -24), -18)))
+    # удержание: ладони держат сферу, напряжение
+    k.key(1.5, 'easeInOutSine', M(legs(-0.2, 0.5), body(0, (6, 0, 0), (-4, 0, 0)),
+                                  arms((-104, -20, 12), -22, (-104, 20, -12), -22, (0, 0, -16), (0, 0, 16))))
+    k.key(2.0, 'easeInOutSine', M(body(0, (8, 2, -1), (-3, 0, 0)),
+                                  arms((-100, -22, 12), -26, (-100, 22, -12), -26)))
+    a.marker(0.82, 'push')
+    return a
+
+
+def max_blue_hold():
+    """Пока сфера жива: ладони держат её перед собой, тело дышит и дрожит от напряжения (цикл 1,6 с,
+    руки отстают от корпуса — overlapping), голова следит за прицелом."""
+    a = Anim('max_blue_hold', 1.6, loop=True, props={'priority': 'action', 'fade_in': 0.25, 'fade_out': 0.35,
+                                                     'look': 0.85, 'fp': 'arms'})
+    k = Keys(a)
+    n = 8
+    for i in range(n + 1):
+        t = 1.6 * i / n
+        ph = i / n
+        import math
+        br = math.sin(2 * math.pi * ph)
+        tr = math.sin(2 * math.pi * ph * 4)  # мелкая дрожь корпуса (руки идут вместе с ним, а не навстречу друг другу)
+        lag = math.sin(2 * math.pi * (ph - 0.12))
+        k.key(round(t, 3), 'catmullrom', M(
+            legs(-0.2, 0.5 + 0.06 * br),
+            body(2 * br, (8 + 2 * br, 2 + 1.2 * tr, -1), (-3 - br, 0, 0)),
+            arms((-100 - 4 * lag, -22, 12 + 2 * lag), -26 - 4 * lag, (-100 - 4 * lag, 22, -12 - 2 * lag),
+                 -26 - 4 * lag, (0, 0, -16), (0, 0, 16))), overlap=False)
+    return a
+
+
+# =========================================================================== Фиолетовый (обычный, G)
+
+def _hp_aim(breath=0.0, push=0.0):
+    """Поза выпуска Фиолетового (третья картинка владельца): полубоком к цели (~55°, ведёт таз), правая рука
+    прямо вперёд на уровне плеча, ладонь раскрыта к цели; левая согнута и прижата к груди; голова вдоль руки."""
+    return M(legs(0.0, 0.12 - 0.02 * push), body(-55, (6 + 1.0 * breath + 3 * push, -6, 0), (4, 60, 0)),
+             arms((10 - 1.0 * breath, 0, 88 + 3 * push), -2 - 2 * breath, (-44, 34, -14), -96, (0, 0, 14), (0, 0, 16)))
+
+
+def hollow_purple():
+    """Каст Полого Фиолетового, 5 с (castProgress 0..1 с сервера, CAST_TICKS 100). По аниме (пожелание владельца):
+    Годжо спокойно складывает кисти перед грудью; Красный и Синий рождаются по бокам сами, руки их НЕ стягивают.
+    Когда шары сошлись (3,1 с), он заранее и плавно переходит в позу выпуска — полубоком, рука вперёд — и
+    просто стоит в ней до выстрела. Никакого «напряжения» и дрожи — только медленное дыхание."""
+    a = Anim('hollow_purple', 5.0, loop='hold', props={'priority': 'action', 'fade_in': 0.25, 'fade_out': 0.3,
+                                                       'look': 0.6, 'aim': 0.5, 'fp': 'arms'})
+    k = Keys(a)
+
+    def pose(breath=0.0):
+        return M(legs(0.05, 0.05 + 0.02 * breath), body(0, (2 + 1.2 * breath, 0, 0), (3 - 0.8 * breath, 0, 0)),
+                 arms((-40 - 1.5 * breath, -40, 12), -90, (-35 - 1.5 * breath, 42, -12), -86, (0, 0, -18), (0, 0, 22)))
+
+    k.key(0.0, 'linear', REST)
+    # кисти поднимаются к груди по небольшой дуге (локти чуть в стороны на полпути)
+    _smooth_move(k, 0.0, 0.7, REST, pose(), n=5,
+                 arc=lambda u: {'RightUpperArm': (0, 0, 14 * math.sin(math.pi * u)),
+                                'LeftUpperArm': (0, 0, -14 * math.sin(math.pi * u))})
+    # спокойное удержание: вдох-выдох раз в ~2,1 с
+    k.key(1.75, 'easeInOutSine', pose(1.0), overlap=False)
+    k.key(2.8, 'easeInOutSine', pose(0.0), overlap=False)
+    k.key(3.1, 'easeInOutSine', pose(0.3), overlap=False)
+    # шары сошлись — плавно встаёт полубоком, рука уходит вперёд по небольшой дуге
+    _smooth_move(k, 3.1, 4.0, pose(0.3), _hp_aim(), n=6,
+                 arc=lambda u: {'RightLowerArm': (-24 * math.sin(math.pi * u), 0, 0),
+                                'RightUpperArm': (0, 0, 8 * math.sin(math.pi * u))})
+    k.key(4.5, 'easeInOutSine', _hp_aim(1.0), overlap=False)
+    k.key(5.0, 'easeInOutSine', _hp_aim(0.0), overlap=False)
+    a.marker(3.1, 'birth')
+    return a
+
+
+def hollow_purple_fire():
+    """Выстрел Фиолетового: он уже стоит в позе выпуска — шар просто уходит с ладони, тело лишь чуть подаётся
+    вперёд. Поза держится, пока шар улетает, затем плавный возврат в стойку. Без дрожи."""
+    a = Anim('hollow_purple_fire', 1.6, props={'priority': 'action', 'fade_in': 0.1, 'fade_out': 0.3,
+                                               'look': 0.6, 'aim': 0.5, 'fp': 'arms'})
+    k = Keys(a)
+    k.key(0.0, 'linear', _hp_aim(), overlap=False)
+    k.key(0.2, 'easeOutCubic', _hp_aim(push=1.0), overlap=False)
+    k.key(0.95, 'easeInOutSine', _hp_aim(push=0.6), overlap=False)
+    _smooth_move(k, 0.95, 1.6, _hp_aim(push=0.6), SETTLE, n=5)
+    a.marker(0.2, 'fire')
+    return a
+
+
+# =========================================================================== Простая территория, RCT, телепорт
+
+UPPER = ('UpperTorso', 'Head', 'RightUpperArm', 'RightLowerArm', 'RightHand', 'LeftUpperArm', 'LeftLowerArm',
+         'LeftHand')
+
+
+def upper(pose):
+    return {b: v for b, v in pose.items() if b in UPPER}
+
+
+def simple_domain():
+    """Простая территория, вход 1 с: присед, правая ладонь вниз над землёй (круг расходится от руки), левая
+    у груди ладонью вперёд; микро-стоп; дальше simple_domain_hold (только верх тела — ходить можно)."""
+    a = Anim('simple_domain', 1.0, props={'priority': 'action', 'fade_in': 0.1, 'fade_out': 0.3, 'look': 0.6,
+                                          'fp': 'arms'})
+    k = Keys(a)
+    k.key(0.0, 'linear', REST)
+    k.key(0.2, 'easeOutCubic', M(legs(0.4, 0.4), body(10, (-6, 10, 0), (-4, -8, 0)),
+                                  arms((-20, 10, 40), -60, (-40, 20, -20), -80, (0, 0, -20), (0, 0, 20))))
+    k.key(0.42, 'easeInQuint', M(legs(0.5, 1.0), body(14, (22, 12, -2), (8, -10, 0)),
+                                  arms((-40, -10, 16), -6, (-56, 36, -10), -86, (-40, 0, 0), (0, 0, 30))))
+    k.hold(0.14)
+    k.key(1.0, 'easeInOutSine', M(legs(0.3, 0.45), body(6, (8, 6, 0), (0, -4, 0)),
+                                  arms((-34, -36, 14), -80, (-46, 36, -10), -84, (0, 0, -30), (0, 0, 30))))
+    a.marker(0.42, 'ground')
+    return a
+
+
+def simple_domain_hold():
+    """Держит простую территорию: ладони сложены у груди (печать), корпус чуть вперёд, дыхание. Только верх тела."""
+    import math
+    a = Anim('simple_domain_hold', 2.0, loop=True, props={'priority': 'action', 'fade_in': 0.3, 'fade_out': 0.3,
+                                                          'look': 0.9, 'fp': 'none'})
+    k = Keys(a)
+    for i in range(9):
+        ph = i / 8
+        br = math.sin(2 * math.pi * ph)
+        lag = math.sin(2 * math.pi * (ph - 0.1))
+        k.key(round(2.0 * ph, 3), 'catmullrom', upper(M(body(0, (8 + 1.5 * br, 6, 0), (0, -4, 0)),
+                                                        arms((-34 - 2 * lag, -36, 14), -80 - 2 * lag,
+                                                             (-46 - 2 * lag, 36, -10), -84 - 2 * lag,
+                                                             (0, 0, -30), (0, 0, 30)))), overlap=False)
+    return a
+
+
+def rct():
+    """Обратная техника (лечение), 1,2 с: ладонь к груди, вдох — корпус раскрывается назад, голова вверх,
+    руки разводятся в стороны ладонями вверх (выдох), возврат."""
+    a = Anim('rct', 1.2, props={'priority': 'action', 'fade_in': 0.1, 'fade_out': 0.3, 'look': 0.3, 'fp': 'arms'})
+    k = Keys(a)
+    k.key(0.0, 'linear', REST)
+    k.key(0.25, 'easeOutCubic', M(legs(0.0, 0.3), body(0, (10, 0, 0), (8, 0, 0)),
+                                   arms((-44, -40, 10), -96, (-44, 40, -10), -96, (0, 0, -30), (0, 0, 30))))
+    k.hold(0.1)
+    k.key(0.6, 'easeOutBack', M(legs(0.0, 0.1), body(0, (-12, 0, 0), (-18, 0, 0)),
+                                arms((-30, 30, 56), -20, (-30, -30, -56), -20, (0, -60, 0), (0, 60, 0))))
+    k.key(0.85, 'easeInOutSine', M(body(0, (-10, 0, 0), (-16, 0, 0)),
+                                   arms((-28, 32, 58), -22, (-28, -32, -58), -22)))
+    k.key(1.2, 'easeInOutSine', SETTLE, overlap=False)
+    a.marker(0.6, 'heal')
+    return a
+
+
+def teleport():
+    """Телепорт, 0,6 с: короткий присед и наклон вперёд, два пальца у лица (жест) — рывок — на новом месте
+    приземление с отдачей. Мгновенный перенос в коде — на маркере blink (0,18 с)."""
+    a = Anim('teleport', 0.6, props={'priority': 'action', 'fade_in': 0.04, 'fade_out': 0.25, 'look': 0.5,
+                                     'fp': 'arms'})
+    k = Keys(a)
+    k.key(0.0, 'linear', REST)
+    k.key(0.12, 'easeOutCubic', M(legs(0.2, 0.7), body(0, (16, 0, 0), (2, 0, 0)),
+                                   arms((-70, -36, 12), -110, (14, 0, -20), -30, (0, 0, -20))))
+    k.key(0.2, 'easeInQuint', M(legs(-0.2, 0.2), body(0, (24, 0, 0), (-6, 0, 0)),
+                                 arms((30, -6, 24), -20, (30, 6, -24), -20)))
+    k.key(0.32, 'easeOutBack', M(legs(0.1, 0.85), body(0, (12, 0, 0), (0, 0, 0)),
+                                 arms((-30, 10, 40), -40, (-30, -10, -40), -40)))
+    k.key(0.6, 'easeInOutSine', SETTLE, overlap=False)
+    a.marker(0.18, 'blink')
+    return a
+
+
+# =========================================================================== Максимальный Фиолетовый (кат-сцена)
+
+def max_purple():
+    """Кат-сцена 20,4 с (тики MaximumPurple: Синий в руке 14, вихрь 16, бросок 40, Красный 58, выстрел 69,
+    небо 100, сближение 128, погоня 160, подъём 72–282 (сразу после Красного), темнота 283, космос 305, слияние 336,
+    поза 360, удар 362).
+    Тело всё время работает: бросает Синий, стреляет Красным, дирижирует шарами (руки ведут их по кругу),
+    поднимается раскрывшись, собирает шары в ладонях и встаёт в позу Годжо. Камера — кат-сцены, поэтому fp=none."""
+    import math
+    a = Anim('max_purple', 20.4, loop='hold', props={'priority': 'action4', 'fade_in': 0.15, 'fade_out': 0.6,
+                                                     'look': 0.0, 'face': 0, 'fp': 'none'})
+    k = Keys(a)
+    k.key(0.0, 'linear', REST)
+    # Синий (референс 0–2,3 с): правая рука поднимается, шар рождается в ладони и чуть подлетает; рука ведёт
+    # его по окружности — в сторону, вниз-назад и вперёд — и плавно выталкивает вперёд с уклоном вверх.
+    # Кисть не крутится: всё движение — плечом и корпусом, ключи по сплайну.
+    k.key(0.4, 'easeInOutCubic', M(legs(0.15, 0.15), body(6, (2, 8, 0), (12, 12, 0)),
+                                   arms((-95, -20, 30), -70, (-10, 10, -12), -20)))
+    k.key(0.8, 'easeOutCubic', M(legs(0.2, 0.25), body(8, (0, 10, 0), (8, 16, 0)),
+                                 arms((-108, -20, 30), -58, (-14, 12, -16), -24)))
+    k.key(1.15, 'catmullrom', M(legs(0.4, 0.6), body(16, (10, 18, -2), (16, 22, 0)),
+                                arms((-30, 0, 75), -20, (-30, 20, -30), -40)))
+    k.key(1.5, 'catmullrom', M(legs(0.5, 0.9), body(24, (16, 26, -4), (18, 24, 0)),
+                               arms((20, 10, 45), -25, (-40, 30, -20), -50)))
+    k.key(1.82, 'catmullrom', M(legs(0.3, 0.5), body(10, (6, 10, -2), (8, 8, 0)),
+                                arms((-70, 0, 30), -15, (-30, 20, -25), -40)))
+    k.key(2.0, 'easeOutCubic', M(legs(-0.05, 0.05), body(-4, (-8, -4, 2), (-4, 2, 0)),
+                                 arms((-125, 0, 8), -4, (-20, -10, -30), -20)))
+    k.hold(0.15)
+    # референс 2,4–2,7 с: после броска правая рука проходит перед корпусом и уходит вверх,
+    # левая кисть поднимается к лицу
+    k.key(2.45, 'easeInOutCubic', M(legs(-0.1, 0.25), body(-6, (-2, -8, 2), (-4, 8, 0)),
+                                    arms((-120, -20, 20), -40, (-80, 26, -26), -90, (0, 0, 0), (0, -30, 0))))
+    # Красный: правая рука прямо вверх, указательный палец к небу, шар над кончиком пальца;
+    # левая кисть у лица
+    k.key(2.75, 'easeOutCubic', M(legs(-0.1, 0.25), body(-8, (-8, -10, 2), (22, 66, 0)),
+                                  arms((-176, 0, -8), 0, (-98, 32, -30), -112, (0, 0, 0), (0, -40, 0))))
+    k.key(3.1, 'easeInOutSine', M(body(-8, (-7, -10, 2), (22, 68, 0)),
+                                  arms((-177, 0, -8), 0, (-98, 32, -30), -112)))
+    k.key(3.42, 'easeInOutSine', M(body(-8, (-8, -10, 2), (22, 68, 0)),
+                                   arms((-177, 0, -8), 0, (-98, 32, -30), -112)))
+    # выстрел Красного вверх с кончика пальца: короткий толчок всем телом
+    k.key(3.47, 'easeInQuint', M(legs(-0.05, 0.05), body(-6, (-12, -8, 0), (20, 64, 0)),
+                                  arms((-179, 0, -6), 0, (-96, 34, -28), -114)))
+    k.hold(0.15)
+    # подъём (кадр владельца): после выстрела Красным он плавно сворачивается — колени подтянуты к животу,
+    # корпус чуть ссутулен, кисти у груди — и так поднимается к кольцу. Когда шары встали на места (~13,5 с),
+    # он из этого положения плавно выпрямляется: колени вместе, кисти перед грудью, голова прямо.
+    AIR = {'LowerTorso.pos': ZERO, 'RightUpperLeg': (-14, 0, 3), 'RightLowerLeg': (34, 0, 0),
+           'RightFoot': (16, 0, 0), 'LeftUpperLeg': (-10, 0, -3), 'LeftLowerLeg': (38, 0, 0), 'LeftFoot': (16, 0, 0)}
+    CHEST = arms((-62, -44, 12), -96, (-56, 46, -12), -92, (0, 0, -20), (0, 0, 20))
+
+    def tuck(breath=0.0):
+        return M({'LowerTorso.pos': ZERO, 'LowerTorso': (4, 0, 0),
+                  'RightUpperLeg': (-118 - 3 * breath, 0, 5), 'RightLowerLeg': (128, 0, 0), 'RightFoot': (22, 0, 0),
+                  'LeftUpperLeg': (-114 - 3 * breath, 0, -5), 'LeftLowerLeg': (126, 0, 0), 'LeftFoot': (22, 0, 0),
+                  'UpperTorso': (14 + 2 * breath, 0, 0), 'Head': (8 - breath, 0, 0)},
+                 arms((-48, -40, 14), -104, (-44, 42, -14), -100, (0, 0, -20), (0, 0, 20)))
+
+    # рука с Красным плавно опускается, тело сворачивается
+    _smooth_move(k, 3.62, 5.0, M(legs(-0.05, 0.05), body(-6, (-12, -8, 0), (20, 64, 0)),
+                                 arms((-179, 0, -6), 0, (-96, 34, -28), -114)), tuck(), n=7,
+                 arc=lambda u: {'RightUpperArm': (0, 0, -30 * math.sin(math.pi * u))})
+    t = 5.0
+    i = 0
+    while t < 13.0:
+        t += 1.1
+        i += 1
+        k.key(round(min(t, 13.3), 2), 'easeInOutSine', tuck(1.0 if i % 2 else 0.0), overlap=False)
+    # шары встали на места — выпрямляется
+    _smooth_move(k, 13.45, 14.3, tuck(0.0), M(AIR, body(0, (5, 0, 0), (2, 0, 0)), CHEST), n=6)
+    # темнота: руки крест-накрест у груди, собрался
+    k.key(14.8, 'easeInOutCubic', M(body(0, (10, 0, 0), (6, 0, 0)),
+                                    arms((-50, -50, 10), -100, (-50, 50, -10), -100, (0, 0, -30), (0, 0, 30))))
+    # космос: ладони расходятся и медленно сводятся (шары сходятся)
+    k.key(15.6, 'easeOutCubic', M(body(0, (-4, 0, 0), (-8, 0, 0)),
+                                  arms((-80, 0, 40), -20, (-80, 0, -40), -20, (0, 40, 0), (0, -40, 0))))
+    k.key(16.8, 'easeInCubic', M(body(0, (6, 0, 0), (-24, 0, 0)),
+                                 arms((-84, -30, 10), -40, (-84, 30, -10), -40, (0, 0, -40), (0, 0, 40))))
+    k.hold(0.1)
+    # Референс 17,3–18,3 с. 17,3–17,85: камера сзади у затылка, голова задрана вверх на шар; руки через
+    # стороны вскидываются над головой. 17,9: спереди, руки вверху. 18,0–18,2: корпус отклонён назад всего
+    # на 10–15°, руки прямые раскинуты строго в стороны («Т»), ноги свисают; камера спереди-снизу.
+    OVER = M(AIR, body(0, (-6, 0, 0), (-38, 0, 0)),
+             arms((-20, 0, 120), -30, (-20, 0, -120), -30))
+    k.key(17.6, 'easeInOutCubic', OVER)
+
+    def hang(tilt=-12, chest=-3, head=-6):
+        legs_hang = {'LowerTorso.pos': ZERO, 'RightUpperLeg': (-10, 0, 5), 'RightLowerLeg': (18, 0, 0),
+                     'RightFoot': (14, 0, 0), 'LeftUpperLeg': (-4, 0, -5), 'LeftLowerLeg': (14, 0, 0),
+                     'LeftFoot': (14, 0, 0)}
+        return M(legs_hang, {'LowerTorso': (tilt, 0, 0), 'UpperTorso': (chest, 0, 0), 'Head': (head, 0, 0)})
+
+    UP = M(hang(-6, -4, -24), arms((-14, 0, 166), -10, (-14, 0, -166), -10))
+    k.key(17.9, 'easeInOutCubic', UP, overlap=False)
+    # удар: руки рывком опускаются через стороны в «Т», корпус откидывается на ~12°
+    k.key(18.02, 'easeOutQuint', M(hang(-12, -3, -6), arms((-4, 0, 88), 0, (-4, 0, -88), 0)), overlap=False)
+    k.hold(0.22)
+    # белый экран и после: висит в этой позе, лёгкое покачивание
+    k.key(19.4, 'easeInOutSine', M(hang(-13, -4, -6), arms((-6, 0, 86), -4, (-6, 0, -86), -4)), overlap=False)
+    k.key(20.4, 'easeInOutSine', M(hang(-12, -3, -5), arms((-5, 0, 87), -2, (-5, 0, -87), -2)), overlap=False)
+    for t_, m in ((0.7, 'blue'), (2.05, 'throw'), (3.3, 'red'), (3.47, 'red_fire'), (18.0, 'pose')):
+        a.marker(t_, m)
+    return a
+
+
+# =========================================================================== Расширение территории
+
+def domain_cast():
+    """Расширение территории, 10,8 с (катсцена DomainExpansionClient; камера ведёт правую кисть).
+    Знаменитый жест Годжо: правая кисть по дуге поднимается к лицу (скрещённые пальцы перед глазами), к 3 с
+    замирает; левая рука свободно опущена, корпус чуть скручен, голова слегка наклонена к руке.
+    Дальше живое удержание (дыхание, лёгкая дрожь пальцев) до конца катсцены."""
+    import math
+    a = Anim('domain_cast', 10.8, loop='hold', props={'priority': 'action', 'fade_in': 0.2, 'fade_out': 0.4,
+                                                      'look': 0.2, 'face': 0, 'fp': 'none'})
+    k = Keys(a)
+    k.key(0.0, 'linear', REST)
+    k.key(0.5, 'easeInOutSine', M(legs(0.1, 0.15), body(-4, (2, -4, 0), (2, 4, 0)),
+                                  arms((-14, 0, 14), -20, (4, 0, -10), -10)))
+    # дуга: кисть уходит наружу-вверх
+    k.key(1.4, 'easeInOutCubic', M(body(-8, (0, -8, 1), (0, 8, 0)),
+                                   arms((-62, 14, 40), -40, (6, 4, -12), -12, (0, 20, 0))))
+    k.key(2.4, 'easeInOutCubic', M(body(-10, (2, -10, 2), (6, 10, -2)),
+                                   arms((-78, -28, 18), -66, (6, 6, -12), -14, (0, -20, 0))))
+    k.key(3.0, 'easeOutBack', M(body(-10, (3, -10, 2), (8, 12, -4)),
+                                arms((-80, -40, 10), -70, (6, 6, -12), -14, (0, -30, 0))))
+    k.hold(0.15)
+    t = 3.6
+    i = 0
+    while t <= 10.75:
+        ph = (t - 3.6) / 2.4 * 2 * math.pi
+        br = math.sin(ph)
+        tr = 0.6 if i % 2 == 0 else -0.6
+        k.key(round(t, 2), 'catmullrom', M(
+            legs(0.1, 0.15 + 0.03 * br), body(-10, (3 + 1.2 * br, -10, 2), (8 + 0.8 * br, 12, -4)),
+            arms((-80 - 1.0 * br, -40, 10), -70 - br, (6 - 2 * br, 6, -12), -14, (0, -30, 0))),
+            overlap=False)
+        t += 0.4
+        i += 1
+    a.marker(3.0, 'sign')
+    return a
+
+
+ALL = [red_cast, red_charge, max_red, blue_charge, max_blue, max_blue_hold, hollow_purple, hollow_purple_fire,
+       simple_domain, simple_domain_hold, rct, teleport, max_purple, domain_cast]
+MADE_HERE = {f.__name__ for f in ALL}
+
+
+def check(anims):
+    """Руки от первого лица: кисть не должна оказываться внутри головы (рука во весь экран)."""
+    import geckosim as gs
+    import numpy as np
+    from where import points
+    bad = []
+    for a in anims:
+        if a.props.get('fp') == 'none':  # кат-сцены и клипы без рук от первого лица
+            continue
+        key = 'animation.player.' + a.name
+        with tempfile.NamedTemporaryFile('w', suffix='.json', delete=False) as f:
+            json.dump({'format_version': '1.8.0', 'animations': {key: a.to_json()}}, f)
+        an = gs.load_anims(f.name)[key]
+        os.unlink(f.name)
+        for i in range(int(a.length / 0.05) + 1):
+            pose = {}
+            for b, ch in gs.sample(an, i).items():
+                if 'rotation' in ch:
+                    x, y, z = ch['rotation']
+                    pose[b] = (-np.degrees(x), -np.degrees(y), np.degrees(z))
+                if 'position' in ch:
+                    pose[b + '.pos'] = ch['position']
+            p = points(pose)
+            for h in ('RightHand', 'LeftHand'):
+                d = np.linalg.norm(p[h] - p['Head'])
+                if d < 0.3:
+                    bad.append('%s t=%.2f %s у головы (%.2f блока)' % (a.name, i * 0.05, h, d))
+    return bad
+
+
+if __name__ == '__main__':
+    anims = [f() for f in ALL]
+    write('gojo.animation.json', anims)
+    for b in check(anims):
+        print('!', b)

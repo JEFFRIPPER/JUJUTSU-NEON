@@ -281,7 +281,7 @@ public class JujutsuNeonMod {
         CursedFx.init();
         SimpleDomain.init();
         M1Combo.init();
-        FrameAnimNet.init();
+        com.kira.jujutsuneon.rbx.RbxNet.init();
         MovementFx.init();
         modBus.addListener(this::addToCreativeTab);
 
@@ -2292,6 +2292,7 @@ public class JujutsuNeonMod {
         if (DomainExpansion.denyTechniqueEdit(level, pos, owner)) return false;
         if (state.isAir() && state.getFluidState().isEmpty()) return false;
         if (isOwnerSafeBlock(owner, pos)) return false;
+        if (HollowPurpleOverhaul.inOwnerClearZone(owner, pos)) return false;
         if (isPurpleProtectedTechnicalBlock(state)) return false;
 
         // Purple explicitly erases bedrock, fluids, containers and all ordinary world blocks.
@@ -2713,6 +2714,8 @@ public class JujutsuNeonMod {
     private static final float MAX_RED_DAMAGE = 100.0F; // 50 сердец
 
     // Ограничиваем количество world-updates за тик, чтобы вырезание тоннеля не роняло TPS.
+    /** Удар в max_red_cast.ogg — через 1,2 с (24 тика) от начала файла. */
+    private static final int MAX_RED_SFX_HIT_TICKS = 24;
     private static final int MAX_RED_BLOCK_BUDGET_PER_TICK = 220;
     private static final double MAX_RED_SLICE_STEP = 0.72;
     private static final double MAX_RED_DISK_STEP = 0.78;
@@ -2729,15 +2732,33 @@ public class JujutsuNeonMod {
         final UUID ownerId;
         Vec3 pos;
         final Vec3 velocity;
+        final boolean max;
         double travelled;
 
-        RedShot(int id, UUID ownerId, Vec3 pos, Vec3 velocity) {
+        RedShot(int id, UUID ownerId, Vec3 pos, Vec3 velocity, boolean max) {
             this.id = id;
             this.ownerId = ownerId;
             this.pos = pos;
             this.velocity = velocity;
+            this.max = max;
         }
     }
+
+    /** Кратер Максимального Красного: блоки снимаются волной от центра, с бюджетом на тик. */
+    private static final class RedCrater {
+        final UUID ownerId;
+        final ServerLevel level;
+        final ArrayDeque<BlockPos> queue;
+
+        RedCrater(UUID ownerId, ServerLevel level, ArrayDeque<BlockPos> queue) {
+            this.ownerId = ownerId;
+            this.level = level;
+            this.queue = queue;
+        }
+    }
+
+    private static final List<RedCrater> RED_CRATERS = new ArrayList<>();
+    private static final int RED_CRATER_BLOCKS_PER_TICK = 3500;
 
     private static class MaximumRedRuntime {
         final ArrayDeque<BlockPos> destructionQueue = new ArrayDeque<>();
@@ -2875,7 +2896,7 @@ public class JujutsuNeonMod {
         player.setSprinting(false);
         player.setDeltaMovement(Vec3.ZERO);
         player.hurtMarked = true;
-        playSfx(player.serverLevel(), player, SFX_MAX_RED_CAST, 2.4f, 1.0f);
+        // звук max_red_cast.ogg — в tickRedState, чтобы его удар (1,2 с от начала файла) совпал с выстрелом
         RedTechnique.sendCharge(player, false);
         RedTechnique.sendCast(player, true);
     }
@@ -2890,17 +2911,18 @@ public class JujutsuNeonMod {
     private static void launchNormalRed(ServerPlayer player) {
         Vec3 pos = redLaunchPosition(player);
         Vec3 velocity = player.getLookAngle().normalize().scale(RedTechnique.RED_SPEED);
-        RedShot shot = new RedShot(++redShotIds, player.getUUID(), pos, velocity);
+        RedShot shot = new RedShot(++redShotIds, player.getUUID(), pos, velocity, false);
         RED_SHOTS.add(shot);
-        RedTechnique.sendShot(player, shot.id, pos, velocity);
+        RedTechnique.sendShot(player, shot.id, pos, velocity, false);
     }
 
+    /** Максимальный Красный: большой шар летит сверхзвуком, на попадании — кратер (см. explodeMaxRed). */
     private static void fireMaximumRed(ServerPlayer player) {
-        Vec3 dir = player.getLookAngle().normalize();
-        Vec3 origin = player.getEyePosition().add(0.0, -0.25, 0.0);
-        MaximumRedRuntime runtime = new MaximumRedRuntime(origin, dir);
-        MAX_RED_RUNTIMES.put(player.getUUID(), runtime);
-        RedTechnique.sendBeam(player, origin, dir);
+        Vec3 pos = redLaunchPosition(player);
+        Vec3 velocity = player.getLookAngle().normalize().scale(RedTechnique.MAX_RED_SPEED);
+        RedShot shot = new RedShot(++redShotIds, player.getUUID(), pos, velocity, true);
+        RED_SHOTS.add(shot);
+        RedTechnique.sendShot(player, shot.id, pos, velocity, true);
         player.displayClientMessage(
                 Component.literal("MAXIMUM RED").withStyle(ChatFormatting.RED, ChatFormatting.BOLD), true);
     }
@@ -2928,7 +2950,12 @@ public class JujutsuNeonMod {
     }
 
     private static void explodeRed(ServerPlayer owner, ServerLevel level, Vec3 center) {
-        List<LivingEntity> victims = level.getEntitiesOfClass(
+        explodeRed(owner, level, center, true);
+    }
+
+    /** damage = false — только взрыв блоков и звук (урон Максимального Красного считается отдельно). */
+    private static void explodeRed(ServerPlayer owner, ServerLevel level, Vec3 center, boolean damage) {
+        List<LivingEntity> victims = !damage ? List.of() : level.getEntitiesOfClass(
                 LivingEntity.class,
                 new AABB(center, center).inflate(RED_EXPLOSION_DAMAGE_RADIUS),
                 e -> e.isAlive() && e != owner
@@ -2972,8 +2999,86 @@ public class JujutsuNeonMod {
         level.playSound(null, center.x, center.y, center.z, SFX_RED_BOOM.get(), SoundSource.PLAYERS, 8.0f, 1.0f);
     }
 
+    /**
+     * Попадание Максимального Красного: обычный взрыв Красного (обломки, звук, отброс) плюс рваный кратер
+     * радиусом MAX_RED_CRATER_RADIUS — блоки уходят волной от центра (RED_CRATER_BLOCKS_PER_TICK за тик).
+     * Урон MAX_RED_DAMAGE всем в MAX_RED_DAMAGE_RADIUS.
+     */
+    private static void explodeMaxRed(ServerPlayer owner, ServerLevel level, Vec3 center) {
+        explodeRed(owner, level, center, false);
+
+        double rad = RedTechnique.MAX_RED_DAMAGE_RADIUS;
+        List<LivingEntity> victims = level.getEntitiesOfClass(LivingEntity.class, new AABB(center, center).inflate(rad),
+                e -> e.isAlive() && e != owner && e.position().add(0.0, e.getBbHeight() * 0.5, 0.0).distanceTo(center) <= rad);
+        owner.getPersistentData().putBoolean("jn_red_custom_damage", true);
+        try {
+            for (LivingEntity victim : victims) {
+                Vec3 c = victim.position().add(0.0, victim.getBbHeight() * 0.5, 0.0);
+                if (DomainExpansion.separated(level, center, c)) continue;
+                victim.invulnerableTime = 0;
+                victim.hurt(level.damageSources().playerAttack(owner), MAX_RED_DAMAGE);
+                Vec3 away = c.subtract(center);
+                double d = Math.max(0.6, away.length());
+                Vec3 push = away.scale(1.0 / d).scale(3.2 * (1.0 - Math.min(1.0, d / rad)) + 0.6);
+                victim.setDeltaMovement(victim.getDeltaMovement().add(push.x, push.y * 0.6 + 0.5, push.z));
+                victim.hurtMarked = true;
+            }
+        } finally {
+            owner.getPersistentData().putBoolean("jn_red_custom_damage", false);
+        }
+
+        // Рваный край: радиус зависит от направления (сумма синусов) и чуть от случайности у самой кромки.
+        double r0 = RedTechnique.MAX_RED_CRATER_RADIUS;
+        long seed = Double.doubleToLongBits(center.x * 31.0 + center.z * 17.0 + center.y);
+        java.util.Random rnd = new java.util.Random(seed);
+        double p1 = rnd.nextDouble() * 6.3, p2 = rnd.nextDouble() * 6.3, p3 = rnd.nextDouble() * 6.3;
+        int R = (int) Math.ceil(r0 * 1.15);
+        BlockPos c0 = BlockPos.containing(center);
+        List<long[]> cells = new ArrayList<>();
+        for (int dx = -R; dx <= R; dx++) {
+            for (int dy = -R; dy <= R; dy++) {
+                for (int dz = -R; dz <= R; dz++) {
+                    double dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
+                    if (dist > R) continue;
+                    double yaw = Math.atan2(dz, dx), pitch = dist < 1.0E-6 ? 0 : Math.asin(dy / dist);
+                    double edge = r0 * (0.86 + 0.09 * Math.sin(3 * yaw + p1) + 0.06 * Math.sin(5 * yaw + 2 * pitch + p2)
+                            + 0.05 * Math.sin(7 * pitch + p3));
+                    if (dist > edge - rnd.nextDouble() * 1.8) continue;
+                    BlockPos pos = c0.offset(dx, dy, dz);
+                    cells.add(new long[]{(long) (dist * 100), pos.asLong()});
+                }
+            }
+        }
+        cells.sort(Comparator.comparingLong(a -> a[0]));
+        ArrayDeque<BlockPos> queue = new ArrayDeque<>(cells.size());
+        for (long[] cell : cells) queue.addLast(BlockPos.of(cell[1]));
+        RED_CRATERS.add(new RedCrater(owner.getUUID(), level, queue));
+    }
+
+    private static void tickRedCraters(MinecraftServer server) {
+        if (RED_CRATERS.isEmpty()) return;
+        Iterator<RedCrater> it = RED_CRATERS.iterator();
+        while (it.hasNext()) {
+            RedCrater crater = it.next();
+            ServerPlayer owner = server.getPlayerList().getPlayer(crater.ownerId);
+            int budget = RED_CRATER_BLOCKS_PER_TICK;
+            while (budget > 0 && !crater.queue.isEmpty()) {
+                BlockPos pos = crater.queue.pollFirst();
+                if (!crater.level.hasChunkAt(pos)) continue;
+                BlockState state = crater.level.getBlockState(pos);
+                if (state.isAir() && state.getFluidState().isEmpty()) continue;
+                budget--;
+                if (owner != null ? !canMaximumRedAnnihilate(owner, crater.level, pos, state)
+                        : state.getDestroySpeed(crater.level, pos) < 0.0F) continue;
+                crater.level.setBlock(pos, Blocks.AIR.defaultBlockState(), MAX_RED_BLOCK_UPDATE_FLAGS);
+            }
+            if (crater.queue.isEmpty()) it.remove();
+        }
+    }
+
     /** Летящие шарики Красного (у всех игроков). */
     private static void tickRedShots(MinecraftServer server) {
+        tickRedCraters(server);
         if (RED_SHOTS.isEmpty()) return;
         Iterator<RedShot> it = RED_SHOTS.iterator();
         while (it.hasNext()) {
@@ -2989,7 +3094,7 @@ public class JujutsuNeonMod {
 
             // Стена территории непроницаема: Красный гаснет о неё.
             if (DomainExpansion.separated(level, pos, next)) {
-                RedTechnique.sendShotEnd(level, shot.id, pos, false);
+                RedTechnique.sendShotEnd(level, shot.id, pos, false, shot.max);
                 it.remove();
                 continue;
             }
@@ -3004,16 +3109,18 @@ public class JujutsuNeonMod {
                         ? entityHit.getBoundingBox().getCenter()
                         : blockHit.getLocation();
                 it.remove();
-                RedTechnique.sendShotEnd(level, shot.id, impact, true);
-                explodeRed(owner, level, impact);
+                RedTechnique.sendShotEnd(level, shot.id, impact, true, shot.max);
+                if (shot.max) explodeMaxRed(owner, level, impact);
+                else explodeRed(owner, level, impact);
                 continue;
             }
 
             shot.travelled += shot.velocity.length();
             shot.pos = next;
-            if (shot.travelled >= RedTechnique.RED_MAX_DISTANCE || !level.isInWorldBounds(BlockPos.containing(next))) {
-                // 150 блоков — просто исчезает.
-                RedTechnique.sendShotEnd(level, shot.id, next, false);
+            double maxDist = shot.max ? RedTechnique.MAX_RED_MAX_DISTANCE : RedTechnique.RED_MAX_DISTANCE;
+            if (shot.travelled >= maxDist || !level.isInWorldBounds(BlockPos.containing(next))) {
+                // 150 (у Максимального — 200) блоков — просто исчезает.
+                RedTechnique.sendShotEnd(level, shot.id, next, false, shot.max);
                 it.remove();
             }
         }
@@ -3225,6 +3332,7 @@ public class JujutsuNeonMod {
             player.setSprinting(false);
             player.fallDistance = 0.0F;
 
+            if (age == RedTechnique.M_FIRE - MAX_RED_SFX_HIT_TICKS) playSfx(player.serverLevel(), player, SFX_MAX_RED_CAST, 2.4f, 1.0f);
             if (age == RedTechnique.M_FIRE) fireMaximumRed(player);
             if (age >= RedTechnique.M_END) clearRedCast(player);
         }
@@ -3349,6 +3457,26 @@ public class JujutsuNeonMod {
         );
     }
 
+    /** Бесконечность: ничто не подходит к Годжо вплотную — мобы и игроки вязнут у границы и не входят в него. */
+    private static void infinityRepel(ServerPlayer player, ServerLevel level) {
+        final double edge = 1.15;
+        Vec3 c = player.position();
+        for (LivingEntity e : level.getEntitiesOfClass(LivingEntity.class, player.getBoundingBox().inflate(edge + 0.6),
+                e -> e != player && e.isAlive() && !e.isSpectator() && !(e instanceof ArmorStand))) {
+            Vec3 d = e.position().subtract(c);
+            Vec3 flat = new Vec3(d.x, 0.0, d.z);
+            double dist = flat.length();
+            if (dist >= edge || Math.abs(d.y) > 2.2) continue;
+            Vec3 away = dist < 1.0E-3 ? player.getLookAngle().multiply(1, 0, 1).normalize() : flat.scale(1.0 / dist);
+            Vec3 v = e.getDeltaMovement();
+            double toward = v.dot(away);
+            // скорость к Годжо гасится полностью, плюс мягкий выталкивающий толчок тем глубже, чем ближе
+            Vec3 out = v.subtract(away.scale(Math.min(0.0, toward))).add(away.scale(0.08 + 0.22 * (1.0 - dist / edge)));
+            e.setDeltaMovement(out.x, v.y, out.z);
+            e.hurtMarked = true;
+        }
+    }
+
     private static void castInfinityToggle(ServerPlayer player) {
         ServerLevel level = player.serverLevel();
         boolean enabled = !player.getPersistentData().getBoolean("jn_infinity");
@@ -3367,6 +3495,7 @@ public class JujutsuNeonMod {
     private static void castRCT(ServerPlayer player) {
         ServerLevel level = player.serverLevel();
         handSign(player);
+        com.kira.jujutsuneon.rbx.RbxNet.play(player, "rct");
         player.heal(10.0F);
         player.addEffect(new MobEffectInstance(MobEffects.REGENERATION, 100, 1, false, false, true));
         // Свои звук и эффекты (CursedFxClient): кольцо у ног, спирали света, удары сердца, искры.
@@ -3752,6 +3881,8 @@ public class JujutsuNeonMod {
         player.fallDistance = 0.0F;
         player.hurtMarked = true;
         player.getPersistentData().putLong("jn_r_tp_cd", now + 80); // 4 секунды
+        // перенос мгновенный: тело сразу в фазе приземления (жест до рывка уже не нужен)
+        com.kira.jujutsuneon.rbx.RbxNet.play(player, new com.kira.jujutsuneon.rbx.RbxNet.Anim("teleport").startAt(0.16f));
         spawnTeleportBurst(level, destination.add(0.0, 0.9, 0.0));
 
         level.playSound(
@@ -4231,6 +4362,7 @@ public class JujutsuNeonMod {
 
                 // Бесконечность включена — клиенты рисуют едва заметную оболочку (напоминание раз в секунду).
                 if (infinity && now % 20 == 0) CursedFx.send(player, CursedFx.EV_INFINITY_HOLD);
+                if (infinity) infinityRepel(player, level);
 
             }
 
@@ -4801,6 +4933,8 @@ public class JujutsuNeonMod {
         private static int activeAnimLength = 1;
         private static String chargingAnim = "NONE";
         private static float chargingProgress = 0.0f;
+        /** Прогресс зарядки на прошлом тике — руки от первого лица двигаются плавно, с долей тика. */
+        private static float chargingProgressO = 0.0f;
 
         private static boolean hudVisible = true;
         private static double hudEnergy = CE_MAX;
@@ -5022,6 +5156,7 @@ public class JujutsuNeonMod {
                 if (!state.wasDown) {
                     state.ticks = 0;
                     state.holdTriggered = false;
+                    if (Minecraft.getInstance().player != null) com.kira.jujutsuneon.rbx.PlayerAnimations.play(Minecraft.getInstance().player, "blue_charge");
                 }
 
                 state.ticks++;
@@ -5660,6 +5795,11 @@ public class JujutsuNeonMod {
                     activeAnimLength = 1;
                 }
             }
+            // Зарядку Синего отпустили (или её сбросил экран/обездвиживание) — поза зарядки плавно уходит.
+            if (mc.player != null && !"CHARGE_BLUE".equals(chargingAnim) && com.kira.jujutsuneon.rbx.PlayerAnimations.isPlaying(mc.player, "blue_charge")) {
+                com.kira.jujutsuneon.rbx.PlayerAnimations.stop(mc.player, 0.2);
+            }
+            chargingProgressO = chargingProgress;
 
             if (mc.screen != null) {
                 if (lastSpeedHeld) {
@@ -6322,8 +6462,11 @@ public class JujutsuNeonMod {
             boolean main = event.getHand() == InteractionHand.MAIN_HAND;
             float side = main ? 1.0f : -1.0f;
 
+            float pt = event.getPartialTick();
             if (!"NONE".equals(chargingAnim)) {
-                float p = chargingProgress;
+                float p = "CHARGE_MAX_PURPLE".equals(chargingAnim)
+                        ? chargingProgress
+                        : Mth.lerp(pt, Math.min(chargingProgressO, chargingProgress), chargingProgress);
                 float pulse = 0.75f + 0.25f * (float) Math.sin(p * Math.PI * 6.0);
 
                 // Поза зарядки: руки сходятся к центру, напоминает ручные печати,
@@ -6338,6 +6481,11 @@ public class JujutsuNeonMod {
             if (activeAnimTicks <= 0) return;
 
             float t = 1.0f - activeAnimTicks / (float) activeAnimLength;
+
+            if (!"PURPLE_CAST".equals(activeAnim)) {
+                // до конца анимации осталось activeAnimTicks − доля тика: рука идёт плавно в каждом кадре
+                t = Mth.clamp(1.0f - (activeAnimTicks - pt) / (float) activeAnimLength, 0.0f, 1.0f);
+            }
 
             if ("PURPLE_CAST".equals(activeAnim)) {
                 float gather = Mth.clamp(t / 0.70f, 0.0f, 1.0f);

@@ -348,11 +348,17 @@ im.alpha_composite(gl)
 im.resize((4096, 4096), Image.Resampling.LANCZOS).save(ITEM / "gojo_blindfold.png", optimize=True)
 
 # Armor layer.
+# Повязка — полоса ткани на уровне глаз по четырём боковым граням шлема (развёртка головы 64x32:
+# грани по x 0..32, по v 8..16; глаза на v ≈ 12). Верх шлема прозрачный: раньше он был залит целиком,
+# и над головой висела плоская тёмная «пластина» шире головы.
 armor = Image.new("RGBA", (1024, 512), (0, 0, 0, 0))
 ad = ImageDraw.Draw(armor)
-ad.rectangle((0, 0, 255, 127), fill=(10, 12, 20, 255))
-for y in range(12, 120, 12):
-    ad.line((8, y, 246, y+4), fill=(45, 55, 72, 145), width=3)
+U = 16  # пикселей текстуры на единицу развёртки
+ad.rectangle((0, int(10.5 * U), 32 * U - 1, int(13.5 * U)), fill=(10, 12, 20, 255))
+for x in range(4, 32 * U, 14):
+    ad.line((x, int(10.7 * U), x + 6, int(13.3 * U)), fill=(45, 55, 72, 145), width=3)
+ad.line((0, int(10.5 * U), 32 * U, int(10.5 * U)), fill=(34, 40, 58, 255), width=4)
+ad.line((0, int(13.5 * U), 32 * U, int(13.5 * U)), fill=(34, 40, 58, 255), width=4)
 armor.resize((4096, 2048), Image.Resampling.LANCZOS).save(ARMOR / "gojo_layer_1.png", optimize=True)
 
 MODEL.joinpath("gojo_blindfold.json").write_text(json.dumps({

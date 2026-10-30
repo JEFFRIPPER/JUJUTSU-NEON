@@ -1,5 +1,6 @@
 package com.kira.jujutsuneon;
 
+import com.kira.jujutsuneon.rbx.PlayerAnimations;
 import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.blaze3d.vertex.BufferBuilder;
 import com.mojang.blaze3d.vertex.BufferUploader;
@@ -143,7 +144,12 @@ public final class SimpleDomainClient {
         if (mc.level == null) return;
         SCENES.put(owner, new Scene(owner, entityId, center, inDomain));
         if (mc.level.getEntity(entityId) instanceof AbstractClientPlayer p) {
-            MaximumPurpleAnimation.play(p, "simple_domain");
+            com.kira.jujutsuneon.rbx.AnimationTrack t = PlayerAnimations.play(p, "simple_domain", new PlayerAnimations.Play().fade(0.15));
+            // дальше держит печать (только верх тела — ходить можно), пока территория стоит
+            if (t != null) t.ended.connect(tr -> {
+                Scene sc = SCENES.get(owner);
+                if (sc != null && !sc.ending) PlayerAnimations.play(p, "simple_domain_hold");
+            });
         }
     }
 
@@ -165,6 +171,11 @@ public final class SimpleDomainClient {
         s.ending = true;
         s.broken = broken;
         s.endAge = 0;
+        Minecraft mc = Minecraft.getInstance();
+        if (mc.level != null && mc.level.getEntity(s.entityId) instanceof AbstractClientPlayer p) {
+            PlayerAnimations.stop(p, "simple_domain_hold", 0.3);
+            PlayerAnimations.stop(p, "simple_domain", 0.3);
+        }
         if (broken) {
             // Лопнул: осколки света разлетаются от края во все стороны.
             for (int i = 0; i < 60; i++) {
