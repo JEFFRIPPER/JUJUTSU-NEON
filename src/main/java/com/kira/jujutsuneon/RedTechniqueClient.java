@@ -673,31 +673,55 @@ public final class RedTechniqueClient {
             billboard(pose, cam, camera, ft.add(0.0, 1.0, 0.0), 2.4f, 0f, TEX_GLOW, 1f, 0.15f, 0.1f, glow * 0.25f, true);
         }
 
-        // Спиральные ленты вокруг шара и руки: закручиваются в плоскости поперёк руки и разрастаются,
-        // обвивая руку и корпус (шар при этом не растёт).
-        float rib = env(t, M_CONDENSE - 1, M_SHOCK + 3, 2, 4);
+        // Спиральные ленты (главное в референсе). Три фазы:
+        //  1) M_CONDENSE: 4 кольца-ленты «прорисовываются» вокруг шара и кисти, каждое под своим наклоном;
+        //  2) к M_SHOCK разрастаются в огромные дуги, обвивают руку и корпус — спиральная воронка вдоль руки;
+        //  3) после M_SHOCK вытягиваются назад вдоль руки и переходят в поток линий.
+        float rib = env(t, M_CONDENSE - 1, M_FLASH, 1.5, 3);
         if (rib > 0.01f) {
-            double grow = smooth(win(t, M_CONDENSE - 1, M_SHOCK));
+            double draw = smooth(win(t, M_CONDENSE - 1, M_CONDENSE + 4));
+            double grow = smooth(win(t, M_CONDENSE + 2, M_SHOCK));
+            double drag = smooth(win(t, M_SHOCK - 2, M_FLASH));
             Random rnd = new Random(c.seed * 13L);
             for (int i = 0; i < 5; i++) {
-                double a0 = i / 5.0 * Math.PI * 2.0 + rnd.nextDouble() * 0.6;
-                double spin = (0.38 + rnd.nextDouble() * 0.2) * (i % 2 == 0 ? 1 : -1);
-                double rad = (0.35 + 2.2 * grow) * (0.75 + rnd.nextDouble() * 0.5);
-                double len = 0.3 + 2.6 * grow;
+                // Своя плоскость кольца: ось руки, наклонённая на 15–60°.
+                double tiltA = rnd.nextDouble() * Math.PI * 2.0;
+                double tilt = Math.toRadians(15 + rnd.nextDouble() * 45);
+                Vec3 n = d.scale(Math.cos(tilt)).add(u.scale(Math.cos(tiltA) * Math.sin(tilt))).add(v.scale(Math.sin(tiltA) * Math.sin(tilt))).normalize();
+                Vec3 pu = Math.abs(n.y) > 0.95 ? new Vec3(1, 0, 0) : n.cross(new Vec3(0, 1, 0)).normalize();
+                Vec3 pv = pu.cross(n).normalize();
+                double a0 = rnd.nextDouble() * Math.PI * 2.0;
+                double spin = (0.55 + rnd.nextDouble() * 0.3) * (i % 2 == 0 ? 1 : -1);
+                double rad = (0.32 + 0.12 * i) * (1.0 - grow) + (1.6 + rnd.nextDouble() * 1.6) * grow;
+                double arc = Math.PI * (0.4 + 1.5 * draw + 0.3 * grow);
+                double back = 0.4 + 2.2 * grow + 4.0 * drag;
+                Vec3 center = orb.subtract(d.scale(0.8 * grow + 1.5 * drag));
+                int segs = 28;
                 Vec3 prev = null;
-                for (int s2 = 0; s2 <= 22; s2++) {
-                    double q = s2 / 22.0;
-                    double a = a0 + t * spin + q * Math.PI * 1.7;
-                    double rr = rad * (0.35 + 0.65 * Math.sin(q * Math.PI));
-                    Vec3 p = orb.subtract(d.scale(q * len)).add(u.scale(Math.cos(a) * rr)).add(v.scale(Math.sin(a) * rr));
+                for (int s2 = 0; s2 <= segs; s2++) {
+                    double q = s2 / (double) segs;
+                    double a = a0 + t * spin - q * arc;
+                    double rr = rad * (1.0 - 0.25 * q) * (1.0 - 0.6 * drag * q);
+                    Vec3 p = center.add(pu.scale(Math.cos(a) * rr)).add(pv.scale(Math.sin(a) * rr)).subtract(d.scale(q * back));
                     if (prev != null) {
-                        float w = (float) (0.05 + 0.09 * Math.sin(q * Math.PI));
-                        float aa = rib * (float) Math.sin(q * Math.PI);
-                        streak(pose, camera, prev, p, w * 2.6f, TEX_STREAK, 1f, 0.12f, 0.1f, aa * 0.6f, true);
-                        streak(pose, camera, prev, p, w, TEX_STREAK, 1f, 0.82f, 0.85f, aa, true);
+                        // Голова ленты толстая и яркая, хвост тонкий и рваный.
+                        double taper = Math.pow(1.0 - q, 0.7);
+                        float w = (float) ((0.06 + 0.12 * grow) * taper + 0.015);
+                        float aa = rib * (float) Math.min(1.0, (1.0 - q) * 1.6) * (s2 % 7 == 3 && q > 0.5 ? 0.35f : 1f);
+                        streak(pose, camera, prev, p, w * 3.0f, TEX_STREAK, 1f, 0.1f, 0.12f, aa * 0.7f, true);
+                        streak(pose, camera, prev, p, w * 1.6f, TEX_STREAK, 1f, 0.45f, 0.5f, aa * 0.8f, true);
+                        streak(pose, camera, prev, p, w * 0.7f, TEX_STREAK, 1f, 0.95f, 0.92f, aa, true);
                     }
                     prev = p;
                 }
+            }
+            // Искры, осыпающиеся с лент.
+            Random sp = new Random(c.seed * 101L + (long) Math.floor(t));
+            for (int i = 0; i < 10; i++) {
+                double a = sp.nextDouble() * Math.PI * 2.0;
+                double r = 0.3 + (0.4 + 2.4 * grow) * sp.nextDouble();
+                Vec3 p = orb.add(u.scale(Math.cos(a) * r)).add(v.scale(Math.sin(a) * r)).subtract(d.scale(sp.nextDouble() * 2.0 * grow));
+                billboard(pose, cam, camera, p, 0.08f + 0.06f * sp.nextFloat(), 0f, TEX_GLOW, 1f, 0.6f, 0.55f, rib * 0.8f, true);
             }
         }
 
