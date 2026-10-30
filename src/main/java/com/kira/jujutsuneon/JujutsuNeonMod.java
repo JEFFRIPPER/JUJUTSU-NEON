@@ -2292,6 +2292,7 @@ public class JujutsuNeonMod {
         if (DomainExpansion.denyTechniqueEdit(level, pos, owner)) return false;
         if (state.isAir() && state.getFluidState().isEmpty()) return false;
         if (isOwnerSafeBlock(owner, pos)) return false;
+        if (HollowPurpleOverhaul.inOwnerClearZone(owner, pos)) return false;
         if (isPurpleProtectedTechnicalBlock(state)) return false;
 
         // Purple explicitly erases bedrock, fluids, containers and all ordinary world blocks.

@@ -165,6 +165,8 @@ public final class MaximumPurpleClient {
         final UUID ownerId;
         /** Кончик пальца в момент выстрела Красным (redFist). */
         Vec3 redTip;
+        /** Ладонь с Синим в момент броска (blueHand). */
+        Vec3 blueTip;
         final ClientLevel level;
         final Vec3 feet;
         final float yaw;
@@ -742,11 +744,11 @@ public final class MaximumPurpleClient {
         if (t < T_SPAWN - 0.3 || t >= T_MERGED) return null;
         MaxPurpleRefTracks.Track tr = MaxPurpleRefTracks.at(t);
         if (tr != null) return trackedOrb(s, tr, t, true);
-        if (t < T_RELEASE) return bluePathPos(s, t);
+        if (t < T_RELEASE) return blueHand(s, t);
         if (t < TR_SKY.from()) {
             // Синий брошен — по спирали уходит ввысь (за кадр)
-            Vec3 top = bluePathPos(s, T_RELEASE);
-            Vec3 b1 = s.at(-2.5, -7.0, 25.0);
+            Vec3 top = blueHand(s, T_RELEASE);
+            Vec3 b1 = s.at(5.0, -3.0, 25.0); // вперёд и вверх — туда, куда его вытолкнула рука
             double p = win(t, T_RELEASE, 66);
             Vec3 base = lerp(top, b1, easeOut(p));
             Vec3 pos = base.add(spiralAround(s, b1.subtract(top), p, 3.0, 1.7 * smooth(win(t, T_RELEASE, 46))));
@@ -783,6 +785,24 @@ public final class MaximumPurpleClient {
             }
         }
         return s.atP(0.05, 0.36, 2.25, t);
+    }
+
+    /**
+     * Синий до броска — в правой ладони (референс: рождается в руке и чуть подлетает над ней, рука ведёт его
+     * по дуге и выталкивает). После броска — точка, где ладонь его отпустила.
+     */
+    private static Vec3 blueHand(Scene s, double t) {
+        if (t >= T_RELEASE && s.blueTip != null) return s.blueTip;
+        Minecraft mc = Minecraft.getInstance();
+        if (mc.level != null && mc.level.getPlayerByUUID(s.ownerId) instanceof AbstractClientPlayer p) {
+            Vec3 palm = com.kira.jujutsuneon.rbx.PlayerAnimations.jointWorld(p, "RightHand", mc.getFrameTime(), 0.3);
+            if (palm != null) {
+                Vec3 pos = palm.add(0.0, 0.2 * smooth(win(t, T_SPAWN, T_SPAWN + 8)), 0.0);
+                if (t < T_RELEASE) s.blueTip = pos;
+                return pos;
+            }
+        }
+        return bluePathPos(s, t);
     }
 
     /** Позиция Красного или null. */
@@ -1007,15 +1027,16 @@ public final class MaximumPurpleClient {
             // 16,8–17,45 с: один большой фиолетовый шар, белый вихрь
             ck(336, A_CORE, 3.6, 0.0, 0.0, A_CORE, 0.0, 0.0, 0.0, 70f, 0f, true),
             ck(349, A_CORE, 1.9, 0.0, 0.0, A_CORE, 0.0, 0.0, 0.0, 82f, 8f, false),
-            // 17,45–18,3 с (референс #2081–2186, один план): спереди-сверху на опущенную голову, шар за спиной;
-            // камера опускается к груди (руки над головой), потом снова сверху — игрок откидывается назад
-            ck(1048 / 3.0, A_PLAYER, 0.95, 0.0, 3.2, A_PLAYER, -0.2, 0.0, 1.45, 70f, 0f, true),
-            ck(355.3, A_PLAYER, 1.05, 0.1, 2.65, A_PLAYER, -0.1, 0.0, 1.55, 70f, 0f, false),
-            // 17,85–18,3 с: игрок откидывается на спину — камера уходит вниз и вперёд, снимает его сбоку-спереди
-            // на уровне тела, сфера за ним (референс #2150–2186); чуть сбоку от ног, чтобы голова не пряталась за торсом
-            ck(359.3, A_PLAYER, 1.5, 0.5, 1.0, A_PLAYER, -0.3, 0.0, 1.0, 72f, 0f, false),
-            ck(361.8, A_PLAYER, 1.15, 1.65, 0.8, A_PLAYER, -0.45, 0.0, 0.9, 72f, 0f, false),
-            ck(366.0, A_PLAYER, 1.25, 1.8, 0.85, A_PLAYER, -0.45, 0.0, 0.9, 74f, 0f, false),
+            // 17,3–17,85 с (референс): камера сзади у затылка, чуть ниже макушки, смотрит вверх на шар;
+            // потом чуть отъезжает — руки через стороны вскидываются над головой
+            ck(1048 / 3.0, A_PLAYER, -0.75, 0.0, 1.3, A_CORE, 0.0, 0.0, 0.0, 72f, 0f, true),
+            ck(353.0, A_PLAYER, -0.85, 0.1, 1.5, A_CORE, 0.0, 0.0, 0.0, 72f, 0f, false),
+            ck(357.0, A_PLAYER, -1.05, 0.15, 1.3, A_PLAYER, 0.0, 0.0, 2.4, 74f, 0f, false),
+            // 17,9 с: смена плана — спереди, чуть ниже лица, руки над головой, за ним вихрь
+            ck(358.0, A_PLAYER, 1.6, 0.0, 0.5, A_PLAYER, 0.0, 0.0, 1.7, 72f, 0f, true),
+            // 18,0–18,2 с: неподвижно спереди-снизу, круто вверх — ремень и свисающие ноги, голова скрыта грудью
+            ck(359.6, A_PLAYER, 0.8, 0.0, -1.1, A_PLAYER, -0.1, 0.0, 1.3, 74f, 0f, true),
+            ck(366.0, A_PLAYER, 0.8, 0.0, -1.1, A_PLAYER, -0.1, 0.0, 1.3, 74f, 0f, false),
     };
 
     private static Vec3 anchor(Scene s, int a, double f, double r, double u, double t) {
@@ -1600,7 +1621,7 @@ public final class MaximumPurpleClient {
             }
         }
         // #231–236: тонкое белое кольцо у кисти + белые лучи-копья, кольцо расширяется
-        Vec3 rel = bluePathPos(s, T_RELEASE);
+        Vec3 rel = blueHand(s, T_RELEASE);
         float ring = env(t, T_RELEASE + 0.4, T_RELEASE + 2.2, 0.1, 0.8);
         if (ring > 0.0f) {
             float r = (float) (0.3 + 1.6 * easeOut(win(t, T_RELEASE + 0.4, T_RELEASE + 1.8)));
@@ -2109,7 +2130,7 @@ public final class MaximumPurpleClient {
         }
         // бросок: синий взрыв
         if (t >= T_RELEASE && t < T_RELEASE + 2) {
-            Vec3 top = bluePathPos(s, T_RELEASE);
+            Vec3 top = blueHand(s, T_RELEASE);
             for (int i = 0; i < 12; i++) {
                 boolean white = RNG.nextInt(3) == 0;
                 spark(top, rndVec(0.3), 0.22f, white ? 0.9f : 0.3f, white ? 0.95f : 0.6f, 1.0f, 8, 0.8);
@@ -2329,18 +2350,18 @@ public final class MaximumPurpleClient {
             drawCracks(g, w, h, t);
         }
         // референс 120 к/с #2187–2190: штриховка и кисть «пистолетом»; #2191–2201: белый «X» и контур кисти; #2202 — белый
-        // Манга-кадры удара: сам игрок, зависший на спине в воздухе (его модель в текущей позе, сбоку),
+        // Манга-кадры удара: сам игрок, зависший в воздухе буквой «Т» (его модель в текущей позе, спереди),
         // рисунком пером — белый контур, тело тушью. Сначала на чёрно-белых линиях со штриховкой, потом рядом
         // с «X»; ~0,18 с каждый с лёгким наездом.
         if (t >= 362.5 && t < 366.0) {
             double k = t - 362.5;
             drawFrame(g, w, h, MANGA_D1, k * 0.3);
-            drawOutlineAt(g, w, h, 1.0f + 0.02f * (float) k, w * 0.16f, -h * 0.3f, 90.0f);
+            drawOutlineAt(g, w, h, 0.6f + 0.012f * (float) k, 0.0f, -h * 0.19f, 180.0f);
             drawFrame(g, w, h, TEX_HATCH, 0.0);
         } else if (t >= 366.0 && t < 369.5) {
             double k = t - 366.0;
             drawFrame(g, w, h, MANGA_D2, k * 0.3);
-            drawOutlineAt(g, w, h, 1.04f + 0.02f * (float) k, w * 0.2f, -h * 0.3f, 90.0f);
+            drawOutlineAt(g, w, h, 0.62f + 0.012f * (float) k, w * 0.12f, -h * 0.19f, 180.0f);
         }
 
         // сразу белый экран, пока дорезается кратер

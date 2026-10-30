@@ -366,6 +366,7 @@ public final class HollowPurpleOverhaul {
                     if (blockState.isAir() && blockState.getFluidState().isEmpty()) continue;
                     if (isProtectedTechnicalBlock(blockState)) continue;
                     if (isOwnerSafeCell(owner, level, pos)) continue;
+                    if (inOwnerClearZone(owner, pos)) continue;
                     if (DomainExpansion.denyTechniqueEdit(level, pos, owner)) continue;
 
                     Vec3 center = Vec3.atCenterOf(pos);
@@ -389,6 +390,22 @@ public final class HollowPurpleOverhaul {
                 }
             }
         }
+    }
+
+    /**
+     * Блоки у самого кастующего не трогаем: ни опору, ни площадку вокруг. Разрушение начинается только со
+     * второго блока впереди по направлению выстрела (первый блок перед игроком цел).
+     */
+    static boolean inOwnerClearZone(ServerPlayer owner, BlockPos pos) {
+        Vec3 dir = new Vec3(
+                owner.getPersistentData().getDouble("jn_purple_vx"),
+                owner.getPersistentData().getDouble("jn_purple_vy"),
+                owner.getPersistentData().getDouble("jn_purple_vz"));
+        if (dir.lengthSqr() < 1.0E-8) dir = owner.getLookAngle();
+        dir = dir.normalize();
+        Vec3 feet = new Vec3(Mth.floor(owner.getX()) + 0.5, owner.getY(), Mth.floor(owner.getZ()) + 0.5);
+        double along = Vec3.atCenterOf(pos).subtract(feet).dot(dir);
+        return along < 1.9;
     }
 
     private static boolean isOwnerSafeCell(
