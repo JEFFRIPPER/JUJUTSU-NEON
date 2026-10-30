@@ -224,7 +224,8 @@ public final class RedTechniqueClient {
         CASTS.put(caster, c);
         if (mc.level.getEntity(entityId) instanceof AbstractClientPlayer p) {
             String anim = max ? "max_red" : "red_cast";
-            PlayerAnimations.play(p, anim, new PlayerAnimations.Play().fade(0.1)
+            // Max Red сменяет позу зарядки: клип начинается с той же позы, вход мягче (без скачка)
+            PlayerAnimations.play(p, anim, new PlayerAnimations.Play().fade(max ? 0.25 : 0.1)
                     .firstPerson(true, true, (max ? ARM_TICKS_MAX : ARM_TICKS_RED) / 20.0));
         }
         if (max && mc.player != null && mc.player.getId() == entityId) {
@@ -542,8 +543,8 @@ public final class RedTechniqueClient {
             {5, -0.10, 0.40, 0.70},
             {10, 0.55, 0.45, 1.15},
             {15, 0.74, 0.36, 1.35},
-            {48, 0.74, 0.36, 1.35},
-            {56, 0.03, 0.33, 0.76},
+            {45, 0.74, 0.36, 1.35},
+            {59, 0.03, 0.33, 0.76},
     };
 
     private static Vec3 maxHand(Minecraft mc, Cast c, double t, float pt) {
