@@ -416,7 +416,8 @@ public final class PlayerAnimations {
             }
             if (w <= 1.0E-3) return;
             float diff = Mth.wrapDegrees(p.yHeadRot - p.yBodyRot);
-            p.yBodyRot += diff * (float) (0.6 * w);
+            // мягко (≈ 0,25 за тик, между тиками интерполируется): рывок на 30° за тик выглядел как телепорт
+            p.yBodyRot += diff * (float) (0.25 * w);
         }
 
         void frame(AbstractClientPlayer p, float pt, double dt) {
