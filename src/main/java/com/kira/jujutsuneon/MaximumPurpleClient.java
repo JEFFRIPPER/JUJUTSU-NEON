@@ -764,6 +764,7 @@ public final class MaximumPurpleClient {
         if (tr != null) return trackedRadius(s, tr, t, true);
         if (t < T_RELEASE) return (float) (0.06 + 0.08 * smooth(win(t, T_SPAWN, T_SPAWN + 3)));
         if (t < CHASE_FROM) return (float) (0.16 + 0.16 * easeOut(win(t, T_RELEASE, 60)));
+        if (t < RING_FROM) return 0.55f; // погоня — дальний план, шары крупнее
         if (t < T_SPACE) return 0.38f;
         return 0.42f;
     }
@@ -828,15 +829,17 @@ public final class MaximumPurpleClient {
         if (t < T_RED_FIRE) return (float) (0.03 + 0.05 * smooth(win(t, RED_TIP_FROM, RED_BORN - 2.0))
                 + 0.04 * smooth(win(t, RED_BORN - 0.4, RED_BORN + 0.6)) + 0.01 * Math.sin(t * 1.7));
         if (t < CHASE_FROM) return (float) (0.10 + 0.22 * easeOut(win(t, 69, 90)));
-        if (t < T_SPACE) return (float) (0.32 + 0.06 * smooth(win(t, CHASE_FROM, CHASE_FROM + 20)));
+        if (t < RING_FROM) return 0.52f; // погоня — дальний план, шары крупнее
+        if (t < T_SPACE) return 0.38f;
         return 0.42f;
     }
 
-    /** Огромная фиолетовая сфера — всегда за спиной игрока (17,5–18,2 с). */
+    /**
+     * Огромная фиолетовая сфера (17,5–18,4 с) — над игроком, чуть позади: из-за затылка видна над макушкой,
+     * спереди-снизу и снизу — за ним. Камеры этих планов остаются снаружи сферы.
+     */
     private static Vec3 bigSpherePos(Scene s, double t) {
-        // референс: камера смотрит сверху — шар за спиной ниже плеч; когда камера у груди — шар за головой
-        double mid = smooth(win(t, 354.0, 358.5)) * (1.0 - smooth(win(t, 360.5, 362.5)));
-        return s.atP(-5.2, 0.0, 0.2 + 1.5 * mid, t);
+        return s.atP(-1.6, 0.0, 6.3, t);
     }
 
     // ------------------------------------------------------------------ ticks
@@ -1011,8 +1014,9 @@ public final class MaximumPurpleClient {
             ck(382 / 3.0, A_CORE, 7.0, -3.5, 3.6, A_CORE, 0.0, 0.0, 0.0, 66f, 0f, true),
             // 7,97–11,4 с (кадр 478): погоня — дальний вид сбоку: вверху шары гоняются друг за другом вокруг
             // ядра, внизу кадра виден игрок, который плавно поднимается к ним; камера медленно подтягивается
-            ck(CHASE_FROM, A_CORE, 3.0, -15.0, -9.0, A_CORE, 0.0, 0.0, -9.6, 74f, 0f, true),
-            ck(226, A_CORE, 2.0, -12.0, -4.6, A_CORE, 0.0, 0.0, -5.0, 66f, 0f, false),
+            // (камера сбоку чуть ниже ног и смотрит вверх: игрок крупно внизу, кольцо над ним)
+            ck(CHASE_FROM, A_PLAYER, 2.0, -10.0, -2.0, A_PLAYER, 0.0, 0.0, 7.2, 74f, 0f, true),
+            ck(226, A_PLAYER, 1.5, -8.0, -1.5, A_PLAYER, 0.0, 0.0, 4.4, 70f, 0f, false),
             // 11,4–14,1 с: снизу — кольцо, игрок поднимается к центру, кольцо раскрывается
             // (референс 120 к/с #1370–1683: камера чуть ниже кольца, почти горизонтально, кольцо ~0,6 ширины кадра;
             //  игрок входит в кадр снизу ~12,3 с и поднимается под кольцо)
@@ -1029,17 +1033,18 @@ public final class MaximumPurpleClient {
             ck(349, A_CORE, 1.9, 0.0, 0.0, A_CORE, 0.0, 0.0, 0.0, 82f, 8f, false),
             // 17,3–17,85 с (референс): камера сзади у затылка, чуть ниже макушки, смотрит вверх на шар;
             // потом чуть отъезжает — руки через стороны вскидываются над головой
-            ck(1048 / 3.0, A_PLAYER, -0.75, 0.0, 1.3, A_CORE, 0.0, 0.0, 0.0, 72f, 0f, true),
-            ck(352.0, A_PLAYER, -0.8, 0.05, 1.42, A_CORE, 0.0, 0.0, 0.0, 72f, 0f, false),
-            // 17,6–17,85 с: вплотную за плечами, взгляд вверх через плечо — руки через стороны идут вверх
-            ck(352.0, A_PLAYER, -0.55, 0.22, 1.45, A_PLAYER, 0.6, -0.05, 2.35, 78f, 0f, true),
-            ck(357.0, A_PLAYER, -0.5, 0.18, 1.4, A_PLAYER, 0.6, -0.05, 2.45, 78f, 0f, false),
-            // 17,9 с: смена плана — спереди-снизу, руки скрещены над головой, за спиной сфера
+            // огромная сфера висит над игроком чуть позади (bigSpherePos): внизу кадра макушка, над ней сфера
+            ck(1048 / 3.0, A_PLAYER, -1.2, 0.0, 0.9, A_PLAYER, 0.0, 0.0, 3.6, 80f, 0f, true),
+            ck(352.0, A_PLAYER, -1.1, 0.05, 1.0, A_PLAYER, 0.0, 0.0, 3.6, 80f, 0f, false),
+            // 17,6–17,85 с: вплотную за плечами, взгляд вперёд-вверх через плечо — руки через стороны идут вверх
+            ck(352.0, A_PLAYER, -0.9, 0.45, 1.5, A_PLAYER, 0.8, 0.0, 2.2, 76f, 0f, true),
+            ck(357.0, A_PLAYER, -0.85, 0.4, 1.45, A_PLAYER, 0.8, 0.0, 2.3, 76f, 0f, false),
+            // 17,9 с: смена плана — спереди-снизу, руки скрещены над головой, над ним сфера
             ck(358.0, A_PLAYER, 1.35, 0.1, 0.35, A_PLAYER, 0.0, 0.0, 1.95, 72f, 0f, true),
             // 18,0–18,45 с: неподвижно снизу и чуть спереди, близко, взгляд вверх — руки в «Т», ноги свисают,
             // видны подошвы, голова скрыта грудью
-            ck(359.6, A_PLAYER, 0.5, 0.0, -1.0, A_PLAYER, -0.15, 0.0, 1.25, 60f, 0f, true),
-            ck(370.0, A_PLAYER, 0.5, 0.0, -1.0, A_PLAYER, -0.15, 0.0, 1.25, 60f, 0f, false),
+            ck(359.6, A_PLAYER, 0.35, 0.0, -0.6, A_PLAYER, -0.1, 0.0, 1.3, 64f, 0f, true),
+            ck(370.0, A_PLAYER, 0.35, 0.0, -0.6, A_PLAYER, -0.1, 0.0, 1.3, 64f, 0f, false),
     };
 
     private static Vec3 anchor(Scene s, int a, double f, double r, double u, double t) {
@@ -2297,7 +2302,7 @@ public final class MaximumPurpleClient {
     }
 
     /** Наклон модели в манга-кадрах удара: вид снизу, как у последнего плана перед ними. */
-    private static final float MANGA_PITCH = 50.0f;
+    private static final float MANGA_PITCH = 62.0f;
 
     private static void drawLocalOverlays(GuiGraphics g, int w, int h, double t) {
         RenderSystem.enableBlend();
@@ -2370,14 +2375,14 @@ public final class MaximumPurpleClient {
             double k = t - 362.5;
             drawFrame(g, w, h, MANGA_D1, k * 0.3);
             float z = 0.8f + 0.012f * (float) k;
-            drawOutlineAt(g, w, h, z, 0.0f, h * 0.84f - h * (1.32f + 0.75f * (z - 1.0f)), 180.0f, MANGA_PITCH,
+            drawOutlineAt(g, w, h, z, 0.0f, h * 0.76f - h * (1.32f + 0.75f * (z - 1.0f)), 180.0f, MANGA_PITCH,
                     1.0 + Math.floor(t * 0.7));
             drawFrame(g, w, h, TEX_HATCH, 0.0);
         } else if (t >= 366.0 && t < 369.5) {
             double k = t - 366.0;
             drawFrame(g, w, h, MANGA_D2, k * 0.3);
             float z = 0.82f + 0.012f * (float) k;
-            drawOutlineAt(g, w, h, z, w * 0.12f, h * 0.84f - h * (1.32f + 0.75f * (z - 1.0f)), 180.0f, MANGA_PITCH,
+            drawOutlineAt(g, w, h, z, w * 0.12f, h * 0.76f - h * (1.32f + 0.75f * (z - 1.0f)), 180.0f, MANGA_PITCH,
                     1.0 + Math.floor(t * 0.7));
         }
 
@@ -2534,7 +2539,7 @@ public final class MaximumPurpleClient {
         int n = seed == 0.0 ? 8 : 14;
         for (int i = 0; i < n; i++) {
             double a = i * Math.PI * 2.0 / n;
-            float oi = seed == 0.0 ? o : o * (float) (0.6 + 1.3 * hash(seed + i * 1.7));
+            float oi = seed == 0.0 ? o : o * (float) (0.5 + 2.2 * hash(seed + i * 1.7));
             drawSilhouetteAt(g, w, h, WHITE_TINT, WHITE_TINT, WHITE_TINT, zoom,
                     dx + (float) Math.cos(a) * oi, dy + (float) Math.sin(a) * oi, bodyYaw, pitch);
         }

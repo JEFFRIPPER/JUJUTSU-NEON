@@ -567,7 +567,7 @@ def max_purple():
         return M(legs_hang, {'LowerTorso': (tilt, 0, 0), 'UpperTorso': (chest, 0, 0), 'Head': (head, 0, 0)})
 
     # 17,9 с: руки скрещены над головой (предплечья крест-накрест над лбом)
-    UP = M(hang(-6, -4, -18), arms((0, 55, 175), -62, (0, -55, -175), -62))
+    UP = M(hang(-6, -4, -18), arms((-10, 60, 165), -70, (-10, -60, -165), -70))
     k.key(17.9, 'easeInOutCubic', UP, overlap=False)
     # удар: руки рывком опускаются через стороны в «Т», корпус откидывается на ~12°
     k.key(18.02, 'easeOutQuint', M(hang(-12, -3, -6), arms((-4, 0, 88), 0, (-4, 0, -88), 0)), overlap=False)
