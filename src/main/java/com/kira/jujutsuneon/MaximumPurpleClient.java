@@ -764,7 +764,6 @@ public final class MaximumPurpleClient {
         if (tr != null) return trackedRadius(s, tr, t, true);
         if (t < T_RELEASE) return (float) (0.06 + 0.08 * smooth(win(t, T_SPAWN, T_SPAWN + 3)));
         if (t < CHASE_FROM) return (float) (0.16 + 0.16 * easeOut(win(t, T_RELEASE, 60)));
-        if (t < RING_FROM) return 0.55f; // погоня — дальний план, шары крупнее
         if (t < T_SPACE) return 0.38f;
         return 0.42f;
     }
@@ -829,8 +828,7 @@ public final class MaximumPurpleClient {
         if (t < T_RED_FIRE) return (float) (0.03 + 0.05 * smooth(win(t, RED_TIP_FROM, RED_BORN - 2.0))
                 + 0.04 * smooth(win(t, RED_BORN - 0.4, RED_BORN + 0.6)) + 0.01 * Math.sin(t * 1.7));
         if (t < CHASE_FROM) return (float) (0.10 + 0.22 * easeOut(win(t, 69, 90)));
-        if (t < RING_FROM) return 0.52f; // погоня — дальний план, шары крупнее
-        if (t < T_SPACE) return 0.38f;
+        if (t < T_SPACE) return (float) (0.32 + 0.06 * smooth(win(t, CHASE_FROM, CHASE_FROM + 20)));
         return 0.42f;
     }
 
@@ -1012,11 +1010,9 @@ public final class MaximumPurpleClient {
             // камера и шары по трекам референса (trackCam), ключи ниже — только запасные.
             ck(218 / 3.0, A_GROUND, 20.0, -8.0, 11.5, A_GROUND, 0.0, 0.0, 6.0, 60f, 0f, true),
             ck(382 / 3.0, A_CORE, 7.0, -3.5, 3.6, A_CORE, 0.0, 0.0, 0.0, 66f, 0f, true),
-            // 7,97–11,4 с (кадр 478): погоня — дальний вид сбоку: вверху шары гоняются друг за другом вокруг
-            // ядра, внизу кадра виден игрок, который плавно поднимается к ним; камера медленно подтягивается
-            // (камера сбоку чуть ниже ног и смотрит вверх: игрок крупно внизу, кольцо над ним)
-            ck(CHASE_FROM, A_PLAYER, 2.0, -10.0, -2.0, A_PLAYER, 0.0, 0.0, 7.2, 74f, 0f, true),
-            ck(226, A_PLAYER, 1.5, -8.0, -1.5, A_PLAYER, 0.0, 0.0, 4.4, 70f, 0f, false),
+            // 7,97–11,4 с (кадр 478): погоня — дальний план на уровне шаров, медленная панорама
+            ck(CHASE_FROM, A_CORE, 6.5, -2.2, -0.6, A_CORE, -1.0, 1.0, 0.0, 60f, 0f, true),
+            ck(226, A_CORE, 6.0, 1.2, -0.4, A_CORE, -1.0, -0.6, 0.0, 58f, 0f, false),
             // 11,4–14,1 с: снизу — кольцо, игрок поднимается к центру, кольцо раскрывается
             // (референс 120 к/с #1370–1683: камера чуть ниже кольца, почти горизонтально, кольцо ~0,6 ширины кадра;
             //  игрок входит в кадр снизу ~12,3 с и поднимается под кольцо)
@@ -1587,15 +1583,6 @@ public final class MaximumPurpleClient {
             float radius = (float) (Mth.lerp(smooth(win(t, 15.6, 17.0)), 0.3 + 1.5 * grow, 1.05)
                     - 0.2 * smooth(win(t, 36.0, 41.0)));
             blueSplashVortex(pose, cam, camera, s, blue, radius, t, k);
-            // #106+: тёмно-синие ошмётки отлетают влево-вниз
-            float debris = env(t, 21.5, T_RELEASE, 1.0, 1.0);
-            for (int i = 0; i < 8 && debris > 0.0f; i++) {
-                double life = (t * 0.06 + hash(i * 4.1)) % 1.0;
-                Vec3 p = blue.add(s.right.scale(-0.4 - 1.2 * life)).add(0.0, -0.6 * life + 0.3 * hash(i), 0.0)
-                        .add(s.forward.scale(0.4 * (hash(i * 2.2) - 0.5)));
-                billboard(pose, cam, camera, p, (float) (0.12 + 0.1 * hash(i * 9.0)), (float) i, TEX_BLOOM, 0.02f, 0.03f, 0.12f,
-                        0.85f * debris * (float) Math.sin(Math.PI * life), false);
-            }
             // #116–165: горизонтальные бело-фиолетовые разряды через голову влево
             float zap = env(t, 22.6, 31.4, 0.5, 1.0);
             if (zap > 0.0f && ((int) (t * 2.0)) % 3 != 2) {
@@ -1648,9 +1635,7 @@ public final class MaximumPurpleClient {
         }
         // #237–255: белое гаснет в бело-голубой водоворот — крупные мягкие ленты и белые шарики вокруг персонажа
         // бросок (референс 1,9–2,7 с): брызги на весь кадр, разлетаются и тают; на земле кляксы
-        splashBurst(pose, cam, camera, rel, t, T_RELEASE + 0.2, 2.0, 15, 41.0, 2.6, 0.5f, 1.6f, 15.0, 1.0f);
-        splashBurst(pose, cam, camera, s.atP(0.0, 0.0, 1.1, t), t, T_RELEASE + 1.0, 3.0, 10, 47.0, 2.2, 0.4f, 1.2f, 16.0, 0.9f);
-        groundSplats(pose, camera, s, t);
+        // без водяных брызг и клякс — только вихрь лент и свечение
     }
 
     /**
@@ -1685,7 +1670,7 @@ public final class MaximumPurpleClient {
         float flash = env(t, 13.6, 17.0, 0.4, 2.4);
         billboard(pose, cam, camera, blue, 3.2f * flash, 0f, TEX_BLOOM, 0.75f, 0.9f, 1.0f, 0.9f * flash, true);
         // взрыв брызг (0,6–0,8 с)
-        splashBurst(pose, cam, camera, blue, t, 14.2, 2.5, 16, 17.0, 1.7, 0.4f, 1.5f, 12.0, 1.0f);
+
         // водоворот: штрихи-«жидкость» закручиваются в одну сторону ровно, без «дыхания» и встречного слоя;
         // внутренний слой чуть быстрее — спираль затягивается к ядру
         float sw = radius * 1.6f;
@@ -1695,25 +1680,6 @@ public final class MaximumPurpleClient {
         // яркое бело-голубое ядро в центре вихря
         billboard(pose, cam, camera, blue, radius * 0.9f, 0f, TEX_BLOOM, 0.55f, 0.85f, 1.0f, 0.9f * k, true);
         billboard(pose, cam, camera, blue, radius * 0.45f, 0f, TEX_BLOOM, 1.0f, 1.0f, 1.0f, k, true);
-        // поток брызг, срывающихся с водоворота: новая каждые ~1,4 тика, по касательной
-        double from = 16.0, step = 1.4, life = 9.0;
-        int n0 = Math.max(0, (int) Math.floor((t - life - from) / step)), n1 = (int) Math.floor((t - from) / step);
-        for (int j = n0; j <= n1; j++) {
-            double birth = from + j * step;
-            double age = t - birth;
-            if (age < 0.0 || age > life) continue;
-            double u = age / life;
-            double h = hash(j * 1.91 + 5.0);
-            // срывается по касательной в сторону вращения вихря
-            double ang = j * 2.39996 - birth * 0.38 - 0.6 * easeOut(u);
-            Vec3 out = s.right.scale(Math.cos(ang)).add(new Vec3(0, 1, 0).scale(Math.sin(ang) * 0.8))
-                    .add(s.forward.scale((h - 0.5) * 0.8)).normalize();
-            Vec3 p = blue.add(out.scale(radius * (0.5 + 1.4 * easeOut(u))));
-            float size = radius * (float) (0.35 + 0.5 * easeOut(u)) * (float) (0.7 + 0.6 * h);
-            float a = k * (float) (smooth(u / 0.15) * (1.0 - smooth((u - 0.45) / 0.55))) * nearFade(camera, p, size);
-            billboard(pose, cam, camera, p, size, (float) (ang + 1.57 + h), TEX_BSPLASH[j % TEX_BSPLASH.length],
-                    1f, 1f, 1f, a, false);
-        }
         // светящиеся точки, медленно разлетаются
         for (int i = 0; i < 12; i++) {
             double h = hash(i * 11.1 + 3.0);
