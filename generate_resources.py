@@ -332,40 +332,6 @@ for name, cfg in CORE_4K.items():
 for name, rgb in GENERIC.items():
     make_generic_vfx(name, rgb)
 
-# 4K item texture.
-s = 1024
-im = Image.new("RGBA", (s, s), (0, 0, 0, 0))
-d = ImageDraw.Draw(im)
-d.rounded_rectangle((80, 340, 944, 690), radius=120, fill=(10, 12, 20, 255), outline=(60, 195, 255, 255), width=10)
-for y in range(370, 670, 18):
-    d.line((120, y, 900, y+12), fill=(34, 38, 52, 160), width=4)
-d.rounded_rectangle((150, 405, 874, 625), radius=90, fill=(4, 5, 10, 255))
-gl = Image.new("RGBA", (s, s), (0, 0, 0, 0))
-g = ImageDraw.Draw(gl)
-g.rounded_rectangle((130, 385, 894, 645), radius=105, outline=(55, 205, 255, 120), width=28)
-gl = gl.filter(ImageFilter.GaussianBlur(25))
-im.alpha_composite(gl)
-im.resize((4096, 4096), Image.Resampling.LANCZOS).save(ITEM / "gojo_blindfold.png", optimize=True)
-
-# Armor layer.
-# Повязка — полоса ткани на уровне глаз по четырём боковым граням шлема (развёртка головы 64x32:
-# грани по x 0..32, по v 8..16; глаза на v ≈ 12). Верх шлема прозрачный: раньше он был залит целиком,
-# и над головой висела плоская тёмная «пластина» шире головы.
-armor = Image.new("RGBA", (1024, 512), (0, 0, 0, 0))
-ad = ImageDraw.Draw(armor)
-U = 16  # пикселей текстуры на единицу развёртки
-ad.rectangle((0, int(10.5 * U), 32 * U - 1, int(13.5 * U)), fill=(10, 12, 20, 255))
-for x in range(4, 32 * U, 14):
-    ad.line((x, int(10.7 * U), x + 6, int(13.3 * U)), fill=(45, 55, 72, 145), width=3)
-ad.line((0, int(10.5 * U), 32 * U, int(10.5 * U)), fill=(34, 40, 58, 255), width=4)
-ad.line((0, int(13.5 * U), 32 * U, int(13.5 * U)), fill=(34, 40, 58, 255), width=4)
-armor.resize((4096, 2048), Image.Resampling.LANCZOS).save(ARMOR / "gojo_layer_1.png", optimize=True)
-
-MODEL.joinpath("gojo_blindfold.json").write_text(json.dumps({
-    "parent": "minecraft:item/generated",
-    "textures": {"layer0": "jujutsu_neon:item/gojo_blindfold"}
-}, indent=2))
-
 # Костюм Годжо: иконки и текстуры — tools/gen_gojo_suit.py (лежат в репозитории)
 for part in ("head", "chest", "legs", "feet"):
     MODEL.joinpath(f"gojo_suit_{part}.json").write_text(json.dumps({
@@ -374,7 +340,6 @@ for part in ("head", "chest", "legs", "feet"):
     }, indent=2))
 
 LANG.joinpath("ru_ru.json").write_text(json.dumps({
-    "item.jujutsu_neon.gojo_blindfold": "Повязка Годжо",
     "item.jujutsu_neon.gojo_suit_head": "Причёска Годжо",
     "item.jujutsu_neon.gojo_suit_chest": "Костюм Годжо",
     "item.jujutsu_neon.gojo_suit_legs": "Штаны Годжо",

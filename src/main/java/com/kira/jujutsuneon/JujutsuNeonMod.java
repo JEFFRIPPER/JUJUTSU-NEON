@@ -258,15 +258,6 @@ public class JujutsuNeonMod {
     public static final RegistryObject<Item> GOJO_SUIT_LEGS = ITEMS.register("gojo_suit_legs", () -> GojoSuit.create(ArmorItem.Type.LEGGINGS));
     public static final RegistryObject<Item> GOJO_SUIT_FEET = ITEMS.register("gojo_suit_feet", () -> GojoSuit.create(ArmorItem.Type.BOOTS));
 
-    public static final RegistryObject<Item> GOJO_BLINDFOLD = ITEMS.register(
-            "gojo_blindfold",
-            () -> new GojoBlindfoldItem(
-                    GojoBlindfoldMaterial.INSTANCE,
-                    ArmorItem.Type.HELMET,
-                    new Item.Properties().stacksTo(1).rarity(Rarity.EPIC)
-            )
-    );
-
     private static final SimpleChannel NETWORK = NetworkRegistry.newSimpleChannel(
             new ResourceLocation(MODID, "main"),
             () -> PROTOCOL,
@@ -373,7 +364,6 @@ public class JujutsuNeonMod {
 
     private void addToCreativeTab(BuildCreativeModeTabContentsEvent event) {
         if (event.getTabKey() == CreativeModeTabs.COMBAT) {
-            event.accept(GOJO_BLINDFOLD);
             event.accept(GOJO_SUIT_HEAD);
             event.accept(GOJO_SUIT_CHEST);
             event.accept(GOJO_SUIT_LEGS);
@@ -6744,73 +6734,4 @@ public class JujutsuNeonMod {
         }
     }
 
-    /**
-     * Предмет-активатор способностей.
-     *
-     * Материал возвращает имя "leather", поэтому без отдельной модели
-     * Minecraft использует совместимое поведение шлема. Позже можно
-     * подложить собственную модель/текстуру повязки через resources.
-     */
-    private static class GojoBlindfoldItem extends ArmorItem {
-
-        public GojoBlindfoldItem(ArmorMaterial material, Type type, Properties properties) {
-            super(material, type, properties);
-        }
-
-        @Override
-        public Component getName(ItemStack stack) {
-            return Component.literal("Повязка Годжо")
-                    .withStyle(ChatFormatting.LIGHT_PURPLE);
-        }
-
-        @Override
-        public String getArmorTexture(ItemStack stack, Entity entity, EquipmentSlot slot, String type) {
-            return MODID + ":textures/models/armor/gojo_layer_1.png";
-        }
-    }
-
-    private enum GojoBlindfoldMaterial implements ArmorMaterial {
-        INSTANCE;
-
-        @Override
-        public int getDurabilityForType(ArmorItem.Type type) {
-            return 275;
-        }
-
-        @Override
-        public int getDefenseForType(ArmorItem.Type type) {
-            return type == ArmorItem.Type.HELMET ? 2 : 0;
-        }
-
-        @Override
-        public int getEnchantmentValue() {
-            return 18;
-        }
-
-        @Override
-        public SoundEvent getEquipSound() {
-            return SoundEvents.ARMOR_EQUIP_LEATHER;
-        }
-
-        @Override
-        public Ingredient getRepairIngredient() {
-            return Ingredient.EMPTY;
-        }
-
-        @Override
-        public String getName() {
-            // Используем ванильную leather-текстуру брони как fallback.
-            return "leather";
-        }
-
-        @Override
-        public float getToughness() {
-            return 0.0F;
-        }
-
-        @Override
-        public float getKnockbackResistance() {
-            return 0.0F;
-        }
-    }
 }

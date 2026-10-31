@@ -1,9 +1,16 @@
 package com.kira.jujutsuneon.rbx;
 
+import com.kira.jujutsuneon.GojoSuit;
 import com.mojang.blaze3d.vertex.PoseStack;
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.model.PlayerModel;
+import net.minecraft.client.model.geom.ModelPart;
+import net.minecraft.client.player.AbstractClientPlayer;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.client.renderer.MultiBufferSource;
+import net.minecraft.client.renderer.RenderType;
+import net.minecraft.client.renderer.texture.OverlayTexture;
+import net.minecraft.resources.ResourceLocation;
 import net.minecraft.client.renderer.entity.EntityRenderer;
 import net.minecraft.client.renderer.entity.player.PlayerRenderer;
 import net.minecraft.util.Mth;
@@ -12,6 +19,7 @@ import net.minecraft.world.entity.HumanoidArm;
 import net.minecraft.world.level.GameType;
 import net.minecraft.world.phys.Vec3;
 import net.minecraftforge.api.distmarker.Dist;
+import net.minecraftforge.client.event.RenderArmEvent;
 import net.minecraftforge.client.event.RenderHandEvent;
 import net.minecraftforge.client.event.RenderLevelStageEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
@@ -76,6 +84,39 @@ public final class R15FirstPerson {
         HumanoidArm arm = event.getHand() == InteractionHand.MAIN_HAND ? main : main.getOpposite();
         if (shows(m, arm)) event.setCanceled(true);
         lastHand = event.getHand() + " r15=" + m;
+    }
+
+    private static final ResourceLocation SUIT_SKIN = new ResourceLocation(GojoSuit.SKIN);
+
+    /**
+     * Обычная ванильная рука от первого лица (пустая ладонь, вне анимаций с {@code @fp}): при полном костюме Годжо —
+     * рукав и кисть со скина костюма, а не со скина игрока. Широкая модель, как у самого костюма.
+     */
+    @SubscribeEvent
+    public static void onRenderArm(RenderArmEvent event) {
+        AbstractClientPlayer p = event.getPlayer();
+        if (!GojoSuit.isFull(p)) return;
+        Minecraft mc = Minecraft.getInstance();
+        EntityRenderer<?> r = mc.getEntityRenderDispatcher().getSkinMap().get("default");
+        if (!(r instanceof PlayerRenderer renderer)) return;
+        PlayerModel<AbstractClientPlayer> model = renderer.getModel();
+        event.setCanceled(true);
+        boolean right = event.getArm() == HumanoidArm.RIGHT;
+        ModelPart arm = right ? model.rightArm : model.leftArm;
+        ModelPart sleeve = right ? model.rightSleeve : model.leftSleeve;
+        model.attackTime = 0.0F;
+        model.crouching = false;
+        model.swimAmount = 0.0F;
+        model.setupAnim(p, 0.0F, 0.0F, 0.0F, 0.0F, 0.0F);
+        arm.visible = true;
+        sleeve.visible = true;
+        arm.xRot = 0.0F;
+        sleeve.xRot = 0.0F;
+        PoseStack ps = event.getPoseStack();
+        MultiBufferSource buf = event.getMultiBufferSource();
+        int light = event.getPackedLight();
+        arm.render(ps, buf.getBuffer(RenderType.entitySolid(SUIT_SKIN)), light, OverlayTexture.NO_OVERLAY);
+        sleeve.render(ps, buf.getBuffer(RenderType.entityTranslucent(SUIT_SKIN)), light, OverlayTexture.NO_OVERLAY);
     }
 
     @SubscribeEvent
