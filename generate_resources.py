@@ -366,8 +366,19 @@ MODEL.joinpath("gojo_blindfold.json").write_text(json.dumps({
     "textures": {"layer0": "jujutsu_neon:item/gojo_blindfold"}
 }, indent=2))
 
+# Костюм Годжо: иконки и текстуры — tools/gen_gojo_suit.py (лежат в репозитории)
+for part in ("head", "chest", "legs", "feet"):
+    MODEL.joinpath(f"gojo_suit_{part}.json").write_text(json.dumps({
+        "parent": "minecraft:item/generated",
+        "textures": {"layer0": f"jujutsu_neon:item/gojo_suit_{part}"}
+    }, indent=2))
+
 LANG.joinpath("ru_ru.json").write_text(json.dumps({
-    "item.jujutsu_neon.gojo_blindfold": "Повязка Годжо"
+    "item.jujutsu_neon.gojo_blindfold": "Повязка Годжо",
+    "item.jujutsu_neon.gojo_suit_head": "Причёска Годжо",
+    "item.jujutsu_neon.gojo_suit_chest": "Костюм Годжо",
+    "item.jujutsu_neon.gojo_suit_legs": "Штаны Годжо",
+    "item.jujutsu_neon.gojo_suit_feet": "Ботинки Годжо"
 }, ensure_ascii=False, indent=2))
 
 # Original synthesized HD sound design, 48 kHz stereo.

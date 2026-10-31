@@ -1,10 +1,14 @@
 package com.kira.jujutsuneon.rbx;
 
+import com.kira.jujutsuneon.GojoSuit;
 import com.mojang.blaze3d.vertex.PoseStack;
 import com.mojang.blaze3d.vertex.VertexConsumer;
+import net.minecraft.client.Minecraft;
 import net.minecraft.client.model.PlayerModel;
 import net.minecraft.client.model.geom.ModelPart;
 import net.minecraft.client.player.AbstractClientPlayer;
+import net.minecraft.client.renderer.RenderType;
+import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.entity.HumanoidArm;
 import org.joml.Matrix4f;
 
@@ -14,6 +18,8 @@ import org.joml.Matrix4f;
  * по костям R15. Вне отрисовки R15 ведёт себя как обычная ванильная модель.
  */
 public final class R15PlayerModel extends PlayerModel<AbstractClientPlayer> {
+
+    private static final ResourceLocation SUIT_SKIN = new ResourceLocation(GojoSuit.SKIN);
 
     final boolean slim;
     private final boolean[] visible = new boolean[R15Rig.Part.values().length];
@@ -111,6 +117,11 @@ public final class R15PlayerModel extends PlayerModel<AbstractClientPlayer> {
                 visible[part.ordinal()] &= c.partShown(part);
                 overlays[part.ordinal()] &= c.partShown(part);
             }
+        }
+        // полный костюм Годжо: скин костюма вместо скина игрока, причёска — слой шапки
+        if (GojoSuit.isFull(c.player)) {
+            vc = Minecraft.getInstance().renderBuffers().bufferSource().getBuffer(RenderType.entityTranslucent(SUIT_SKIN));
+            overlays[R15Rig.Part.HEAD.ordinal()] = visible[R15Rig.Part.HEAD.ordinal()];
         }
         ps.pushPose();
         R15Render.toGeo(ps, c);

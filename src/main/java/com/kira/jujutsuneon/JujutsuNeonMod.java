@@ -253,6 +253,11 @@ public class JujutsuNeonMod {
     public static final RegistryObject<SoundEvent> SFX_M1_FINAL = sound("m1_final");
     public static final RegistryObject<SoundEvent> SFX_M1_BLOCK = sound("m1_block");
 
+    public static final RegistryObject<Item> GOJO_SUIT_HEAD = ITEMS.register("gojo_suit_head", () -> GojoSuit.create(ArmorItem.Type.HELMET));
+    public static final RegistryObject<Item> GOJO_SUIT_CHEST = ITEMS.register("gojo_suit_chest", () -> GojoSuit.create(ArmorItem.Type.CHESTPLATE));
+    public static final RegistryObject<Item> GOJO_SUIT_LEGS = ITEMS.register("gojo_suit_legs", () -> GojoSuit.create(ArmorItem.Type.LEGGINGS));
+    public static final RegistryObject<Item> GOJO_SUIT_FEET = ITEMS.register("gojo_suit_feet", () -> GojoSuit.create(ArmorItem.Type.BOOTS));
+
     public static final RegistryObject<Item> GOJO_BLINDFOLD = ITEMS.register(
             "gojo_blindfold",
             () -> new GojoBlindfoldItem(
@@ -369,6 +374,10 @@ public class JujutsuNeonMod {
     private void addToCreativeTab(BuildCreativeModeTabContentsEvent event) {
         if (event.getTabKey() == CreativeModeTabs.COMBAT) {
             event.accept(GOJO_BLINDFOLD);
+            event.accept(GOJO_SUIT_HEAD);
+            event.accept(GOJO_SUIT_CHEST);
+            event.accept(GOJO_SUIT_LEGS);
+            event.accept(GOJO_SUIT_FEET);
         }
     }
 
@@ -405,12 +414,12 @@ public class JujutsuNeonMod {
     }
 
     static boolean hasGojoBlindfold(ServerPlayer player) {
-        return player.getItemBySlot(EquipmentSlot.HEAD).is(GOJO_BLINDFOLD.get());
+        return GojoSuit.isFull(player);
     }
 
     static void requireBlindfoldMessage(ServerPlayer player) {
         player.displayClientMessage(
-                Component.literal("Надень Повязку Годжо, чтобы использовать технику.")
+                Component.literal("Надень полный костюм Годжо (4 части), чтобы использовать технику.")
                         .withStyle(ChatFormatting.LIGHT_PURPLE),
                 true
         );

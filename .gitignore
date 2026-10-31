@@ -6,6 +6,7 @@ out/
 *.iml
 src/main/resources/assets/jujutsu_neon/textures/particle/vfx/*.png
 src/main/resources/assets/jujutsu_neon/textures/item/*.png
+!src/main/resources/assets/jujutsu_neon/textures/item/gojo_suit_*.png
 src/main/resources/assets/jujutsu_neon/textures/models/armor/*.png
 src/main/resources/assets/jujutsu_neon/sounds/*.ogg
 src/main/resources/assets/jujutsu_neon/sounds/*.wav

@@ -117,7 +117,7 @@ public final class JujutsuNeonSkillAnimationClient {
     private static boolean hasBlindfold() {
         Minecraft mc = Minecraft.getInstance();
         return mc.player != null &&
-                mc.player.getItemBySlot(EquipmentSlot.HEAD).is(JujutsuNeonMod.GOJO_BLINDFOLD.get());
+                GojoSuit.isFull(mc.player);
     }
 
     private static boolean hudBlindfold() {

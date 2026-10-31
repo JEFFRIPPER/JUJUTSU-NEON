@@ -45,7 +45,10 @@ final class CaptureAnimScene {
         actor.setYHeadRot(-90f);
         actor.yHeadRotO = -90f;
         actor.yBodyRot = actor.yBodyRotO = -90f;
-        actor.setItemSlot(EquipmentSlot.HEAD, new ItemStack(JujutsuNeonMod.GOJO_BLINDFOLD.get()));
+        actor.setItemSlot(EquipmentSlot.HEAD, new ItemStack(JujutsuNeonMod.GOJO_SUIT_HEAD.get()));
+        actor.setItemSlot(EquipmentSlot.CHEST, new ItemStack(JujutsuNeonMod.GOJO_SUIT_CHEST.get()));
+        actor.setItemSlot(EquipmentSlot.LEGS, new ItemStack(JujutsuNeonMod.GOJO_SUIT_LEGS.get()));
+        actor.setItemSlot(EquipmentSlot.FEET, new ItemStack(JujutsuNeonMod.GOJO_SUIT_FEET.get()));
         mc.level.addPlayer(actor.getId(), actor);
         mc.options.hideGui = true;
         tick = 0;

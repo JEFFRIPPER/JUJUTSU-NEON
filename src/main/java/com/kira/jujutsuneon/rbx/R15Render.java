@@ -1,5 +1,6 @@
 package com.kira.jujutsuneon.rbx;
 
+import com.kira.jujutsuneon.GojoSuit;
 import com.kira.jujutsuneon.JujutsuNeonSkillAnimationClient;
 import com.mojang.blaze3d.vertex.PoseStack;
 import net.minecraft.client.Minecraft;
@@ -97,6 +98,10 @@ public final class R15Render {
     private static Field rendererModel, rendererLayers, elytraField;
     private static boolean reflectionFailed;
 
+    static {
+        GojoSuit.skinDrawn = e -> e instanceof AbstractClientPlayer p && activeFor(p);
+    }
+
     private R15Render() {
     }
 
@@ -131,7 +136,7 @@ public final class R15Render {
 
     /** Рисуется ли игрок моделью R15 прямо сейчас (для своего вида от первого лица и отладки). */
     public static boolean activeFor(AbstractClientPlayer p) {
-        return enabled() && !JujutsuNeonSkillAnimationClient.purpleActive(p)
+        return enabled() && GojoSuit.isFull(p) && !JujutsuNeonSkillAnimationClient.purpleActive(p)
                 && R15Rig.model(isSlim(p) ? R15Rig.PLAYER_SLIM : R15Rig.PLAYER_WIDE) != null;
     }
 
@@ -146,7 +151,8 @@ public final class R15Render {
     }
 
     static boolean isSlim(AbstractClientPlayer p) {
-        return "slim".equals(p.getModelName());
+        // скин костюма Годжо — широкие руки
+        return !GojoSuit.isFull(p) && "slim".equals(p.getModelName());
     }
 
     // ------------------------------------------------------------------ события

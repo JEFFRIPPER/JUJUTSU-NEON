@@ -135,7 +135,7 @@ public final class JujutsuNeonMovementPatch {
     }
 
     private static boolean hasBlindfold(ServerPlayer player) {
-        return player.getItemBySlot(EquipmentSlot.HEAD).is(JujutsuNeonMod.GOJO_BLINDFOLD.get());
+        return GojoSuit.isFull(player);
     }
 
     private static boolean handsEmpty(ServerPlayer player) {
