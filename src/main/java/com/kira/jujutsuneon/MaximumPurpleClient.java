@@ -747,12 +747,15 @@ public final class MaximumPurpleClient {
         if (tr != null) return trackedOrb(s, tr, t, true);
         if (t < T_RELEASE) return blueHand(s, t);
         if (t < TR_SKY.from()) {
-            // Синий брошен — по спирали уходит ввысь (за кадр)
+            // Синий брошен — плавно уходит вперёд с небольшим подъёмом по пологой спирали
+            // (отклонение от прямой 10–20°), без рывка вверх
             Vec3 top = blueHand(s, T_RELEASE);
-            Vec3 b1 = s.at(5.0, -3.0, 25.0); // вперёд и вверх — туда, куда его вытолкнула рука
-            double p = win(t, T_RELEASE, 66);
-            Vec3 base = lerp(top, b1, easeOut(p));
-            Vec3 pos = base.add(spiralAround(s, b1.subtract(top), p, 3.0, 1.7 * smooth(win(t, T_RELEASE, 46))));
+            Vec3 b1 = s.atP(22.0, -2.0, 9.0, T_RELEASE);
+            double p = win(t, T_RELEASE, 72);
+            Vec3 base = lerp(top, b1, 0.35 * p + 0.65 * smooth(p));
+            double along = top.distanceTo(base);
+            Vec3 pos = base.add(spiralAround(s, b1.subtract(top), p, 1.5, 0.27 * along / Math.max(0.05, Math.pow(1.0 - p, 1.3) + 0.05)
+                    * Math.pow(1.0 - p, 1.3) * smooth(win(t, T_RELEASE, T_RELEASE + 4))));
             return pos.add(0.0, 0.08 * Math.sin(t * 0.2) * smooth(win(t, 66, 72)), 0.0);
         }
         if (t < T_SPACE - 2) return orbitPos(s, t, true);
