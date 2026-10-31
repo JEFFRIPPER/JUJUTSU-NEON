@@ -83,8 +83,13 @@ public final class CaptureMode {
                     if (++wait == 20) {
                         MinecraftServer server = mc.getSingleplayerServer();
                         if (server != null) server.execute(() -> {
+                            // полный костюм Годжо: без него нет модели R15 и техник
                             for (String c : new String[]{"time set 6000", "gamerule doDaylightCycle false",
-                                    "weather clear", "gamerule doWeatherCycle false", "gamerule doMobSpawning false"}) {
+                                    "weather clear", "gamerule doWeatherCycle false", "gamerule doMobSpawning false",
+                                    "item replace entity @a armor.head with jujutsu_neon:gojo_suit_head",
+                                    "item replace entity @a armor.chest with jujutsu_neon:gojo_suit_chest",
+                                    "item replace entity @a armor.legs with jujutsu_neon:gojo_suit_legs",
+                                    "item replace entity @a armor.feet with jujutsu_neon:gojo_suit_feet"}) {
                                 server.getCommands().performPrefixedCommand(server.createCommandSourceStack().withSuppressedOutput(), c);
                             }
                         });
