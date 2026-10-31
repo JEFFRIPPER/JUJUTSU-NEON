@@ -102,7 +102,7 @@ public final class JujutsuNeonFlightPatch {
     }
 
     private static boolean hasBlindfold(ServerPlayer player) {
-        return player.getItemBySlot(EquipmentSlot.HEAD).is(JujutsuNeonMod.GOJO_BLINDFOLD.get());
+        return GojoSuit.isFull(player);
     }
 
     private static double groundDistance(ServerPlayer player, double maxDistance) {

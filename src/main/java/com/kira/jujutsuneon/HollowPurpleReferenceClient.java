@@ -1,5 +1,8 @@
 package com.kira.jujutsuneon;
 
+import com.kira.jujutsuneon.rbx.PlayerAnimations;
+import net.minecraft.client.player.AbstractClientPlayer;
+
 import com.mojang.blaze3d.platform.GlStateManager;
 import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.blaze3d.vertex.BufferBuilder;
@@ -140,6 +143,7 @@ public final class HollowPurpleReferenceClient {
                 ignored -> new VisualState(msg.ownerId(), pos, direction)
         );
 
+        bodyAnim(msg);
         if (!msg.active()) {
             visual.targetAlpha = 0.0f;
             visual.targetRadius = 0.0f;
@@ -170,6 +174,23 @@ public final class HollowPurpleReferenceClient {
                 visual.lastTrailPosition = pos;
                 while (visual.trail.size() > MAX_TRAIL_POINTS) visual.trail.removeFirst();
             }
+        }
+    }
+
+    /** Тело кастующего: раскрыть руки (Синий и Красный по бокам), свести, толкнуть вперёд; на выстреле — толчок. */
+    private static void bodyAnim(HollowPurpleOverhaul.PurpleVisualPacket msg) {
+        Minecraft mc = Minecraft.getInstance();
+        if (mc.level == null || !(mc.level.getPlayerByUUID(msg.ownerId()) instanceof AbstractClientPlayer p)) return;
+        boolean casting = PlayerAnimations.isPlaying(p, "hollow_purple");
+        if (!msg.active()) {
+            if (casting) PlayerAnimations.stop(p, "hollow_purple", 0.3);
+            return;
+        }
+        if (msg.mode() == MODE_CASTING && !casting) {
+            PlayerAnimations.play(p, "hollow_purple", new PlayerAnimations.Play()
+                    .startAt(Mth.clamp(msg.castProgress(), 0.0f, 1.0f) * 5.0));
+        } else if (msg.mode() == MODE_PROJECTILE && casting) {
+            PlayerAnimations.play(p, "hollow_purple_fire");
         }
     }
 

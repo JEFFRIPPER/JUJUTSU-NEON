@@ -1,5 +1,6 @@
 package com.kira.jujutsuneon;
 
+import com.kira.jujutsuneon.rbx.PlayerAnimations;
 import com.mojang.blaze3d.platform.InputConstants;
 import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.blaze3d.vertex.BufferBuilder;
@@ -235,7 +236,8 @@ public final class DomainExpansionClient {
         boolean watcher = owner || watchers.contains(me);
         if (age < T_CAST_END && !collapsing) {
             if (mc.level.getPlayerByUUID(ownerId) instanceof AbstractClientPlayer p) {
-                MaximumPurpleAnimation.play(p, "domain_cast");
+                // кто подключился посреди каста — видит анимацию с того же места
+                PlayerAnimations.play(p, "domain_cast", new PlayerAnimations.Play().fade(0.2).startAt(age / 20.0));
             }
             // Свою кат-сцену Максимального Фиолетового сервер к этому моменту уже оборвал;
             // если сигнал ещё не дошёл — камеру не перехватываем.
@@ -320,7 +322,7 @@ public final class DomainExpansionClient {
     private static void stopOwnerAnimation(Scene s) {
         Minecraft mc = Minecraft.getInstance();
         if (mc.level != null && mc.level.getPlayerByUUID(s.ownerId) instanceof AbstractClientPlayer p) {
-            MaximumPurpleAnimation.stop(p);
+            PlayerAnimations.stop(p, 0.4);
         }
     }
 
@@ -686,7 +688,18 @@ public final class DomainExpansionClient {
     private static Vec3 anchor(Scene s, int a, double f, double r, double u, double t) {
         return switch (a) {
             case A_HEAD -> s.off(s.center.add(0.0, 1.58, 0.0), f, r, u);
-            case A_HAND -> s.off(handPos(s, t), f, r, u);
+            case A_HAND -> {
+                // Кисть — настоящая, с модели R15 (иначе по таблице). Камера не ближе 1 блока к руке:
+                // на 0,3–0,6 блока она проваливалась в модель (полэкрана чёрное, обрезанные руки).
+                Vec3 hand = null;
+                if (s.level.getPlayerByUUID(s.ownerId) instanceof net.minecraft.client.player.AbstractClientPlayer p) {
+                    hand = PlayerAnimations.jointWorld(p, "RightHand", Minecraft.getInstance().getFrameTime(), 0.12);
+                }
+                if (hand == null) hand = handPos(s, t);
+                double len = Math.sqrt(f * f + r * r + u * u);
+                double k = len > 1.0E-3 && len < 1.0 ? 1.0 / len : 1.0;
+                yield s.off(hand, f * k, r * k, u * k);
+            }
             default -> s.at(f, r, u);
         };
     }

@@ -27,9 +27,11 @@ import java.util.function.Supplier;
  * искра в ладони растёт в маленький шарик, бросок вперёд на 13-м тике. Шарик летит со скоростью
  * 3,75 блока/тик до 150 блоков; при попадании — взрыв (вдвое мощнее прежнего).
  *
- * Максимальный Красный (по референсу, ~1,7 с): разворот боком, рука к голове (печать), огромное
- * красное кольцо и белые ленты энергии сходятся в шар у груди, ударная волна, три кадра негатива,
- * огромный красный луч-конус вперёд с обломками, отдача назад.
+ * Максимальный Красный (по референсу 1030.mp4, 2,95 с): корпус боком, правая рука по дуге вытягивается
+ * в цель ладонью-«стопом», перед ладонью рождается шар (сам не растёт), вокруг руки закручиваются и
+ * разрастаются ленты, кадр уходит в красный, ленты сменяются потоком линий назад, белая вспышка.
+ * Выстрел — большой красный шар, летит сверхзвуком (ударные волны режут воздух) и на попадании выбивает
+ * рваный кратер радиусом ~24 блока (в 3 раза больше обычного Красного), урон 50 сердец.
  *
  * Логика на сервере — в JujutsuNeonMod (tickRedState), картинка — RedTechniqueClient.
  */
@@ -42,20 +44,31 @@ public final class RedTechnique {
     static final int R_FIRE = 13;
     static final int R_END = 18;
 
-    // ---- Максимальный Красный (тики от начала) ----
-    static final int M_AURA = 5;
-    static final int M_CONDENSE = 15;
-    static final int M_ORB = 18;
-    static final int M_SHOCK = 22;
-    static final int M_FLASH = 23;
-    static final int M_FIRE = 26;
-    static final int M_END = 36;
+    // ---- Максимальный Красный (тики от начала; по референсу 1030.mp4, анимация max_red 2,95 с) ----
+    /** Перед ладонью рождается шар. */
+    static final int M_ORB = 19;
+    /** Вокруг шара и руки закручиваются ленты. */
+    static final int M_CONDENSE = 24;
+    /** Ленты переходят в поток линий от шара назад. */
+    static final int M_SHOCK = 34;
+    /** Кадр негатива и белая вспышка. */
+    static final int M_FLASH = 39;
+    static final int M_FIRE = 40;
+    static final int M_END = 59;
 
     static final double RED_SPEED = 3.75;
     static final double RED_MAX_DISTANCE = 150.0;
     /** Радиус попадания (сам шарик меньше — 0,16). */
     static final double RED_HIT_RADIUS = 0.22;
     static final float RED_ORB_RADIUS = 0.16f;
+
+    /** Снаряд Максимального Красного: летит как обычный Красный, но сверхзвуком, и оставляет кратер. */
+    static final double MAX_RED_SPEED = 3.5;
+    static final double MAX_RED_MAX_DISTANCE = 200.0;
+    /** Радиус кратера (у обычного Красного взрыв силой 12 выбивает ~8–9 блоков в земле). */
+    static final double MAX_RED_CRATER_RADIUS = 24.0;
+    static final double MAX_RED_DAMAGE_RADIUS = 26.0;
+    static final float MAX_RED_ORB_RADIUS = 0.34f;
 
     static final double BEAM_SPEED = 8.0;
     static final double BEAM_LENGTH = 50.0;
@@ -163,7 +176,7 @@ public final class RedTechnique {
     }
 
     /** S2C: шарик вылетел (летит по прямой — клиент ведёт его сам). */
-    public record ShotPacket(int shotId, int casterEntity, double x, double y, double z, double vx, double vy, double vz) {
+    public record ShotPacket(int shotId, int casterEntity, double x, double y, double z, double vx, double vy, double vz, boolean max) {
         static void encode(ShotPacket msg, FriendlyByteBuf buf) {
             buf.writeVarInt(msg.shotId);
             buf.writeVarInt(msg.casterEntity);
@@ -173,40 +186,42 @@ public final class RedTechnique {
             buf.writeDouble(msg.vx);
             buf.writeDouble(msg.vy);
             buf.writeDouble(msg.vz);
+            buf.writeBoolean(msg.max);
         }
 
         static ShotPacket decode(FriendlyByteBuf buf) {
             return new ShotPacket(buf.readVarInt(), buf.readVarInt(), buf.readDouble(), buf.readDouble(), buf.readDouble(),
-                    buf.readDouble(), buf.readDouble(), buf.readDouble());
+                    buf.readDouble(), buf.readDouble(), buf.readDouble(), buf.readBoolean());
         }
 
         static void handle(ShotPacket msg, Supplier<NetworkEvent.Context> ctx) {
             NetworkEvent.Context context = ctx.get();
             context.enqueueWork(() -> DistExecutor.unsafeRunWhenOn(Dist.CLIENT, () -> () ->
                     RedTechniqueClient.onShot(msg.shotId, msg.casterEntity, new Vec3(msg.x, msg.y, msg.z),
-                            new Vec3(msg.vx, msg.vy, msg.vz))));
+                            new Vec3(msg.vx, msg.vy, msg.vz), msg.max)));
             context.setPacketHandled(true);
         }
     }
 
     /** S2C: шарик взорвался (exploded) или растаял в конце пути. */
-    public record ShotEndPacket(int shotId, double x, double y, double z, boolean exploded) {
+    public record ShotEndPacket(int shotId, double x, double y, double z, boolean exploded, boolean max) {
         static void encode(ShotEndPacket msg, FriendlyByteBuf buf) {
             buf.writeVarInt(msg.shotId);
             buf.writeDouble(msg.x);
             buf.writeDouble(msg.y);
             buf.writeDouble(msg.z);
             buf.writeBoolean(msg.exploded);
+            buf.writeBoolean(msg.max);
         }
 
         static ShotEndPacket decode(FriendlyByteBuf buf) {
-            return new ShotEndPacket(buf.readVarInt(), buf.readDouble(), buf.readDouble(), buf.readDouble(), buf.readBoolean());
+            return new ShotEndPacket(buf.readVarInt(), buf.readDouble(), buf.readDouble(), buf.readDouble(), buf.readBoolean(), buf.readBoolean());
         }
 
         static void handle(ShotEndPacket msg, Supplier<NetworkEvent.Context> ctx) {
             NetworkEvent.Context context = ctx.get();
             context.enqueueWork(() -> DistExecutor.unsafeRunWhenOn(Dist.CLIENT, () -> () ->
-                    RedTechniqueClient.onShotEnd(msg.shotId, new Vec3(msg.x, msg.y, msg.z), msg.exploded)));
+                    RedTechniqueClient.onShotEnd(msg.shotId, new Vec3(msg.x, msg.y, msg.z), msg.exploded, msg.max)));
             context.setPacketHandled(true);
         }
     }
@@ -260,13 +275,13 @@ public final class RedTechnique {
         CHANNEL.send(around(player), new CastPacket(player.getUUID(), player.getId(), max, player.getYRot()));
     }
 
-    static void sendShot(ServerPlayer player, int shotId, Vec3 start, Vec3 velocity) {
-        CHANNEL.send(near(player.serverLevel(), start, 220.0), new ShotPacket(shotId, player.getId(),
-                start.x, start.y, start.z, velocity.x, velocity.y, velocity.z));
+    static void sendShot(ServerPlayer player, int shotId, Vec3 start, Vec3 velocity, boolean max) {
+        CHANNEL.send(near(player.serverLevel(), start, 260.0), new ShotPacket(shotId, player.getId(),
+                start.x, start.y, start.z, velocity.x, velocity.y, velocity.z, max));
     }
 
-    static void sendShotEnd(ServerLevel level, int shotId, Vec3 pos, boolean exploded) {
-        CHANNEL.send(near(level, pos, 260.0), new ShotEndPacket(shotId, pos.x, pos.y, pos.z, exploded));
+    static void sendShotEnd(ServerLevel level, int shotId, Vec3 pos, boolean exploded, boolean max) {
+        CHANNEL.send(near(level, pos, 300.0), new ShotEndPacket(shotId, pos.x, pos.y, pos.z, exploded, max));
     }
 
     static void sendBeam(ServerPlayer player, Vec3 origin, Vec3 dir) {

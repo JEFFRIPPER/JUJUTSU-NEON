@@ -6,6 +6,9 @@ import com.mojang.blaze3d.vertex.BufferBuilder;
 import com.mojang.blaze3d.vertex.BufferUploader;
 import com.mojang.blaze3d.vertex.DefaultVertexFormat;
 import com.mojang.blaze3d.vertex.PoseStack;
+import com.kira.jujutsuneon.rbx.AnimationTrack;
+import com.kira.jujutsuneon.rbx.PlayerAnimations;
+import net.minecraft.client.player.AbstractClientPlayer;
 import com.mojang.blaze3d.vertex.Tesselator;
 import com.mojang.blaze3d.vertex.VertexFormat;
 import com.mojang.math.Axis;
@@ -127,6 +130,7 @@ public final class MaximumBlueReferenceClient {
         Vec3 pos = new Vec3(x, y, z);
         BlueVisual visual = VISUALS.get(ownerId);
 
+        bodyAnim(ownerId, active);
         if (!active) {
             if (visual != null) {
                 visual.targetPos = pos;
@@ -159,6 +163,26 @@ public final class MaximumBlueReferenceClient {
         visual.targetRadius = Math.max(0.0f, radius);
         visual.targetAlpha = 1.0f;
         visual.staleTicks = 0;
+    }
+
+    /** Пока Максимальный Синий жив, тело держит технику: вход max_blue, дальше живой цикл max_blue_hold. */
+    private static void bodyAnim(UUID ownerId, boolean active) {
+        Minecraft mc = Minecraft.getInstance();
+        if (mc.level == null || !(mc.level.getPlayerByUUID(ownerId) instanceof AbstractClientPlayer p)) return;
+        boolean intro = PlayerAnimations.isPlaying(p, "max_blue"), hold = PlayerAnimations.isPlaying(p, "max_blue_hold");
+        if (!active) {
+            if (intro || hold) PlayerAnimations.stop(p, 0.35);
+            return;
+        }
+        if (intro || hold) return;
+        AnimationTrack t = PlayerAnimations.play(p, "max_blue");
+        if (t != null) {
+            t.ended.connect(tr -> {
+                if (VISUALS.containsKey(ownerId) && VISUALS.get(ownerId).phase != PHASE_FADING) {
+                    PlayerAnimations.play(p, "max_blue_hold", new PlayerAnimations.Play().fade(0.25));
+                }
+            });
+        }
     }
 
     public static void acceptDebrisBatch(
@@ -347,6 +371,11 @@ public final class MaximumBlueReferenceClient {
         float radius = Mth.lerp(partial, visual.previousRadius, visual.currentRadius);
         Vec3 pos = visual.previousPos.lerp(visual.currentPos, partial);
         if (alpha <= 0.01f || radius <= 0.025f) return;
+        // Камера внутри сферы (вид спереди F5, кто-то стоит перед Годжо): сфера почти прозрачна изнутри,
+        // иначе весь экран — синие полосы и ничего не видно.
+        double inside = camera.distanceTo(pos) / Math.max(0.1, radius * 1.15);
+        if (inside < 1.0) alpha *= (float) (0.12 + 0.88 * smooth((inside - 0.55) / 0.45));
+        if (alpha <= 0.01f) return;
 
         float formation = visual.phase == PHASE_FORMING
                 ? Mth.clamp((visual.phaseAge + partial) / (float) FORM_TICKS, 0.0f, 1.0f)

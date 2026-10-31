@@ -84,7 +84,7 @@ public final class JujutsuNeonMovementPatchClient {
 
     private static boolean hasBlindfold(Minecraft mc) {
         return mc.player != null &&
-                mc.player.getItemBySlot(EquipmentSlot.HEAD).is(JujutsuNeonMod.GOJO_BLINDFOLD.get());
+                GojoSuit.isFull(mc.player);
     }
 
     private static boolean handsEmpty(Minecraft mc) {

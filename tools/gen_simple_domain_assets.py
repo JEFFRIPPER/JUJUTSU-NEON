@@ -9,7 +9,7 @@
   simple_domain_hit   — удар поглощён: глухой толчок и звенящая рябь
   simple_domain_break — третий удар: круг лопается — стеклянный треск и выдох ветра
   simple_domain_end   — круг сжимается и гаснет
-Анимация (player_animation/simple_domain.json): присед с печатью у груди, 0,8 с, потом встаёт.
+Анимация (tools/rig/legacy_pa/simple_domain.json, затем tools/rig/convert_pa.py): присед с печатью у груди, 0,8 с, потом встаёт.
 """
 import json
 import math
@@ -23,7 +23,7 @@ from PIL import Image
 ROOT = Path(__file__).resolve().parent.parent / "src/main/resources/assets/jujutsu_neon"
 TEX = ROOT / "textures/gui"
 SND = ROOT / "sounds/cursed"
-ANIM = ROOT / "player_animation"
+ANIM = Path(__file__).resolve().parent / "rig/legacy_pa"
 for d in (TEX, SND, ANIM):
     d.mkdir(parents=True, exist_ok=True)
 
